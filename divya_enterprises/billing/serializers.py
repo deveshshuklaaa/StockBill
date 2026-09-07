@@ -26,7 +26,7 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
 class InvoiceSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     line_items = InvoiceLineItemSerializer(many=True, read_only=True)
-    payment_status = serializers.SerializerMethodField()
+    payment_status = serializers.ReadOnlyField(source="computed_payment_status")
 
     class Meta:
         model = Invoice
@@ -45,9 +45,6 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "customer_name", "invoice_date", "created_at", "updated_at", "line_items", "payment_status"]
-
-    def get_payment_status(self, obj):
-        return obj.computed_payment_status
 
 
 class CreditNoteLineItemSerializer(serializers.ModelSerializer):

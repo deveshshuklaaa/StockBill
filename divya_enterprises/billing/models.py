@@ -2,6 +2,9 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Sum
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
 
 from customers.models import Customer
 from inventory.models import Product
@@ -30,12 +33,26 @@ class Invoice(models.Model):
     def __str__(self):
         return self.invoice_number
 
+    def sync_payment_status(self):
+        self.payment_status = self.computed_payment_status
+
+    def save(self, *args, **kwargs):
+        if self.pk is None:
+            self.payment_status = self.PAYMENT_STATUS_CREDIT
+        else:
+            self.payment_status = self.computed_payment_status
+        super().save(*args, **kwargs)
+
     @property
     def computed_payment_status(self):
-        total_paid = sum((payment.amount for payment in self.payments.all()), Decimal("0.00"))
-        if total_paid >= self.total_amount:
+        if self.pk is None:
+            return self.PAYMENT_STATUS_CREDIT
+        total_paid = self.payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        total_credited = self.credit_notes.aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+        net_paid = total_paid - total_credited
+        if net_paid >= self.total_amount:
             return self.PAYMENT_STATUS_PAID
-        if total_paid <= 0:
+        if net_paid <= 0:
             return self.PAYMENT_STATUS_CREDIT
         return self.PAYMENT_STATUS_PARTIALLY_PAID
 
@@ -90,3 +107,32 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.customer.name} - {self.amount}"
+
+
+def refresh_invoice_payment_status(invoice):
+    if invoice is None:
+        return
+    invoice.sync_payment_status()
+    invoice.save(update_fields=["payment_status", "updated_at"])
+
+
+@receiver(post_save, sender=Payment)
+def update_invoice_payment_status_on_payment_save(sender, instance, **kwargs):
+    if instance.invoice_id:
+        refresh_invoice_payment_status(instance.invoice)
+
+
+@receiver(post_delete, sender=Payment)
+def update_invoice_payment_status_on_payment_delete(sender, instance, **kwargs):
+    if instance.invoice_id:
+        refresh_invoice_payment_status(instance.invoice)
+
+
+@receiver(post_save, sender=CreditNote)
+def update_invoice_payment_status_on_credit_note_save(sender, instance, **kwargs):
+    refresh_invoice_payment_status(instance.original_invoice)
+
+
+@receiver(post_delete, sender=CreditNote)
+def update_invoice_payment_status_on_credit_note_delete(sender, instance, **kwargs):
+    refresh_invoice_payment_status(instance.original_invoice)
