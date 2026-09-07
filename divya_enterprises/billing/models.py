@@ -11,6 +11,12 @@ from inventory.models import Product
 
 
 class Invoice(models.Model):
+    PAYMENT_TYPE_CASH = "cash"
+    PAYMENT_TYPE_CREDIT = "credit"
+    PAYMENT_TYPE_CHOICES = [
+        (PAYMENT_TYPE_CASH, "Cash"),
+        (PAYMENT_TYPE_CREDIT, "Credit"),
+    ]
     PAYMENT_STATUS_PAID = "paid"
     PAYMENT_STATUS_CREDIT = "credit"
     PAYMENT_STATUS_PARTIALLY_PAID = "partially_paid"
@@ -23,6 +29,7 @@ class Invoice(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name="invoices")
     invoice_number = models.CharField(max_length=50, unique=True)
     invoice_date = models.DateField(auto_now_add=True)
+    payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPE_CHOICES, default=PAYMENT_TYPE_CREDIT)
     payment_status = models.CharField(max_length=25, choices=PAYMENT_STATUS_CHOICES, default=PAYMENT_STATUS_CREDIT)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     notes = models.TextField(blank=True)
@@ -37,6 +44,10 @@ class Invoice(models.Model):
         self.payment_status = self.computed_payment_status
 
     def save(self, *args, **kwargs):
+        if self.pk is not None:
+            stored_payment_type = type(self).objects.only("payment_type").get(pk=self.pk).payment_type
+            if self.payment_type != stored_payment_type:
+                raise ValueError("Invoice payment_type is immutable after creation.")
         if self.pk is None:
             self.payment_status = self.PAYMENT_STATUS_CREDIT
         else:

@@ -92,6 +92,8 @@ The app exposes API routes under `/api/`.
 
 Staff can access daily sales, stock valuation, top-products, and customer reports. Cost-price and profit/loss fields are excluded from staff responses, and the profit/loss endpoint returns `403` for staff. Profit/loss uses each product's current `cost_price` because historical cost snapshots are not tracked.
 
+Daily sales keeps sale origin separate from collections: `sold_cash_today` and `sold_on_credit_today` are based on the immutable invoice `payment_type`, while `cash_collected_today` sums payments by `payment_date`, including collections against older credit invoices. The payment-type migration backfills historical invoices with linked payments as cash and unpaid invoices as credit; this is a one-time historical approximation only.
+
 ## Confirmed billing rules implemented in schema
 
 This milestone aligns the scaffold to the confirmed business rules:

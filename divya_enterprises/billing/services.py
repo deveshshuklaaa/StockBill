@@ -68,6 +68,7 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
     invoice = Invoice.objects.create(
         customer=customer,
         invoice_number=invoice_number,
+        payment_type=payment_type,
         notes=notes,
         created_by=created_by,
         total_amount=_money(total_amount),

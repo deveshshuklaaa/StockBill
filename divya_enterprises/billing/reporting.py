@@ -5,7 +5,6 @@ from django.db.models import (
     Case,
     Count,
     DecimalField,
-    Exists,
     ExpressionWrapper,
     F,
     IntegerField,
@@ -24,7 +23,7 @@ from rest_framework.views import APIView
 from accounts.permissions import IsAdminUser, IsStaffUser
 from inventory.models import Product
 
-from .models import CreditNoteLineItem, Invoice, InvoiceLineItem
+from .models import CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 
 
 MONEY_FIELD = DecimalField(max_digits=18, decimal_places=2)
@@ -59,26 +58,41 @@ class DailySalesReportView(APIView):
         except ValueError as error:
             return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
 
-        payment_exists = Exists(Invoice.objects.filter(pk=OuterRef("pk"), payments__isnull=False))
-        invoices = Invoice.objects.filter(invoice_date=report_date).annotate(is_cash=payment_exists)
+        invoices = Invoice.objects.filter(invoice_date=report_date)
         tax_totals = (
             InvoiceLineItem.objects.filter(invoice__invoice_date=report_date)
             .values("tax_rate")
             .annotate(total=Coalesce(Sum("tax_amount"), Value(Decimal("0.00")), output_field=MONEY_FIELD))
             .order_by("tax_rate")
         )
-        counts = invoices.aggregate(
+        totals = invoices.aggregate(
             total=Count("id"),
-            cash=Count("id", filter=Q(is_cash=True)),
-            credit=Count("id", filter=Q(is_cash=False)),
+            cash_count=Count("id", filter=Q(payment_type=Invoice.PAYMENT_TYPE_CASH)),
+            credit_count=Count("id", filter=Q(payment_type=Invoice.PAYMENT_TYPE_CREDIT)),
+            sold_cash=Coalesce(
+                Sum("total_amount", filter=Q(payment_type=Invoice.PAYMENT_TYPE_CASH)),
+                Value(Decimal("0.00")),
+                output_field=MONEY_FIELD,
+            ),
+            sold_credit=Coalesce(
+                Sum("total_amount", filter=Q(payment_type=Invoice.PAYMENT_TYPE_CREDIT)),
+                Value(Decimal("0.00")),
+                output_field=MONEY_FIELD,
+            ),
             revenue=Coalesce(Sum("total_amount"), Value(Decimal("0.00")), output_field=MONEY_FIELD),
         )
+        cash_collected = Payment.objects.filter(payment_date=report_date).aggregate(
+            total=Coalesce(Sum("amount"), Value(Decimal("0.00")), output_field=MONEY_FIELD)
+        )["total"]
         return Response(
             {
                 "date": report_date,
-                "invoice_count": counts["total"],
-                "invoice_count_by_payment_type": {"cash": counts["cash"], "credit": counts["credit"]},
-                "total_revenue": counts["revenue"],
+                "invoice_count": totals["total"],
+                "invoice_count_by_payment_type": {"cash": totals["cash_count"], "credit": totals["credit_count"]},
+                "sold_cash_today": totals["sold_cash"],
+                "sold_on_credit_today": totals["sold_credit"],
+                "cash_collected_today": cash_collected,
+                "total_revenue": totals["revenue"],
                 "tax_collected_by_slab": {str(row["tax_rate"]): row["total"] for row in tax_totals},
             }
         )

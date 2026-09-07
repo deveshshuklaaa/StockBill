@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
-from billing.models import Invoice
+from billing.models import Invoice, Payment
 from customers.models import Customer
 from inventory.models import Product
 
@@ -74,8 +74,38 @@ class ReportingEndpointTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["invoice_count"], 2)
         self.assertEqual(response.data["invoice_count_by_payment_type"], {"cash": 1, "credit": 1})
+        self.assertEqual(response.data["sold_cash_today"], Decimal("118.00"))
+        self.assertEqual(response.data["sold_on_credit_today"], Decimal("188.80"))
+        self.assertEqual(response.data["cash_collected_today"], Decimal("118.00"))
         self.assertEqual(response.data["total_revenue"], Decimal("306.80"))
         self.assertEqual(response.data["tax_collected_by_slab"]["18"], Decimal("46.80"))
+
+    def test_prior_day_credit_invoice_payment_counts_as_today_cash_collection_only(self):
+        client = self.client_as(self.admin)
+        invoice = self.invoice(client, "REPORT-PRIOR-CREDIT", self.product, 1)
+        yesterday = date.today() - timedelta(days=1)
+        Invoice.objects.filter(pk=invoice.pk).update(invoice_date=yesterday)
+        payment = Payment.objects.create(customer=self.customer, invoice=invoice, amount=invoice.total_amount)
+        Payment.objects.filter(pk=payment.pk).update(payment_date=date.today())
+
+        response = client.get(f"/api/reports/daily-sales/?date={self.today}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["cash_collected_today"], Decimal("118.00"))
+        self.assertEqual(response.data["sold_on_credit_today"], Decimal("0.00"))
+        self.assertEqual(response.data["sold_cash_today"], Decimal("0.00"))
+
+    def test_same_day_credit_sale_and_payment_counts_in_both_distinct_metrics(self):
+        client = self.client_as(self.admin)
+        invoice = self.invoice(client, "REPORT-SAME-DAY-CREDIT", self.product, 1)
+        Payment.objects.create(customer=self.customer, invoice=invoice, amount=invoice.total_amount)
+
+        response = client.get(f"/api/reports/daily-sales/?date={self.today}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sold_on_credit_today"], Decimal("118.00"))
+        self.assertEqual(response.data["sold_cash_today"], Decimal("0.00"))
+        self.assertEqual(response.data["cash_collected_today"], Decimal("118.00"))
 
     def test_stock_valuation_hides_cost_for_staff_and_includes_it_for_admin(self):
         admin_response = self.client_as(self.admin).get("/api/reports/stock-valuation/")

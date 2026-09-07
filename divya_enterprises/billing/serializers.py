@@ -47,7 +47,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "customer_name", "invoice_date", "created_at", "updated_at", "payment_status", "created_by", "total_amount"]
+        read_only_fields = ["id", "customer_name", "invoice_date", "payment_type", "created_at", "updated_at", "payment_status", "created_by", "total_amount"]
 
     def validate(self, attrs):
         payment_type = attrs.get("payment_type", "credit")
