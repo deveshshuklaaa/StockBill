@@ -12,6 +12,7 @@ This repository contains the Django + DRF backend for the Divya Enterprises inve
 - Billing models and APIs
 - Invoice PDF generation endpoint using WeasyPrint
 - Role-based permission scaffolding for admin vs staff visibility
+- Read-only daily sales, stock valuation, profit/loss, top-products, and customer reports
 
 ## Project structure
 
@@ -81,6 +82,16 @@ python manage.py runserver
 
 The app exposes API routes under `/api/`.
 
+## Reporting endpoints
+
+- `GET /api/reports/daily-sales/?date=YYYY-MM-DD` (defaults to today)
+- `GET /api/reports/stock-valuation/`
+- `GET /api/reports/profit-loss/?from=YYYY-MM-DD&to=YYYY-MM-DD` (admin only)
+- `GET /api/reports/top-products/?from=YYYY-MM-DD&to=YYYY-MM-DD&sort_by=quantity|revenue&limit=10`
+- `GET /api/customers/<id>/report/`
+
+Staff can access daily sales, stock valuation, top-products, and customer reports. Cost-price and profit/loss fields are excluded from staff responses, and the profit/loss endpoint returns `403` for staff. Profit/loss uses each product's current `cost_price` because historical cost snapshots are not tracked.
+
 ## Confirmed billing rules implemented in schema
 
 This milestone aligns the scaffold to the confirmed business rules:
@@ -93,8 +104,5 @@ This milestone aligns the scaffold to the confirmed business rules:
 
 ## Future next steps
 
-- implement invoice creation transaction logic with stock validation and ledger updates
-- implement credit-note reversal logic and outstanding-balance calculations
-- add tests for stock deduction, tax calculation, and partial payment status transitions
 - add React frontend in a separate phase
 

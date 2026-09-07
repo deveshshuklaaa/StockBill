@@ -9,6 +9,7 @@ from .views import (
     PaymentDetailView,
     PaymentListCreateView,
 )
+from .reporting import DailySalesReportView, ProfitLossReportView, StockValuationReportView, TopProductsReportView
 
 urlpatterns = [
     path("invoices/", InvoiceListCreateView.as_view(), name="invoice-list-create"),
@@ -18,4 +19,8 @@ urlpatterns = [
     path("credit-notes/<int:pk>/", CreditNoteDetailView.as_view(), name="credit-note-detail"),
     path("payments/", PaymentListCreateView.as_view(), name="payment-list-create"),
     path("payments/<int:pk>/", PaymentDetailView.as_view(), name="payment-detail"),
+    path("reports/daily-sales/", DailySalesReportView.as_view(), name="daily-sales-report"),
+    path("reports/stock-valuation/", StockValuationReportView.as_view(), name="stock-valuation-report"),
+    path("reports/profit-loss/", ProfitLossReportView.as_view(), name="profit-loss-report"),
+    path("reports/top-products/", TopProductsReportView.as_view(), name="top-products-report"),
 ]
