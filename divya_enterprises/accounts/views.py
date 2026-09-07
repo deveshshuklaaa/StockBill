@@ -1,5 +1,8 @@
 from django.contrib.auth import get_user_model
 from rest_framework import generics, permissions
+from rest_framework.authtoken.views import obtain_auth_token
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .permissions import IsAdminUser
 from .serializers import StaffUserSerializer, UserSerializer
@@ -23,3 +26,10 @@ class StaffUserListView(generics.ListAPIView):
     serializer_class = StaffUserSerializer
     permission_classes = [permissions.IsAuthenticated]
     queryset = User.objects.filter(is_active=True).order_by("id")
+
+
+class CurrentUserView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(UserSerializer(request.user).data)

@@ -82,6 +82,18 @@ python manage.py runserver
 
 The app exposes API routes under `/api/`.
 
+## Frontend setup
+
+The Vite + React frontend lives in `frontend/` and uses `VITE_API_BASE_URL` for the Django API base URL. Copy `frontend/.env.example` to `frontend/.env`, install dependencies, and start it with:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Authentication uses the DRF token endpoint at `/api/auth/token/`. The token and current user are kept in `sessionStorage`, never `localStorage`, so signing out or closing the browser tab removes the financial application session. Axios attaches the token to every API request through a request interceptor.
+
 ## Reporting endpoints
 
 - `GET /api/reports/daily-sales/?date=YYYY-MM-DD` (defaults to today)
