@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from django.db import models
+from django.db.models import Sum
 
 
 class Customer(models.Model):
@@ -19,3 +22,10 @@ class Customer(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def outstanding_balance(self):
+        invoice_total = self.invoices.aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+        payment_total = self.payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        credit_note_total = self.invoices.aggregate(total=Sum("credit_notes__total_amount"))["total"] or Decimal("0.00")
+        return invoice_total - payment_total - credit_note_total

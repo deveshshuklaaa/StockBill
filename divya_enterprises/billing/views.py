@@ -21,7 +21,7 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
 
-class InvoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
+class InvoiceDetailView(generics.RetrieveAPIView):
     queryset = Invoice.objects.select_related("customer", "created_by").prefetch_related("line_items").all()
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -45,7 +45,7 @@ class CreditNoteListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
 
-class CreditNoteDetailView(generics.RetrieveUpdateDestroyAPIView):
+class CreditNoteDetailView(generics.RetrieveAPIView):
     queryset = CreditNote.objects.select_related("original_invoice", "created_by").prefetch_related("line_items").all()
     serializer_class = CreditNoteSerializer
     permission_classes = [permissions.IsAuthenticated]

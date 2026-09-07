@@ -85,6 +85,7 @@ class CreditNote(models.Model):
 
 class CreditNoteLineItem(models.Model):
     credit_note = models.ForeignKey(CreditNote, on_delete=models.CASCADE, related_name="line_items")
+    invoice_line_item = models.ForeignKey(InvoiceLineItem, on_delete=models.PROTECT, related_name="credit_note_reversals")
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="credit_note_line_items")
     quantity = models.DecimalField(max_digits=12, decimal_places=3, default=1)
     rate_charged = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -98,7 +99,7 @@ class CreditNoteLineItem(models.Model):
 
 
 class Payment(models.Model):
-    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="payments")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, null=True, blank=True, related_name="payments")
     invoice = models.ForeignKey(Invoice, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
     amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     payment_date = models.DateField(auto_now_add=True)
