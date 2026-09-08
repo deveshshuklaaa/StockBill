@@ -4,7 +4,7 @@ from .models import CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Pa
 
 
 class InvoiceLineItemSerializer(serializers.ModelSerializer):
-    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_name = serializers.SerializerMethodField()
     tax_rate = serializers.IntegerField(required=False, allow_null=True)
 
     class Meta:
@@ -25,9 +25,12 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "invoice", "created_at", "product_name", "tax_amount", "line_total", "cost_price_snapshot", "cogs_amount"]
 
+    def get_product_name(self, obj):
+        return obj.product_name_snapshot or obj.product.name
+
 
 class InvoiceSerializer(serializers.ModelSerializer):
-    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    customer_name = serializers.SerializerMethodField()
     line_items = InvoiceLineItemSerializer(many=True, required=True)
     payment_status = serializers.ReadOnlyField(source="computed_payment_status")
     payment_type = serializers.ChoiceField(choices=["cash", "credit"], default="credit")
@@ -42,6 +45,15 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "invoice_date",
             "payment_type",
             "payment_status",
+            "state",
+            "cancellation_reason",
+            "cancelled_at",
+            "customer_name_snapshot",
+            "customer_gstin_snapshot",
+            "billing_address_snapshot",
+            "shipping_address_snapshot",
+            "state_snapshot",
+            "pincode_snapshot",
             "total_amount",
             "notes",
             "created_by",
@@ -49,7 +61,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "customer_name", "invoice_date", "created_at", "updated_at", "payment_status", "created_by", "total_amount"]
+        read_only_fields = ["id", "customer_name", "invoice_date", "created_at", "updated_at", "payment_status", "state", "cancellation_reason", "cancelled_at", "created_by", "total_amount", "customer_name_snapshot", "customer_gstin_snapshot", "billing_address_snapshot", "shipping_address_snapshot", "state_snapshot", "pincode_snapshot"]
+
+    def get_customer_name(self, obj):
+        return obj.customer_name_snapshot or (obj.customer.name if obj.customer else "Walk-in customer")
 
     def validate(self, attrs):
         payment_type = attrs.get("payment_type", "credit")
@@ -68,6 +83,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             created_by=self.context["request"].user,
             payment_type=payment_type,
             line_items=line_items,
+            state=self.context.get("invoice_state", Invoice.STATE_POSTED),
             **validated_data,
         )
 

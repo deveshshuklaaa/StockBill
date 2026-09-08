@@ -36,6 +36,14 @@ class Invoice(models.Model):
     payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPE_CHOICES, default=PAYMENT_TYPE_CREDIT)
     state = models.CharField(max_length=12, choices=STATE_CHOICES, default=STATE_POSTED)
     cancellation_reason = models.TextField(blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="cancelled_invoices")
+    customer_name_snapshot = models.CharField(max_length=255, blank=True)
+    customer_gstin_snapshot = models.CharField(max_length=25, blank=True)
+    billing_address_snapshot = models.TextField(blank=True)
+    shipping_address_snapshot = models.TextField(blank=True)
+    state_snapshot = models.CharField(max_length=100, blank=True)
+    pincode_snapshot = models.CharField(max_length=20, blank=True)
     payment_status = models.CharField(max_length=25, choices=PAYMENT_STATUS_CHOICES, default=PAYMENT_STATUS_CREDIT)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     notes = models.TextField(blank=True)
@@ -46,14 +54,23 @@ class Invoice(models.Model):
     def __str__(self):
         return self.invoice_number
 
+    def delete(self, *args, **kwargs):
+        if self.state != self.STATE_DRAFT:
+            raise ValueError("Only draft invoices can be deleted.")
+        return super().delete(*args, **kwargs)
+
     def sync_payment_status(self):
         self.payment_status = self.computed_payment_status
 
     def save(self, *args, **kwargs):
         if self.pk is not None:
-            stored_payment_type = type(self).objects.only("payment_type").get(pk=self.pk).payment_type
-            if self.payment_type != stored_payment_type:
-                raise ValueError("Invoice payment_type is immutable after creation.")
+            stored = type(self).objects.only(
+                "payment_type", "customer_id", "total_amount", "state", "invoice_number"
+            ).get(pk=self.pk)
+            if stored.state in {self.STATE_POSTED, self.STATE_CANCELLED}:
+                immutable_fields = ["payment_type", "customer_id", "total_amount", "invoice_number"]
+                if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
+                    raise ValueError("Posted and cancelled invoice financial fields are immutable.")
         if self.pk is None:
             self.payment_status = self.PAYMENT_STATUS_CREDIT
         else:
@@ -65,8 +82,9 @@ class Invoice(models.Model):
         if self.pk is None:
             return self.PAYMENT_STATUS_CREDIT
         total_paid = self.payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        total_reversed = PaymentReversal.objects.filter(payment__invoice=self).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
         total_credited = self.credit_notes.aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
-        net_paid = total_paid - total_credited
+        net_paid = total_paid - total_reversed - total_credited
         if net_paid >= self.total_amount:
             return self.PAYMENT_STATUS_PAID
         if net_paid <= 0:
@@ -84,10 +102,28 @@ class InvoiceLineItem(models.Model):
     line_total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     cost_price_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     cogs_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    product_name_snapshot = models.CharField(max_length=255, blank=True)
+    base_unit_snapshot = models.CharField(max_length=20, blank=True)
+    hsn_sac_snapshot = models.CharField(max_length=50, blank=True)
+    taxable_value_snapshot = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.invoice.invoice_number} - {self.product.name}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            stored = type(self).objects.get(pk=self.pk)
+            if stored.invoice.state != Invoice.STATE_DRAFT:
+                immutable_fields = ["invoice_id", "product_id", "quantity", "rate_charged", "tax_rate", "tax_amount", "line_total"]
+                if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
+                    raise ValueError("Posted and cancelled invoice lines are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.invoice.state != Invoice.STATE_DRAFT:
+            raise ValueError("Only draft invoice lines can be deleted.")
+        return super().delete(*args, **kwargs)
 
 
 class CreditNote(models.Model):
@@ -126,7 +162,46 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.customer.name} - {self.amount}"
+        return f"{self.customer.name if self.customer else 'Walk-in'} - {self.amount}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            stored = type(self).objects.only("customer_id", "invoice_id", "amount").get(pk=self.pk)
+            if any(getattr(self, field) != getattr(stored, field) for field in ["customer_id", "invoice_id", "amount"]):
+                raise ValueError("Payments are append-only and cannot be edited.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Payments are append-only and cannot be deleted.")
+
+
+class PaymentReversal(models.Model):
+    payment = models.ForeignKey(Payment, on_delete=models.PROTECT, related_name="reversals")
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    reason = models.TextField()
+    reversed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="payment_reversals")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AuditLog(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    action = models.CharField(max_length=100)
+    entity_type = models.CharField(max_length=100)
+    entity_id = models.PositiveBigIntegerField()
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class DebitNote(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="debit_notes")
+    invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, null=True, blank=True, related_name="debit_notes")
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    reason = models.TextField()
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_debit_notes")
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class InvoiceIdempotencyKey(models.Model):
@@ -146,6 +221,8 @@ def refresh_invoice_payment_status(invoice):
 def update_invoice_payment_status_on_payment_save(sender, instance, **kwargs):
     if instance.invoice_id:
         refresh_invoice_payment_status(instance.invoice)
+    if kwargs.get("created"):
+        AuditLog.objects.create(user=None, action="payment_received", entity_type="Payment", entity_id=instance.pk)
 
 
 @receiver(post_delete, sender=Payment)
@@ -157,6 +234,8 @@ def update_invoice_payment_status_on_payment_delete(sender, instance, **kwargs):
 @receiver(post_save, sender=CreditNote)
 def update_invoice_payment_status_on_credit_note_save(sender, instance, **kwargs):
     refresh_invoice_payment_status(instance.original_invoice)
+    if kwargs.get("created"):
+        AuditLog.objects.create(user=instance.created_by, action="credit_note_created", entity_type="CreditNote", entity_id=instance.pk)
 
 
 @receiver(post_delete, sender=CreditNote)

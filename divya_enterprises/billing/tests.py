@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
-from billing.models import Invoice, Payment
+from billing.models import AuditLog, Invoice, Payment, PaymentReversal
+from billing.services import cancel_invoice, reverse_payment
 from customers.models import Customer
 from inventory.models import Product
 
@@ -213,3 +214,67 @@ class TransactionalBillingTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("customer", response.data)
         self.assertFalse(Invoice.objects.filter(invoice_number="CREDIT-LIMIT-1001").exists())
+
+    def test_cancellation_preserves_invoice_reverses_stock_and_audits(self):
+        product = self.create_product("Cancellation Product", stock=5)
+        response = self.client.post(
+            "/api/invoices/",
+            self.invoice_payload("CANCEL-1001", product, quantity=2, customer=self.customer.pk),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        invoice = Invoice.objects.get(invoice_number="CANCEL-1001")
+        response = self.client.post(f"/api/invoices/{invoice.pk}/cancel/", {"reason": "Duplicate entry"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        invoice.refresh_from_db()
+        product.refresh_from_db()
+        self.assertEqual(invoice.state, Invoice.STATE_CANCELLED)
+        self.assertEqual(product.current_stock, Decimal("5.000"))
+        self.assertTrue(AuditLog.objects.filter(action="invoice_cancelled", entity_id=invoice.pk).exists())
+        duplicate = self.client.post(f"/api/invoices/{invoice.pk}/cancel/", {"reason": "Again"}, format="json")
+        self.assertEqual(duplicate.status_code, 400)
+
+    def test_payment_reversal_is_append_only_and_cannot_repeat(self):
+        product = self.create_product("Reversal Product", stock=5)
+        invoice = self.invoice_payload("REVERSAL-PAY-1001", product, quantity=1, payment_type="cash")
+        response = self.client.post("/api/invoices/", invoice, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        payment = Payment.objects.get(invoice__invoice_number="REVERSAL-PAY-1001")
+        response = self.client.post(f"/api/payments/{payment.pk}/reverse/", {"amount": "118.00", "reason": "Bank correction"}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(PaymentReversal.objects.filter(payment=payment).count(), 1)
+        duplicate = self.client.post(f"/api/payments/{payment.pk}/reverse/", {"amount": "1.00", "reason": "Again"}, format="json")
+        self.assertEqual(duplicate.status_code, 400)
+
+    def test_posted_invoice_line_and_payment_cannot_be_edited_or_deleted(self):
+        product = self.create_product("Immutable Product", stock=5)
+        response = self.client.post(
+            "/api/invoices/",
+            self.invoice_payload("IMMUTABLE-1001", product, quantity=1, payment_type="cash"),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        invoice = Invoice.objects.get(invoice_number="IMMUTABLE-1001")
+        line = invoice.line_items.get()
+        line.rate_charged = Decimal("1.00")
+        with self.assertRaises(ValueError):
+            line.save()
+        payment = Payment.objects.get(invoice=invoice)
+        with self.assertRaises(ValueError):
+            payment.delete()
+
+    def test_draft_can_be_created_then_posted_transactionally(self):
+        product = self.create_product("Draft Product", stock=5)
+        payload = self.invoice_payload("DRAFT-1001", product, quantity=2, customer=self.customer.pk)
+        draft = self.client.post("/api/invoices/drafts/", payload, format="json")
+        self.assertEqual(draft.status_code, 201, draft.data)
+        invoice = Invoice.objects.get(invoice_number="DRAFT-1001")
+        self.assertEqual(invoice.state, Invoice.STATE_DRAFT)
+        product.refresh_from_db()
+        self.assertEqual(product.current_stock, Decimal("5.000"))
+        posted = self.client.post(f"/api/invoices/{invoice.pk}/post/", {}, format="json")
+        self.assertEqual(posted.status_code, 200, posted.data)
+        invoice.refresh_from_db()
+        product.refresh_from_db()
+        self.assertEqual(invoice.state, Invoice.STATE_POSTED)
+        self.assertEqual(product.current_stock, Decimal("3.000"))

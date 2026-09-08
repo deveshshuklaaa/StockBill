@@ -67,6 +67,7 @@ class StockLedger(models.Model):
     OPENING_STOCK = "OPENING_STOCK"
     PURCHASE = "PURCHASE"
     SALE = "SALE"
+    SALE_REVERSAL = "SALE_REVERSAL"
     SALES_RETURN = "SALES_RETURN"
     PURCHASE_RETURN = "PURCHASE_RETURN"
     DAMAGE = "DAMAGE"
@@ -74,7 +75,7 @@ class StockLedger(models.Model):
     TRANSFER_IN = "TRANSFER_IN"
     TRANSFER_OUT = "TRANSFER_OUT"
     MOVEMENT_CHOICES = [(value, value.replace("_", " ").title()) for value in [
-        OPENING_STOCK, PURCHASE, SALE, SALES_RETURN, PURCHASE_RETURN,
+        OPENING_STOCK, PURCHASE, SALE, SALE_REVERSAL, SALES_RETURN, PURCHASE_RETURN,
         DAMAGE, ADJUSTMENT, TRANSFER_IN, TRANSFER_OUT,
     ]]
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="stock_entries")

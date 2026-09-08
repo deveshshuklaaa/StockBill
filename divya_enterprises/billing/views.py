@@ -6,14 +6,17 @@ from django.utils.text import slugify
 from django.db import IntegrityError, transaction
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 try:
     from weasyprint import HTML
 except OSError:
     HTML = None
 
+from accounts.permissions import IsAdminUser
 from .models import CreditNote, Invoice, InvoiceIdempotencyKey, InvoiceLineItem, Payment
 from .serializers import CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
+from .services import cancel_invoice, post_invoice, reverse_payment
 
 
 class InvoiceListCreateView(generics.ListCreateAPIView):
@@ -87,6 +90,7 @@ class InvoicePdfView(generics.GenericAPIView):
             "invoice": invoice,
             "line_items": invoice.line_items.all(),
             "customer": invoice.customer,
+            "customer_name": invoice.customer_name_snapshot,
             "total": invoice.total_amount,
         }
         template = Template(
@@ -94,7 +98,8 @@ class InvoicePdfView(generics.GenericAPIView):
             <html>
               <body>
                 <h1>Invoice {{ invoice.invoice_number }}</h1>
-                <p>Customer: {{ customer.name|default:'Walk-in' }}</p>
+                {% if invoice.state == 'CANCELLED' %}<h2>CANCELLED</h2><p>{{ invoice.cancellation_reason }}</p>{% endif %}
+                <p>Customer: {{ customer_name|default:'Walk-in' }}</p>
                 <p>Date: {{ invoice.invoice_date }}</p>
                 <table>
                   <thead>
@@ -103,7 +108,7 @@ class InvoicePdfView(generics.GenericAPIView):
                   <tbody>
                     {% for item in line_items %}
                     <tr>
-                      <td>{{ item.product.name }}</td>
+                      <td>{{ item.product_name_snapshot|default:item.product.name }}</td>
                       <td>{{ item.quantity }}</td>
                       <td>{{ item.rate_charged }}</td>
                       <td>{{ item.tax_rate }}%</td>
@@ -123,3 +128,50 @@ class InvoicePdfView(generics.GenericAPIView):
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
+
+
+class InvoiceCancelView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def post(self, request, pk):
+        reason = request.data.get("reason", "").strip()
+        if not reason:
+            return Response({"reason": "A cancellation reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+        invoice = cancel_invoice(invoice_id=pk, cancelled_by=request.user, reason=reason)
+        return Response(InvoiceSerializer(invoice).data)
+
+
+class InvoiceDraftCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = InvoiceSerializer(data=request.data, context={"request": request, "invoice_state": Invoice.STATE_DRAFT})
+        serializer.is_valid(raise_exception=True)
+        return Response(InvoiceSerializer(serializer.save()).data, status=status.HTTP_201_CREATED)
+
+
+class InvoicePostView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        invoice = post_invoice(invoice_id=pk, posted_by=request.user)
+        return Response(InvoiceSerializer(invoice).data)
+
+
+class PaymentReverseView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def post(self, request, pk):
+        reason = request.data.get("reason", "").strip()
+        if not reason:
+            return Response({"reason": "A reversal reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            reversal = reverse_payment(
+                payment_id=pk,
+                amount=request.data.get("amount"),
+                reversed_by=request.user,
+                reason=reason,
+            )
+        except (TypeError, ValueError):
+            return Response({"amount": "A valid reversal amount is required."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"id": reversal.id, "payment": reversal.payment_id, "amount": reversal.amount, "reason": reversal.reason}, status=status.HTTP_201_CREATED)

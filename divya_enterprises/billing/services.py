@@ -2,13 +2,15 @@ from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
+from django.db.models import Sum
+from django.utils import timezone
 from rest_framework import serializers
 
 from customers.models import Customer
 from inventory.models import InventoryBalance, Product, StockLedger
 from inventory.services import adjust_inventory, ensure_inventory_balance, get_default_warehouse
 
-from .models import CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
+from .models import AuditLog, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment, PaymentReversal, refresh_invoice_payment_status
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -57,13 +59,18 @@ def _validate_invoice_lines(line_items):
 
 
 @transaction.atomic
-def create_invoice(*, customer, invoice_number, notes="", created_by, payment_type, line_items):
+def create_invoice(*, customer, invoice_number, notes="", created_by, payment_type, line_items, state=Invoice.STATE_POSTED):
     if payment_type == "credit" and customer is None:
         raise serializers.ValidationError({"customer": "A registered customer is required for credit invoices."})
     if customer is not None:
         customer = Customer.objects.select_for_update().get(pk=customer.pk)
 
-    products, balances = _validate_invoice_lines(line_items)
+    if state == Invoice.STATE_DRAFT:
+        product_ids = {item["product"].pk for item in line_items}
+        products = Product.objects.in_bulk(product_ids)
+        balances = {product_id: type("Balance", (), {"average_cost": products[product_id].cost_price})() for product_id in product_ids}
+    else:
+        products, balances = _validate_invoice_lines(line_items)
     calculated_lines = []
     total_amount = Decimal("0.00")
     for item in line_items:
@@ -92,6 +99,13 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
         notes=notes,
         created_by=created_by,
         total_amount=_money(total_amount),
+        state=state,
+        customer_name_snapshot=customer.name if customer else "Walk-in customer",
+        customer_gstin_snapshot=customer.gstin or "" if customer else "",
+        billing_address_snapshot=customer.billing_address or "" if customer else "",
+        shipping_address_snapshot=customer.shipping_address or "" if customer else "",
+        state_snapshot=customer.state or "" if customer else "",
+        pincode_snapshot=customer.pincode or "" if customer else "",
     )
 
     for product, quantity, rate, tax_rate, tax_amount, line_total, cost_price, cogs_amount in calculated_lines:
@@ -105,7 +119,12 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
             line_total=line_total,
             cost_price_snapshot=cost_price,
             cogs_amount=cogs_amount,
+            product_name_snapshot=product.name,
+            base_unit_snapshot=product.base_unit,
+            taxable_value_snapshot=subtotal,
         )
+        if state == Invoice.STATE_DRAFT:
+            continue
         adjust_inventory(
             product=product,
             quantity_delta=-quantity,
@@ -116,17 +135,49 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
             unit_cost=product.cost_price,
         )
 
+    if state == Invoice.STATE_DRAFT:
+        return invoice
     if payment_type == "cash":
         Payment.objects.create(customer=customer, invoice=invoice, amount=invoice.total_amount)
     else:
         invoice.refresh_from_db()
+    AuditLog.objects.create(user=created_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)
 
+    return invoice
+
+
+@transaction.atomic
+def post_invoice(*, invoice_id, posted_by):
+    invoice = Invoice.objects.select_for_update().prefetch_related("line_items__product").get(pk=invoice_id)
+    if invoice.state == Invoice.STATE_POSTED:
+        return invoice
+    if invoice.state != Invoice.STATE_DRAFT:
+        raise serializers.ValidationError({"state": "Only draft invoices can be posted."})
+    line_items = list(invoice.line_items.select_related("product"))
+    products, balances = _validate_invoice_lines(
+        [{"product": line.product, "quantity": line.quantity, "rate_charged": line.rate_charged, "tax_rate": line.tax_rate} for line in line_items]
+    )
+    for line in line_items:
+        product = products[line.product_id]
+        line.cost_price_snapshot = balances[product.pk].average_cost
+        line.cogs_amount = _money(line.quantity * line.cost_price_snapshot)
+        line.product_name_snapshot = product.name
+        line.base_unit_snapshot = product.base_unit
+        line.save(update_fields=["cost_price_snapshot", "cogs_amount", "product_name_snapshot", "base_unit_snapshot"])
+        adjust_inventory(product=product, quantity_delta=-line.quantity, movement_type=StockLedger.SALE, created_by=posted_by, reference_type="invoice", reference_id=invoice.pk, unit_cost=line.cost_price_snapshot)
+    invoice.state = Invoice.STATE_POSTED
+    invoice.save(update_fields=["state", "updated_at"])
+    if invoice.payment_type == Invoice.PAYMENT_TYPE_CASH:
+        Payment.objects.create(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount)
+    AuditLog.objects.create(user=posted_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)
     return invoice
 
 
 @transaction.atomic
 def create_credit_note(*, original_invoice, reason="", created_by, line_items):
     invoice = Invoice.objects.select_for_update().get(pk=original_invoice.pk)
+    if invoice.state != Invoice.STATE_POSTED:
+        raise serializers.ValidationError({"original_invoice": "Credit notes require a posted invoice."})
     original_lines = {
         line.pk: line
         for line in invoice.line_items.select_related("product").all()
@@ -182,3 +233,44 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
         )
 
     return credit_note
+
+
+@transaction.atomic
+def cancel_invoice(*, invoice_id, cancelled_by, reason):
+    invoice = Invoice.objects.select_for_update().prefetch_related("line_items").get(pk=invoice_id)
+    if invoice.state == Invoice.STATE_CANCELLED:
+        raise serializers.ValidationError({"state": "Invoice is already cancelled."})
+    if invoice.state != Invoice.STATE_POSTED:
+        raise serializers.ValidationError({"state": "Only posted invoices can be cancelled."})
+    for line in invoice.line_items.select_related("product"):
+        adjust_inventory(
+            product=line.product,
+            quantity_delta=line.quantity,
+            movement_type=StockLedger.SALE_REVERSAL,
+            created_by=cancelled_by,
+            reference_type="invoice_cancellation",
+            reference_id=invoice.pk,
+            unit_cost=line.cost_price_snapshot,
+            reason=reason,
+        )
+    invoice.state = Invoice.STATE_CANCELLED
+    invoice.cancelled_at = timezone.now()
+    invoice.cancelled_by = cancelled_by
+    invoice.cancellation_reason = reason
+    invoice.save(update_fields=["state", "cancelled_at", "cancelled_by", "cancellation_reason", "updated_at"])
+    AuditLog.objects.create(user=cancelled_by, action="invoice_cancelled", entity_type="Invoice", entity_id=invoice.pk, metadata={"reason": reason})
+    return invoice
+
+
+@transaction.atomic
+def reverse_payment(*, payment_id, amount, reversed_by, reason):
+    payment = Payment.objects.select_for_update().get(pk=payment_id)
+    amount = _money(amount)
+    reversed_amount = PaymentReversal.objects.filter(payment=payment).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+    if amount <= 0 or reversed_amount + amount > payment.amount:
+        raise serializers.ValidationError({"amount": "Reversal exceeds the remaining payment amount."})
+    reversal = PaymentReversal.objects.create(payment=payment, amount=amount, reason=reason, reversed_by=reversed_by)
+    if payment.invoice_id:
+        refresh_invoice_payment_status(payment.invoice)
+    AuditLog.objects.create(user=reversed_by, action="payment_reversed", entity_type="Payment", entity_id=payment.pk, metadata={"amount": str(amount), "reason": reason})
+    return reversal

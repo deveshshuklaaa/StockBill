@@ -40,7 +40,9 @@ class Customer(models.Model):
 
     @property
     def outstanding_balance(self):
-        invoice_total = self.invoices.aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+        invoice_total = self.invoices.filter(state="POSTED").aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
         payment_total = self.payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        reversal_total = self.payments.aggregate(total=Sum("reversals__amount"))["total"] or Decimal("0.00")
         credit_note_total = self.invoices.aggregate(total=Sum("credit_notes__total_amount"))["total"] or Decimal("0.00")
-        return self.opening_balance + invoice_total - payment_total - credit_note_total
+        debit_note_total = self.debit_notes.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        return self.opening_balance + invoice_total + debit_note_total - payment_total + reversal_total - credit_note_total
