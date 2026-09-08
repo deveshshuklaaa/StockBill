@@ -166,6 +166,7 @@ def post_invoice(*, invoice_id, posted_by):
         line.save(update_fields=["cost_price_snapshot", "cogs_amount", "product_name_snapshot", "base_unit_snapshot"])
         adjust_inventory(product=product, quantity_delta=-line.quantity, movement_type=StockLedger.SALE, created_by=posted_by, reference_type="invoice", reference_id=invoice.pk, unit_cost=line.cost_price_snapshot)
     invoice.state = Invoice.STATE_POSTED
+    invoice._allow_lifecycle_transition = True
     invoice.save(update_fields=["state", "updated_at"])
     if invoice.payment_type == Invoice.PAYMENT_TYPE_CASH:
         Payment.objects.create(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount)
@@ -254,6 +255,7 @@ def cancel_invoice(*, invoice_id, cancelled_by, reason):
             reason=reason,
         )
     invoice.state = Invoice.STATE_CANCELLED
+    invoice._allow_lifecycle_transition = True
     invoice.cancelled_at = timezone.now()
     invoice.cancelled_by = cancelled_by
     invoice.cancellation_reason = reason

@@ -123,3 +123,21 @@ class InventoryBalanceTests(TestCase):
         self.assertEqual(balance.quantity_on_hand, Decimal("5.000"))
         self.assertEqual(balance.average_cost, Decimal("80.00"))
         self.assertEqual(StockLedger.objects.filter(reference_id=purchase.pk, movement_type=StockLedger.PURCHASE).count(), 1)
+
+    def test_stock_ledger_and_balance_cannot_be_directly_edited_or_deleted(self):
+        adjust_inventory(
+            product=self.product,
+            quantity_delta=Decimal("2"),
+            movement_type=StockLedger.OPENING_STOCK,
+            created_by=self.user,
+        )
+        ledger = StockLedger.objects.filter(product=self.product).latest("id")
+        ledger.reason = "tampered"
+        with self.assertRaises(ValueError):
+            ledger.save()
+        with self.assertRaises(ValueError):
+            ledger.delete()
+        balance = InventoryBalance.objects.get(product=self.product, warehouse=self.warehouse)
+        balance.quantity_on_hand = Decimal("999")
+        with self.assertRaises(ValueError):
+            balance.save()

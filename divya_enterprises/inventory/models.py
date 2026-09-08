@@ -62,6 +62,19 @@ class Product(models.Model):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        if self.pk is not None and not getattr(self, "_allow_stock_cache_update", False):
+            loaded_stock = getattr(self, "_loaded_current_stock", self.current_stock)
+            if self.current_stock != loaded_stock:
+                raise ValueError("Product stock is derived from inventory movements and cannot be edited directly.")
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_current_stock = instance.current_stock
+        return instance
+
 
 class StockLedger(models.Model):
     OPENING_STOCK = "OPENING_STOCK"
@@ -97,6 +110,14 @@ class StockLedger(models.Model):
     def __str__(self):
         return f"{self.product.name} {self.quantity_change} ({self.movement_type})"
 
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Stock ledger entries are immutable; create a compensating movement.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Stock ledger entries cannot be deleted.")
+
 
 class InventoryBalance(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="inventory_balances")
@@ -111,6 +132,14 @@ class InventoryBalance(models.Model):
 
     def __str__(self):
         return f"{self.product.name} @ {self.warehouse.code}: {self.quantity_on_hand}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None and not getattr(self, "_allow_service_update", False):
+            raise ValueError("Inventory balances may only change through inventory services.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Inventory balances cannot be deleted.")
 
 
 class PurchaseInvoice(models.Model):

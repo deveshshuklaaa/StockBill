@@ -58,6 +58,7 @@ def adjust_inventory(*, product, quantity_delta, movement_type, created_by=None,
             {"quantity": f"Insufficient stock for {product.name}. Available: {balance.quantity_on_hand}."}
         )
     balance.quantity_on_hand = next_quantity
+    balance._allow_service_update = True
     balance.save(update_fields=["quantity_on_hand", "updated_at"])
 
     StockLedger.objects.create(
@@ -114,6 +115,7 @@ def receive_purchase(*, supplier, warehouse, invoice_number, invoice_date, creat
         new_value = quantity * unit_cost
         next_quantity = balance.quantity_on_hand + quantity
         balance.average_cost = (old_value + new_value) / next_quantity if next_quantity else Decimal("0.00")
+        balance._allow_service_update = True
         balance.save(update_fields=["average_cost", "updated_at"])
         PurchaseLineItem.objects.create(
             purchase_invoice=purchase,
@@ -132,6 +134,7 @@ def receive_purchase(*, supplier, warehouse, invoice_number, invoice_date, creat
             reference_id=purchase.pk,
             unit_cost=unit_cost,
         )
+        product._allow_stock_cache_update = True
         product.cost_price = unit_cost
         product.save(update_fields=["cost_price", "updated_at"])
     return purchase

@@ -1,4 +1,6 @@
 from decimal import Decimal
+import hashlib
+import json
 
 from django.http import HttpResponse
 from django.template import Context, Template
@@ -28,17 +30,24 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
         idempotency_key = request.headers.get("Idempotency-Key")
         if not idempotency_key:
             return super().create(request, *args, **kwargs)
+        request_hash = hashlib.sha256(
+            json.dumps(request.data, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()
         existing = InvoiceIdempotencyKey.objects.select_related("invoice").filter(key=idempotency_key).first()
         if existing:
+            if existing.request_hash != request_hash:
+                return Response({"detail": "Idempotency-Key was already used with a different request."}, status=status.HTTP_409_CONFLICT)
             return Response(self.get_serializer(existing.invoice).data, status=status.HTTP_200_OK)
         try:
             with transaction.atomic():
                 serializer = self.get_serializer(data=request.data)
                 serializer.is_valid(raise_exception=True)
                 invoice = serializer.save()
-                InvoiceIdempotencyKey.objects.create(key=idempotency_key, invoice=invoice)
+                InvoiceIdempotencyKey.objects.create(key=idempotency_key, request_hash=request_hash, invoice=invoice)
         except IntegrityError:
             existing = InvoiceIdempotencyKey.objects.select_related("invoice").get(key=idempotency_key)
+            if existing.request_hash != request_hash:
+                return Response({"detail": "Idempotency-Key was already used with a different request."}, status=status.HTTP_409_CONFLICT)
             return Response(self.get_serializer(existing.invoice).data, status=status.HTTP_200_OK)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)

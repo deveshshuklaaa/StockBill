@@ -67,8 +67,14 @@ class Invoice(models.Model):
             stored = type(self).objects.only(
                 "payment_type", "customer_id", "total_amount", "state", "invoice_number"
             ).get(pk=self.pk)
+            if self.state != stored.state and not getattr(self, "_allow_lifecycle_transition", False):
+                raise ValueError("Invoice lifecycle transitions must use domain services.")
             if stored.state in {self.STATE_POSTED, self.STATE_CANCELLED}:
-                immutable_fields = ["payment_type", "customer_id", "total_amount", "invoice_number"]
+                immutable_fields = [
+                    "payment_type", "customer_id", "total_amount", "invoice_number",
+                    "customer_name_snapshot", "customer_gstin_snapshot", "billing_address_snapshot",
+                    "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
+                ]
                 if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
                     raise ValueError("Posted and cancelled invoice financial fields are immutable.")
         if self.pk is None:
@@ -115,7 +121,11 @@ class InvoiceLineItem(models.Model):
         if self.pk is not None:
             stored = type(self).objects.get(pk=self.pk)
             if stored.invoice.state != Invoice.STATE_DRAFT:
-                immutable_fields = ["invoice_id", "product_id", "quantity", "rate_charged", "tax_rate", "tax_amount", "line_total"]
+                immutable_fields = [
+                    "invoice_id", "product_id", "quantity", "rate_charged", "tax_rate",
+                    "tax_amount", "line_total", "cost_price_snapshot", "cogs_amount",
+                    "product_name_snapshot", "base_unit_snapshot", "hsn_sac_snapshot", "taxable_value_snapshot",
+                ]
                 if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
                     raise ValueError("Posted and cancelled invoice lines are immutable.")
         return super().save(*args, **kwargs)
@@ -137,6 +147,14 @@ class CreditNote(models.Model):
     def __str__(self):
         return f"CreditNote for {self.original_invoice.invoice_number}"
 
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Credit notes are immutable after creation.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Credit notes cannot be deleted.")
+
 
 class CreditNoteLineItem(models.Model):
     credit_note = models.ForeignKey(CreditNote, on_delete=models.CASCADE, related_name="line_items")
@@ -151,6 +169,14 @@ class CreditNoteLineItem(models.Model):
 
     def __str__(self):
         return f"{self.credit_note.id} - {self.product.name}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Credit note lines are immutable after creation.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Credit note lines cannot be deleted.")
 
 
 class Payment(models.Model):
@@ -182,6 +208,14 @@ class PaymentReversal(models.Model):
     reversed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="payment_reversals")
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Payment reversals are immutable after creation.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Payment reversals cannot be deleted.")
+
 
 class AuditLog(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
@@ -194,6 +228,14 @@ class AuditLog(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Audit logs are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Audit logs cannot be deleted.")
+
 
 class DebitNote(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="debit_notes")
@@ -203,9 +245,18 @@ class DebitNote(models.Model):
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_debit_notes")
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Debit notes are immutable after creation.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Debit notes cannot be deleted.")
+
 
 class InvoiceIdempotencyKey(models.Model):
     key = models.CharField(max_length=255, unique=True)
+    request_hash = models.CharField(max_length=64, default="")
     invoice = models.OneToOneField(Invoice, on_delete=models.PROTECT, related_name="idempotency_record")
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
-from billing.models import AuditLog, Invoice, Payment, PaymentReversal
+from billing.models import AuditLog, CreditNote, Invoice, Payment, PaymentReversal
 from billing.services import cancel_invoice, reverse_payment
 from customers.models import Customer
 from inventory.models import Product
@@ -262,6 +262,47 @@ class TransactionalBillingTests(APITestCase):
         payment = Payment.objects.get(invoice=invoice)
         with self.assertRaises(ValueError):
             payment.delete()
+
+    def test_posted_invoice_and_credit_note_records_are_immutable(self):
+        product = self.create_product("Snapshot Product", stock=5)
+        customer = self.customer
+        response = self.client.post(
+            "/api/invoices/",
+            self.invoice_payload("SNAPSHOT-1001", product, quantity=1, customer=customer.pk),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        invoice = Invoice.objects.get(invoice_number="SNAPSHOT-1001")
+        product.name = "Changed Product"
+        product.default_price = Decimal("999.00")
+        product.tax_slab = 40
+        product.save(update_fields=["name", "default_price", "tax_slab", "updated_at"])
+        customer.name = "Changed Customer"
+        customer.gstin = "CHANGED"
+        customer.save(update_fields=["name", "gstin", "updated_at"])
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.customer_name_snapshot, "Test Customer")
+        self.assertEqual(invoice.line_items.get().product_name_snapshot, "Snapshot Product")
+        invoice.total_amount = Decimal("1.00")
+        with self.assertRaises(ValueError):
+            invoice.save()
+
+    def test_idempotency_key_rejects_different_payload(self):
+        product = self.create_product("Idempotency Product", stock=5)
+        first = self.client.post(
+            "/api/invoices/",
+            self.invoice_payload("IDEMPOTENCY-DIFF-1", product, quantity=1, payment_type="cash"),
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="same-key-different-payload",
+        )
+        second = self.client.post(
+            "/api/invoices/",
+            self.invoice_payload("IDEMPOTENCY-DIFF-2", product, quantity=2, payment_type="cash"),
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="same-key-different-payload",
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(second.status_code, 409, second.data)
 
     def test_draft_can_be_created_then_posted_transactionally(self):
         product = self.create_product("Draft Product", stock=5)

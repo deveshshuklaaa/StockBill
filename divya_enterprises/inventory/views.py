@@ -61,13 +61,13 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.save(update_fields=["is_active", "updated_at"])
 
 
-class StockLedgerListCreateView(generics.ListCreateAPIView):
+class StockLedgerListCreateView(generics.ListAPIView):
     queryset = StockLedger.objects.select_related("product", "warehouse").all().order_by("-created_at")
     serializer_class = StockLedgerSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
 
-class StockLedgerDetailView(generics.RetrieveUpdateDestroyAPIView):
+class StockLedgerDetailView(generics.RetrieveAPIView):
     queryset = StockLedger.objects.select_related("product", "warehouse").all()
     serializer_class = StockLedgerSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
