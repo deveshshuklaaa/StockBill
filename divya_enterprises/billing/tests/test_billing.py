@@ -1,10 +1,12 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError, transaction
 from rest_framework.test import APIClient, APITestCase
 
-from billing.models import AuditLog, CreditNote, Invoice, Payment, PaymentReversal
+from billing.models import AuditLog, CreditNote, Invoice, InvoiceLineItem, Payment, PaymentReversal
 from billing.services import cancel_invoice, reverse_payment
+from billing.pdf import render_invoice_html
 from customers.models import Customer
 from inventory.models import Product
 
@@ -319,3 +321,103 @@ class TransactionalBillingTests(APITestCase):
         product.refresh_from_db()
         self.assertEqual(invoice.state, Invoice.STATE_POSTED)
         self.assertEqual(product.current_stock, Decimal("3.000"))
+
+    def test_payment_audit_records_the_authenticated_actor(self):
+        invoice = Invoice.objects.create(
+            invoice_number="AUDIT-PAYMENT-1001",
+            customer=self.customer,
+            payment_type=Invoice.PAYMENT_TYPE_CREDIT,
+            total_amount=Decimal("100.00"),
+            created_by=self.user,
+        )
+        response = self.client.post(
+            "/api/payments/",
+            {"customer": self.customer.pk, "invoice": invoice.pk, "amount": "25.00"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        audit = AuditLog.objects.get(action="payment_received", entity_id=response.data["id"])
+        self.assertEqual(audit.user_id, self.user.pk)
+
+        staff = get_user_model().objects.create_user(username="payment-staff", password="StrongPass123!", role="staff")
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        staff_response = staff_client.post(
+            "/api/payments/",
+            {"customer": self.customer.pk, "invoice": invoice.pk, "amount": "10.00"},
+            format="json",
+        )
+        self.assertEqual(staff_response.status_code, 201, staff_response.data)
+        staff_audit = AuditLog.objects.get(action="payment_received", entity_id=staff_response.data["id"])
+        self.assertEqual(staff_audit.user_id, staff.pk)
+
+        unauthenticated = APIClient().post(
+            "/api/payments/",
+            {"customer": self.customer.pk, "invoice": invoice.pk, "amount": "5.00"},
+            format="json",
+        )
+        self.assertIn(unauthenticated.status_code, {401, 403})
+
+    def test_staff_can_create_credit_notes_but_cannot_mutate_them(self):
+        staff = get_user_model().objects.create_user(username="credit-staff", password="StrongPass123!", role="staff")
+        product = self.create_product("Credit Authorization Product", stock=5)
+        invoice_response = self.client.post(
+            "/api/invoices/",
+            self.invoice_payload("CREDIT-AUTH-1001", product, quantity=1, customer=self.customer.pk),
+            format="json",
+        )
+        invoice = Invoice.objects.get(pk=invoice_response.data["id"])
+        line = invoice.line_items.get()
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        response = staff_client.post(
+            "/api/credit-notes/",
+            {"original_invoice": invoice.pk, "reason": "Staff return", "line_items": [{"invoice_line_item": line.pk, "product": product.pk, "quantity": "1"}]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        update = staff_client.patch(f"/api/credit-notes/{response.data['id']}/", {"reason": "Changed"}, format="json")
+        delete = staff_client.delete(f"/api/credit-notes/{response.data['id']}/")
+        self.assertEqual(update.status_code, 405)
+        self.assertEqual(delete.status_code, 405)
+
+    def test_snapshot_html_is_independent_of_current_product_and_customer(self):
+        product = self.create_product("Original Product", stock=5)
+        response = self.client.post("/api/invoices/", self.invoice_payload("PDF-SNAPSHOT-1001", product, customer=self.customer.pk), format="json")
+        invoice = Invoice.objects.get(pk=response.data["id"])
+        product.name = "Current Product"
+        product.default_price = Decimal("999.00")
+        product.tax_slab = Product.TAX_40
+        product.save(update_fields=["name", "default_price", "tax_slab", "updated_at"])
+        self.customer.name = "Current Customer"
+        self.customer.gstin = "CURRENT-GSTIN"
+        self.customer.billing_address = "Current Address"
+        self.customer.save(update_fields=["name", "gstin", "billing_address", "updated_at"])
+        html = render_invoice_html(invoice)
+        self.assertIn("Original Product", html)
+        self.assertIn("Test Customer", html)
+        self.assertNotIn("Current Product", html)
+        self.assertNotIn("Current Customer", html)
+
+    def test_posted_financial_bulk_mutations_are_blocked_by_database_triggers(self):
+        product = self.create_product("Trigger Product", stock=5)
+        response = self.client.post("/api/invoices/", self.invoice_payload("TRIGGER-1001", product, payment_type="cash"), format="json")
+        invoice = Invoice.objects.get(pk=response.data["id"])
+        line = invoice.line_items.get()
+        payment = Payment.objects.get(invoice=invoice)
+        audit = AuditLog.objects.filter(entity_type="Invoice", entity_id=invoice.pk).first()
+        for operation in (
+            lambda: Invoice.objects.filter(pk=invoice.pk).update(total_amount=Decimal("1.00")),
+            lambda: InvoiceLineItem.objects.filter(pk=line.pk).update(rate_charged=Decimal("1.00")),
+            lambda: Payment.objects.filter(pk=payment.pk).update(amount=Decimal("1.00")),
+        ):
+            with self.assertRaises(DatabaseError):
+                with transaction.atomic():
+                    operation()
+        with self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                Payment.objects.filter(pk=payment.pk).delete()
+        if audit:
+            with self.assertRaises(DatabaseError):
+                with transaction.atomic():
+                    AuditLog.objects.filter(pk=audit.pk).update(action="tampered")

@@ -5,6 +5,7 @@ from django.db import models
 from django.db.models import Sum
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 from customers.models import Customer
 from inventory.models import Product
@@ -183,7 +184,7 @@ class Payment(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT, null=True, blank=True, related_name="payments")
     invoice = models.ForeignKey(Invoice, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
     amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
-    payment_date = models.DateField(auto_now_add=True)
+    payment_date = models.DateField(default=timezone.localdate)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -272,8 +273,6 @@ def refresh_invoice_payment_status(invoice):
 def update_invoice_payment_status_on_payment_save(sender, instance, **kwargs):
     if instance.invoice_id:
         refresh_invoice_payment_status(instance.invoice)
-    if kwargs.get("created"):
-        AuditLog.objects.create(user=None, action="payment_received", entity_type="Payment", entity_id=instance.pk)
 
 
 @receiver(post_delete, sender=Payment)

@@ -138,7 +138,7 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
     if state == Invoice.STATE_DRAFT:
         return invoice
     if payment_type == "cash":
-        Payment.objects.create(customer=customer, invoice=invoice, amount=invoice.total_amount)
+        create_payment(customer=customer, invoice=invoice, amount=invoice.total_amount, actor=created_by)
     else:
         invoice.refresh_from_db()
     AuditLog.objects.create(user=created_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)
@@ -169,7 +169,7 @@ def post_invoice(*, invoice_id, posted_by):
     invoice._allow_lifecycle_transition = True
     invoice.save(update_fields=["state", "updated_at"])
     if invoice.payment_type == Invoice.PAYMENT_TYPE_CASH:
-        Payment.objects.create(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount)
+        create_payment(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount, actor=posted_by)
     AuditLog.objects.create(user=posted_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)
     return invoice
 
@@ -276,3 +276,10 @@ def reverse_payment(*, payment_id, amount, reversed_by, reason):
         refresh_invoice_payment_status(payment.invoice)
     AuditLog.objects.create(user=reversed_by, action="payment_reversed", entity_type="Payment", entity_id=payment.pk, metadata={"amount": str(amount), "reason": reason})
     return reversal
+
+
+@transaction.atomic
+def create_payment(*, customer, invoice, amount, actor, notes=""):
+    payment = Payment.objects.create(customer=customer, invoice=invoice, amount=amount, notes=notes)
+    AuditLog.objects.create(user=actor, action="payment_received", entity_type="Payment", entity_id=payment.pk)
+    return payment

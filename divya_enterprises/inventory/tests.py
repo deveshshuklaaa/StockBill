@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError, connection, transaction
 from django.test import TestCase
 
 from billing.models import Invoice, Payment
@@ -141,3 +142,12 @@ class InventoryBalanceTests(TestCase):
         balance.quantity_on_hand = Decimal("999")
         with self.assertRaises(ValueError):
             balance.save()
+
+        with self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                StockLedger.objects.filter(pk=ledger.pk).update(quantity_change=Decimal("99"))
+        with self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL stockbill.allow_inventory_mutation = 'off'")
+                InventoryBalance.objects.filter(pk=balance.pk).update(quantity_on_hand=Decimal("99"))

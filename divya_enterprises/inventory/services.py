@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from rest_framework import serializers
 
 from .models import InventoryBalance, Product, PurchaseInvoice, PurchaseLineItem, StockLedger, Warehouse
@@ -58,6 +58,8 @@ def adjust_inventory(*, product, quantity_delta, movement_type, created_by=None,
             {"quantity": f"Insufficient stock for {product.name}. Available: {balance.quantity_on_hand}."}
         )
     balance.quantity_on_hand = next_quantity
+    with connection.cursor() as cursor:
+        cursor.execute("SET LOCAL stockbill.allow_inventory_mutation = 'on'")
     balance._allow_service_update = True
     balance.save(update_fields=["quantity_on_hand", "updated_at"])
 
@@ -76,8 +78,9 @@ def adjust_inventory(*, product, quantity_delta, movement_type, created_by=None,
 
     # Keep the legacy global cache synchronized until all consumers migrate to balances.
     total_stock = InventoryBalance.objects.filter(product=product).aggregate(total=models.Sum("quantity_on_hand"))["total"] or Decimal("0.000")
-    Product.objects.filter(pk=product.pk).update(current_stock=total_stock)
+    product._allow_stock_cache_update = True
     product.current_stock = total_stock
+    product.save(update_fields=["current_stock", "updated_at"])
     return balance
 
 
@@ -115,6 +118,8 @@ def receive_purchase(*, supplier, warehouse, invoice_number, invoice_date, creat
         new_value = quantity * unit_cost
         next_quantity = balance.quantity_on_hand + quantity
         balance.average_cost = (old_value + new_value) / next_quantity if next_quantity else Decimal("0.00")
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL stockbill.allow_inventory_mutation = 'on'")
         balance._allow_service_update = True
         balance.save(update_fields=["average_cost", "updated_at"])
         PurchaseLineItem.objects.create(

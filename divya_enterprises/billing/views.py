@@ -3,7 +3,6 @@ import hashlib
 import json
 
 from django.http import HttpResponse
-from django.template import Context, Template
 from django.utils.text import slugify
 from django.db import IntegrityError, transaction
 from rest_framework import generics, permissions, status
@@ -19,6 +18,7 @@ from accounts.permissions import IsAdminUser
 from .models import CreditNote, Invoice, InvoiceIdempotencyKey, InvoiceLineItem, Payment
 from .serializers import CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
 from .services import cancel_invoice, post_invoice, reverse_payment
+from .pdf import render_invoice_html
 
 
 class InvoiceListCreateView(generics.ListCreateAPIView):
@@ -95,43 +95,7 @@ class InvoicePdfView(generics.GenericAPIView):
             )
 
         invoice = self.get_object()
-        context = {
-            "invoice": invoice,
-            "line_items": invoice.line_items.all(),
-            "customer": invoice.customer,
-            "customer_name": invoice.customer_name_snapshot,
-            "total": invoice.total_amount,
-        }
-        template = Template(
-            """
-            <html>
-              <body>
-                <h1>Invoice {{ invoice.invoice_number }}</h1>
-                {% if invoice.state == 'CANCELLED' %}<h2>CANCELLED</h2><p>{{ invoice.cancellation_reason }}</p>{% endif %}
-                <p>Customer: {{ customer_name|default:'Walk-in' }}</p>
-                <p>Date: {{ invoice.invoice_date }}</p>
-                <table>
-                  <thead>
-                    <tr><th>Item</th><th>Qty</th><th>Rate</th><th>Tax</th><th>Total</th></tr>
-                  </thead>
-                  <tbody>
-                    {% for item in line_items %}
-                    <tr>
-                      <td>{{ item.product_name_snapshot|default:item.product.name }}</td>
-                      <td>{{ item.quantity }}</td>
-                      <td>{{ item.rate_charged }}</td>
-                      <td>{{ item.tax_rate }}%</td>
-                      <td>{{ item.line_total }}</td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-                <p><strong>Grand Total:</strong> {{ total }}</p>
-              </body>
-            </html>
-            """
-        )
-        html = template.render(Context(context))
+        html = render_invoice_html(invoice)
         pdf_bytes = HTML(string=html).write_pdf()
         filename = f"invoice-{slugify(invoice.invoice_number)}.pdf"
         response = HttpResponse(pdf_bytes, content_type="application/pdf")

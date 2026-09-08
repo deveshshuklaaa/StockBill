@@ -85,8 +85,7 @@ class ReportingEndpointTests(APITestCase):
         invoice = self.invoice(client, "REPORT-PRIOR-CREDIT", self.product, 1)
         yesterday = date.today() - timedelta(days=1)
         Invoice.objects.filter(pk=invoice.pk).update(invoice_date=yesterday)
-        payment = Payment.objects.create(customer=self.customer, invoice=invoice, amount=invoice.total_amount)
-        Payment.objects.filter(pk=payment.pk).update(payment_date=date.today())
+        payment = Payment.objects.create(customer=self.customer, invoice=invoice, amount=invoice.total_amount, payment_date=date.today())
 
         response = client.get(f"/api/reports/daily-sales/?date={self.today}")
 

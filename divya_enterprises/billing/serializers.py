@@ -162,3 +162,8 @@ class PaymentSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "customer_name", "invoice_number", "payment_date", "created_at"]
+
+    def create(self, validated_data):
+        from .services import create_payment
+
+        return create_payment(actor=self.context["request"].user, **validated_data)

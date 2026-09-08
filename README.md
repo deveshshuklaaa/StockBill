@@ -131,3 +131,5 @@ Set `DB_PASSWORD` and `SECRET_KEY` in the root `.env`, then run `docker compose 
 
 The current costing method is weighted average per product and warehouse. The current GST implementation stores slab and line-tax snapshots but is not a legal CGST/SGST/IGST compliance engine; see [INVARIANTS.md](INVARIANTS.md) for the explicit boundaries.
 
+The backend uses PostgreSQL immutability triggers for critical historical tables. Run tests from `divya_enterprises/` so standard `python manage.py test` discovery executes the full suite.
+
