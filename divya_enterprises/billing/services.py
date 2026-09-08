@@ -53,7 +53,7 @@ def _validate_invoice_lines(line_items):
                 {"line_items": f"Insufficient stock for {product.name}. Available: {available}."}
             )
 
-    return products
+    return products, balances
 
 
 @transaction.atomic
@@ -63,7 +63,7 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
     if customer is not None:
         customer = Customer.objects.select_for_update().get(pk=customer.pk)
 
-    products = _validate_invoice_lines(line_items)
+    products, balances = _validate_invoice_lines(line_items)
     calculated_lines = []
     total_amount = Decimal("0.00")
     for item in line_items:
@@ -74,8 +74,9 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
         subtotal = _money(quantity * rate)
         tax_amount = _money(subtotal * Decimal(tax_rate) / Decimal("100"))
         line_total = _money(subtotal + tax_amount)
-        cogs_amount = _money(quantity * product.cost_price)
-        calculated_lines.append((product, quantity, rate, tax_rate, tax_amount, line_total, cogs_amount))
+        cost_price = balances[product.pk].average_cost
+        cogs_amount = _money(quantity * cost_price)
+        calculated_lines.append((product, quantity, rate, tax_rate, tax_amount, line_total, cost_price, cogs_amount))
         total_amount += line_total
 
     if payment_type == "credit" and customer is not None and customer.credit_limit:
@@ -93,7 +94,7 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
         total_amount=_money(total_amount),
     )
 
-    for product, quantity, rate, tax_rate, tax_amount, line_total, cogs_amount in calculated_lines:
+    for product, quantity, rate, tax_rate, tax_amount, line_total, cost_price, cogs_amount in calculated_lines:
         InvoiceLineItem.objects.create(
             invoice=invoice,
             product=product,
@@ -102,7 +103,7 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
             tax_rate=tax_rate,
             tax_amount=tax_amount,
             line_total=line_total,
-            cost_price_snapshot=product.cost_price,
+            cost_price_snapshot=cost_price,
             cogs_amount=cogs_amount,
         )
         adjust_inventory(

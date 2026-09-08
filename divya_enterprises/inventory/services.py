@@ -22,7 +22,10 @@ def ensure_inventory_balance(*, product, warehouse=None, created_by=None):
     balance, created = InventoryBalance.objects.get_or_create(
         product=product,
         warehouse=warehouse,
-        defaults={"quantity_on_hand": product.current_stock or Decimal("0.000")},
+        defaults={
+            "quantity_on_hand": product.current_stock or Decimal("0.000"),
+            "average_cost": product.cost_price or Decimal("0.00"),
+        },
     )
     if created and product.current_stock:
         StockLedger.objects.create(
