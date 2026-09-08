@@ -23,6 +23,9 @@ export default function AppShell() {
         </div>
         <div className="workspace-label">Workspace</div>
         <nav className="primary-nav" aria-label="Primary navigation">
+          <NavLink to="/invoices/new" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">B</span> New invoice
+          </NavLink>
           <NavLink to="/products" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">P</span> Products
           </NavLink>

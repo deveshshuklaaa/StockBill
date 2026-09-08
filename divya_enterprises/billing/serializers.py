@@ -28,7 +28,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     line_items = InvoiceLineItemSerializer(many=True, required=True)
     payment_status = serializers.ReadOnlyField(source="computed_payment_status")
-    payment_type = serializers.ChoiceField(choices=["cash", "credit"], write_only=True, default="credit")
+    payment_type = serializers.ChoiceField(choices=["cash", "credit"], default="credit")
 
     class Meta:
         model = Invoice
@@ -47,7 +47,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "customer_name", "invoice_date", "payment_type", "created_at", "updated_at", "payment_status", "created_by", "total_amount"]
+        read_only_fields = ["id", "customer_name", "invoice_date", "created_at", "updated_at", "payment_status", "created_by", "total_amount"]
 
     def validate(self, attrs):
         payment_type = attrs.get("payment_type", "credit")
