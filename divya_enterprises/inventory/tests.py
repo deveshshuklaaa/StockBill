@@ -4,10 +4,10 @@ from django.contrib.auth import get_user_model
 from django.db import DatabaseError, connection, transaction
 from django.test import TestCase
 
-from billing.models import Invoice, Payment
+from billing.models import Invoice, Payment, BusinessProfile
 from billing.services import create_invoice
 from customers.models import Customer
-from .models import InventoryBalance, Product, StockLedger, Warehouse
+from .models import InventoryBalance, Product, StockLedger, Warehouse, TaxRate
 from .services import adjust_inventory, get_default_warehouse, receive_purchase
 
 
@@ -19,6 +19,14 @@ class InventoryBalanceTests(TestCase):
             role="admin",
         )
         self.customer = Customer.objects.create(name="Inventory Customer")
+        self.tax_18 = TaxRate.objects.create(name="18% GST", rate=Decimal("18.00"))
+        BusinessProfile.objects.create(
+            business_name="Test Business",
+            gstin="29TEST8888",
+            registered_address="Test Addr",
+            state="Karnataka",
+            state_code="29",
+        )
         self.product = Product.objects.create(
             name="Ledger Product",
             unit_type=Product.UNIT_PIECE,
@@ -26,7 +34,7 @@ class InventoryBalanceTests(TestCase):
             unit_conversion_factor=1,
             default_price=100,
             cost_price=60,
-            tax_slab=Product.TAX_18,
+            tax=self.tax_18,
             current_stock=0,
         )
         self.warehouse = get_default_warehouse()

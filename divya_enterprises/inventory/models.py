@@ -21,15 +21,17 @@ class Warehouse(models.Model):
         return self.name
 
 
+class TaxRate(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+    rate = models.DecimalField(max_digits=5, decimal_places=2)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.rate}%)"
+
+
 class Product(models.Model):
-    TAX_5 = 5
-    TAX_18 = 18
-    TAX_40 = 40
-    TAX_CHOICES = [
-        (TAX_5, "5%"),
-        (TAX_18, "18%"),
-        (TAX_40, "40%"),
-    ]
+
 
     UNIT_CARTON = "carton"
     UNIT_BOX = "box"
@@ -48,7 +50,9 @@ class Product(models.Model):
     unit_conversion_factor = models.DecimalField(max_digits=12, decimal_places=3, default=1, validators=[MinValueValidator(0.001)])
     default_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     cost_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    tax_slab = models.PositiveIntegerField(choices=TAX_CHOICES, default=TAX_18)
+    tax = models.ForeignKey(TaxRate, on_delete=models.SET_NULL, null=True, blank=True, related_name="products")
+    hsn_sac = models.CharField(max_length=50, blank=True)
+    is_tax_applicable = models.BooleanField(default=True)
     current_stock = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     low_stock_threshold = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     is_active = models.BooleanField(default=True)

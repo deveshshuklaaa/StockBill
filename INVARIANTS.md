@@ -16,4 +16,5 @@
 - Invoice creation accepts an `Idempotency-Key`; retries return the original invoice.
 - Customer outstanding balance is opening balance plus invoices minus payments minus credit notes.
 - GST currently snapshots the configured product slab and line tax values. CGST/SGST/IGST split, HSN/SAC, place of supply, and tax-inclusive pricing are not yet implemented and must not be represented as legal GST compliance.
+- Tax migration note: legacy product slabs are mapped to seeded TaxRate rows; legacy invoice tax is split CGST/SGST as an explicit approximation because historical place-of-supply data was unavailable.
 - Historical migrated products are seeded into `Main Warehouse` with an `OPENING_STOCK` ledger event.

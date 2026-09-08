@@ -4,11 +4,11 @@ from django.contrib.auth import get_user_model
 from django.db import DatabaseError, transaction
 from rest_framework.test import APIClient, APITestCase
 
-from billing.models import AuditLog, CreditNote, Invoice, InvoiceLineItem, Payment, PaymentReversal
+from billing.models import AuditLog, CreditNote, Invoice, InvoiceLineItem, Payment, PaymentReversal, BusinessProfile
 from billing.services import cancel_invoice, reverse_payment
 from billing.pdf import render_invoice_html
 from customers.models import Customer
-from inventory.models import Product
+from inventory.models import Product, TaxRate
 
 
 class TransactionalBillingTests(APITestCase):
@@ -26,6 +26,16 @@ class TransactionalBillingTests(APITestCase):
             contact_info="9999999999",
             customer_type=Customer.CUSTOMER_TYPE_B2C,
             is_regular=True,
+            state_code="29",
+        )
+        self.tax_18 = TaxRate.objects.create(name="18%", rate=Decimal("18.00"))
+        self.tax_40 = TaxRate.objects.create(name="40%", rate=Decimal("40.00"))
+        BusinessProfile.objects.create(
+            business_name="Test Business",
+            gstin="29TEST8888",
+            registered_address="Test Addr, 560001",
+            state="Karnataka",
+            state_code="29",
         )
 
     def create_product(self, name, stock=10):
@@ -35,7 +45,7 @@ class TransactionalBillingTests(APITestCase):
             unit_conversion_factor=1,
             default_price=100,
             cost_price=60,
-            tax_slab=Product.TAX_18,
+            tax=self.tax_18,
             current_stock=stock,
         )
 
@@ -49,9 +59,11 @@ class TransactionalBillingTests(APITestCase):
                     "product": product.pk,
                     "quantity": str(quantity),
                     "rate_charged": "100.00",
-                    "tax_rate": product.tax_slab,
+                    "tax_rate": product.tax.rate,
                 }
             ],
+            "place_of_supply": "29",
+            "tax_mode": "exclusive",
         }
 
     def test_cash_sale_deducts_stock_and_creates_paid_ledger_entry(self):
@@ -108,7 +120,7 @@ class TransactionalBillingTests(APITestCase):
                 "product": second_product.pk,
                 "quantity": "2",
                 "rate_charged": "100.00",
-                "tax_rate": second_product.tax_slab,
+                "tax_rate": second_product.tax.rate,
             }
         )
 
@@ -277,8 +289,8 @@ class TransactionalBillingTests(APITestCase):
         invoice = Invoice.objects.get(invoice_number="SNAPSHOT-1001")
         product.name = "Changed Product"
         product.default_price = Decimal("999.00")
-        product.tax_slab = 40
-        product.save(update_fields=["name", "default_price", "tax_slab", "updated_at"])
+        product.tax = self.tax_40
+        product.save(update_fields=["name", "default_price", "tax", "updated_at"])
         customer.name = "Changed Customer"
         customer.gstin = "CHANGED"
         customer.save(update_fields=["name", "gstin", "updated_at"])
@@ -387,8 +399,8 @@ class TransactionalBillingTests(APITestCase):
         invoice = Invoice.objects.get(pk=response.data["id"])
         product.name = "Current Product"
         product.default_price = Decimal("999.00")
-        product.tax_slab = Product.TAX_40
-        product.save(update_fields=["name", "default_price", "tax_slab", "updated_at"])
+        product.tax = self.tax_40
+        product.save(update_fields=["name", "default_price", "tax", "updated_at"])
         self.customer.name = "Current Customer"
         self.customer.gstin = "CURRENT-GSTIN"
         self.customer.billing_address = "Current Address"

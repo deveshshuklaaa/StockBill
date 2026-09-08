@@ -10,7 +10,8 @@ from customers.models import Customer
 from inventory.models import InventoryBalance, Product, StockLedger
 from inventory.services import adjust_inventory, ensure_inventory_balance, get_default_warehouse
 
-from .models import AuditLog, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment, PaymentReversal, refresh_invoice_payment_status
+from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment, PaymentReversal, refresh_invoice_payment_status
+from .tax_engine import calculate_gst
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -41,9 +42,10 @@ def _validate_invoice_lines(line_items):
             raise serializers.ValidationError({"line_items": "Quantity must be greater than zero."})
         if rate < 0:
             raise serializers.ValidationError({"line_items": "Rate charged cannot be negative."})
-        if tax_rate is not None and int(tax_rate) != product.tax_slab:
+        product_tax_rate = product.tax.rate if product.tax else Decimal("0")
+        if tax_rate is not None and Decimal(str(tax_rate)) != product_tax_rate:
             raise serializers.ValidationError(
-                {"line_items": f"Tax rate for {product.name} must match its product tax slab of {product.tax_slab}%."}
+                {"line_items": f"Tax rate for {product.name} must match its configured GST rate of {product_tax_rate}%."}
             )
         requested_stock[product.pk] += quantity
 
@@ -59,32 +61,46 @@ def _validate_invoice_lines(line_items):
 
 
 @transaction.atomic
-def create_invoice(*, customer, invoice_number, notes="", created_by, payment_type, line_items, state=Invoice.STATE_POSTED):
+def create_invoice(*, customer, invoice_number, notes="", created_by, payment_type, line_items, state=Invoice.STATE_POSTED, place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE):
     if payment_type == "credit" and customer is None:
         raise serializers.ValidationError({"customer": "A registered customer is required for credit invoices."})
     if customer is not None:
         customer = Customer.objects.select_for_update().get(pk=customer.pk)
 
+    seller = BusinessProfile.objects.first()
+
     if state == Invoice.STATE_DRAFT:
         product_ids = {item["product"].pk for item in line_items}
-        products = Product.objects.in_bulk(product_ids)
+        products = Product.objects.select_related('tax').in_bulk(product_ids)
         balances = {product_id: type("Balance", (), {"average_cost": products[product_id].cost_price})() for product_id in product_ids}
     else:
         products, balances = _validate_invoice_lines(line_items)
-    calculated_lines = []
-    total_amount = Decimal("0.00")
+
+    calculated_lines_input = []
     for item in line_items:
         product = products[item["product"].pk]
-        quantity = Decimal(item["quantity"])
-        rate = Decimal(item["rate_charged"])
-        tax_rate = int(item.get("tax_rate") if item.get("tax_rate") is not None else product.tax_slab)
-        subtotal = _money(quantity * rate)
-        tax_amount = _money(subtotal * Decimal(tax_rate) / Decimal("100"))
-        line_total = _money(subtotal + tax_amount)
-        cost_price = balances[product.pk].average_cost
-        cogs_amount = _money(quantity * cost_price)
-        calculated_lines.append((product, quantity, rate, tax_rate, tax_amount, line_total, cost_price, cogs_amount))
-        total_amount += line_total
+        quantity = str(item.get("quantity", 1))
+        rate_charged = str(item.get("rate_charged", 0))
+        discount_amount = str(item.get("discount_amount", 0))
+        tax_rate = str(item.get("tax_rate", product.tax.rate if product.tax else 0))
+
+        calculated_lines_input.append({
+            "product": product,
+            "quantity": quantity,
+            "rate_charged": rate_charged,
+            "discount_amount": discount_amount,
+            "tax_rate": tax_rate,
+        })
+
+    calc_result = calculate_gst(
+        seller_profile=seller,
+        customer=customer,
+        lines=calculated_lines_input,
+        place_of_supply_state_code=place_of_supply,
+        tax_mode=tax_mode
+    )
+
+    total_amount = calc_result["totals"]["grand_total"]
 
     if payment_type == "credit" and customer is not None and customer.credit_limit:
         if customer.outstanding_balance + _money(total_amount) > customer.credit_limit:
@@ -98,30 +114,52 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
         payment_type=payment_type,
         notes=notes,
         created_by=created_by,
-        total_amount=_money(total_amount),
+        total_amount=total_amount,
         state=state,
         customer_name_snapshot=customer.name if customer else "Walk-in customer",
         customer_gstin_snapshot=customer.gstin or "" if customer else "",
+        customer_registration_type_snapshot=customer.gst_registration_type if customer else "",
+        customer_state_code_snapshot=customer.state_code or "" if customer else "",
         billing_address_snapshot=customer.billing_address or "" if customer else "",
         shipping_address_snapshot=customer.shipping_address or "" if customer else "",
         state_snapshot=customer.state or "" if customer else "",
         pincode_snapshot=customer.pincode or "" if customer else "",
+        seller_business_name_snapshot=seller.business_name if seller else "",
+        seller_gstin_snapshot=seller.gstin if seller else "",
+        seller_address_snapshot=seller.registered_address if seller else "",
+        seller_state_snapshot=seller.state if seller else "",
+        seller_state_code_snapshot=seller.state_code if seller else "",
+        place_of_supply=calc_result["place_of_supply"],
+        tax_mode=calc_result["tax_mode"],
     )
 
-    for product, quantity, rate, tax_rate, tax_amount, line_total, cost_price, cogs_amount in calculated_lines:
+    for idx, line_result in enumerate(calc_result["lines"]):
+        product = calculated_lines_input[idx]["product"]
+        quantity = Decimal(line_result["quantity"])
+        cost_price = balances[product.pk].average_cost
+        cogs_amount = _money(quantity * cost_price)
+
         InvoiceLineItem.objects.create(
             invoice=invoice,
             product=product,
             quantity=quantity,
-            rate_charged=rate,
-            tax_rate=tax_rate,
-            tax_amount=tax_amount,
-            line_total=line_total,
+            rate_charged=line_result["rate_charged"],
+            discount_amount=line_result["discount_amount"],
+            tax_rate=Decimal(str(calculated_lines_input[idx]["tax_rate"])),
+            tax_amount=line_result["tax_amount"],
+            cgst_rate=line_result["cgst_rate"],
+            cgst_amount=line_result["cgst_amount"],
+            sgst_rate=line_result["sgst_rate"],
+            sgst_amount=line_result["sgst_amount"],
+            igst_rate=line_result["igst_rate"],
+            igst_amount=line_result["igst_amount"],
+            line_total=line_result["line_total"],
             cost_price_snapshot=cost_price,
             cogs_amount=cogs_amount,
             product_name_snapshot=product.name,
             base_unit_snapshot=product.base_unit,
-            taxable_value_snapshot=subtotal,
+            hsn_sac_snapshot=product.hsn_sac,
+            taxable_value_snapshot=line_result["taxable_value"],
         )
         if state == Invoice.STATE_DRAFT:
             continue
@@ -155,7 +193,7 @@ def post_invoice(*, invoice_id, posted_by):
         raise serializers.ValidationError({"state": "Only draft invoices can be posted."})
     line_items = list(invoice.line_items.select_related("product"))
     products, balances = _validate_invoice_lines(
-        [{"product": line.product, "quantity": line.quantity, "rate_charged": line.rate_charged, "tax_rate": line.tax_rate} for line in line_items]
+        [{"product": line.product, "quantity": line.quantity, "rate_charged": line.rate_charged, "tax_rate": line.tax_rate, "discount_amount": line.discount_amount} for line in line_items]
     )
     for line in line_items:
         product = products[line.product_id]
@@ -200,10 +238,23 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
             raise serializers.ValidationError({"line_items": "A reversal cannot exceed the quantity originally billed."})
         product = products[original_line.product_id]
         tax_rate = original_line.tax_rate
-        subtotal = _money(quantity * original_line.rate_charged)
-        tax_amount = _money(subtotal * Decimal(tax_rate) / Decimal("100"))
+        subtotal = _money((quantity * original_line.rate_charged) - original_line.discount_amount)
+        if quantity < original_line.quantity:
+            # Proportionally adjust discount if partial return
+            proportion = quantity / original_line.quantity
+            discount_amount = _money(original_line.discount_amount * proportion)
+            subtotal = _money((quantity * original_line.rate_charged) - discount_amount)
+        else:
+            discount_amount = original_line.discount_amount
+
+        tax_amount = _money(original_line.tax_amount * (quantity / original_line.quantity))
         line_total = _money(subtotal + tax_amount)
-        calculated_lines.append((original_line, product, quantity, tax_amount, line_total))
+
+        cgst_amount = _money(original_line.cgst_amount * (quantity / original_line.quantity))
+        sgst_amount = _money(original_line.sgst_amount * (quantity / original_line.quantity))
+        igst_amount = _money(original_line.igst_amount * (quantity / original_line.quantity))
+
+        calculated_lines.append((original_line, product, quantity, discount_amount, tax_amount, cgst_amount, sgst_amount, igst_amount, line_total))
         total_amount += line_total
 
     credit_note = CreditNote.objects.create(
@@ -212,15 +263,22 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
         total_amount=_money(total_amount),
         created_by=created_by,
     )
-    for original_line, product, quantity, tax_amount, line_total in calculated_lines:
+    for original_line, product, quantity, discount_amount, tax_amount, cgst_amount, sgst_amount, igst_amount, line_total in calculated_lines:
         CreditNoteLineItem.objects.create(
             credit_note=credit_note,
             invoice_line_item=original_line,
             product=product,
             quantity=quantity,
             rate_charged=original_line.rate_charged,
+            discount_amount=discount_amount,
             tax_rate=original_line.tax_rate,
             tax_amount=tax_amount,
+            cgst_rate=original_line.cgst_rate,
+            cgst_amount=cgst_amount,
+            sgst_rate=original_line.sgst_rate,
+            sgst_amount=sgst_amount,
+            igst_rate=original_line.igst_rate,
+            igst_amount=igst_amount,
             line_total=line_total,
         )
         adjust_inventory(

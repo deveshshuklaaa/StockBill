@@ -19,6 +19,7 @@ class WarehouseSerializer(serializers.ModelSerializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+    tax = serializers.DecimalField(source="tax.rate", read_only=True, max_digits=5, decimal_places=2, allow_null=True)
 
     class Meta:
         model = Product
@@ -32,7 +33,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "unit_conversion_factor",
             "default_price",
             "cost_price",
-            "tax_slab",
+            "tax",
+            "hsn_sac",
+            "is_tax_applicable",
             "current_stock",
             "low_stock_threshold",
             "is_active",
@@ -45,6 +48,8 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class ProductPublicSerializer(serializers.ModelSerializer):
+    tax = serializers.DecimalField(source="tax.rate", read_only=True, max_digits=5, decimal_places=2, allow_null=True)
+
     class Meta:
         model = Product
         fields = [
@@ -56,7 +61,9 @@ class ProductPublicSerializer(serializers.ModelSerializer):
             "unit_type",
             "unit_conversion_factor",
             "default_price",
-            "tax_slab",
+            "tax",
+            "hsn_sac",
+            "is_tax_applicable",
             "current_stock",
             "low_stock_threshold",
             "is_active",

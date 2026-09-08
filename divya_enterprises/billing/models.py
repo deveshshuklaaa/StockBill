@@ -11,6 +11,19 @@ from customers.models import Customer
 from inventory.models import Product
 
 
+class BusinessProfile(models.Model):
+    business_name = models.CharField(max_length=255)
+    trade_name = models.CharField(max_length=255, blank=True)
+    gstin = models.CharField(max_length=25)
+    registered_address = models.TextField()
+    state = models.CharField(max_length=100)
+    state_code = models.CharField(max_length=10)
+    contact_details = models.CharField(max_length=255, blank=True)
+
+    def __str__(self):
+        return self.business_name
+
+
 class Invoice(models.Model):
     STATE_DRAFT = "DRAFT"
     STATE_POSTED = "POSTED"
@@ -21,6 +34,12 @@ class Invoice(models.Model):
     PAYMENT_TYPE_CHOICES = [
         (PAYMENT_TYPE_CASH, "Cash"),
         (PAYMENT_TYPE_CREDIT, "Credit"),
+    ]
+    TAX_MODE_EXCLUSIVE = "exclusive"
+    TAX_MODE_INCLUSIVE = "inclusive"
+    TAX_MODE_CHOICES = [
+        (TAX_MODE_EXCLUSIVE, "Exclusive"),
+        (TAX_MODE_INCLUSIVE, "Inclusive"),
     ]
     PAYMENT_STATUS_PAID = "paid"
     PAYMENT_STATUS_CREDIT = "credit"
@@ -39,12 +58,21 @@ class Invoice(models.Model):
     cancellation_reason = models.TextField(blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="cancelled_invoices")
+    seller_business_name_snapshot = models.CharField(max_length=255, blank=True)
+    seller_gstin_snapshot = models.CharField(max_length=25, blank=True)
+    seller_address_snapshot = models.TextField(blank=True)
+    seller_state_snapshot = models.CharField(max_length=100, blank=True)
+    seller_state_code_snapshot = models.CharField(max_length=10, blank=True)
     customer_name_snapshot = models.CharField(max_length=255, blank=True)
     customer_gstin_snapshot = models.CharField(max_length=25, blank=True)
+    customer_state_code_snapshot = models.CharField(max_length=10, blank=True)
+    customer_registration_type_snapshot = models.CharField(max_length=20, blank=True)
     billing_address_snapshot = models.TextField(blank=True)
     shipping_address_snapshot = models.TextField(blank=True)
     state_snapshot = models.CharField(max_length=100, blank=True)
     pincode_snapshot = models.CharField(max_length=20, blank=True)
+    place_of_supply = models.CharField(max_length=10, blank=True)
+    tax_mode = models.CharField(max_length=10, choices=TAX_MODE_CHOICES, default=TAX_MODE_EXCLUSIVE)
     payment_status = models.CharField(max_length=25, choices=PAYMENT_STATUS_CHOICES, default=PAYMENT_STATUS_CREDIT)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     notes = models.TextField(blank=True)
@@ -75,6 +103,10 @@ class Invoice(models.Model):
                     "payment_type", "customer_id", "total_amount", "invoice_number",
                     "customer_name_snapshot", "customer_gstin_snapshot", "billing_address_snapshot",
                     "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
+                    "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
+                    "seller_state_snapshot", "seller_state_code_snapshot",
+                    "customer_state_code_snapshot", "customer_registration_type_snapshot",
+                    "place_of_supply", "tax_mode",
                 ]
                 if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
                     raise ValueError("Posted and cancelled invoice financial fields are immutable.")
@@ -104,8 +136,15 @@ class InvoiceLineItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="invoice_line_items")
     quantity = models.DecimalField(max_digits=12, decimal_places=3, default=1)
     rate_charged = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    tax_rate = models.PositiveIntegerField(default=18)
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    cgst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    cgst_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    sgst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    sgst_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    igst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    igst_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     line_total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     cost_price_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     cogs_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
@@ -123,8 +162,9 @@ class InvoiceLineItem(models.Model):
             stored = type(self).objects.get(pk=self.pk)
             if stored.invoice.state != Invoice.STATE_DRAFT:
                 immutable_fields = [
-                    "invoice_id", "product_id", "quantity", "rate_charged", "tax_rate",
-                    "tax_amount", "line_total", "cost_price_snapshot", "cogs_amount",
+                    "invoice_id", "product_id", "quantity", "rate_charged", "discount_amount", "tax_rate",
+                    "tax_amount", "cgst_rate", "cgst_amount", "sgst_rate", "sgst_amount", "igst_rate", "igst_amount",
+                    "line_total", "cost_price_snapshot", "cogs_amount",
                     "product_name_snapshot", "base_unit_snapshot", "hsn_sac_snapshot", "taxable_value_snapshot",
                 ]
                 if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
@@ -163,8 +203,15 @@ class CreditNoteLineItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="credit_note_line_items")
     quantity = models.DecimalField(max_digits=12, decimal_places=3, default=1)
     rate_charged = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    tax_rate = models.PositiveIntegerField(default=18)
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    cgst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    cgst_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    sgst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    sgst_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    igst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    igst_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     line_total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True)
 

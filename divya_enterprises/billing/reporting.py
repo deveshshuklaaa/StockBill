@@ -93,7 +93,10 @@ class DailySalesReportView(APIView):
                 "sold_on_credit_today": totals["sold_credit"],
                 "cash_collected_today": cash_collected,
                 "total_revenue": totals["revenue"],
-                "tax_collected_by_slab": {str(row["tax_rate"]): row["total"] for row in tax_totals},
+                "tax_collected_by_slab": {
+                    format(row["tax_rate"].normalize(), "f").rstrip("0").rstrip(".") or "0": row["total"]
+                    for row in tax_totals
+                },
             }
         )
 

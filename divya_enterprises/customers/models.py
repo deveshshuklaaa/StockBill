@@ -23,6 +23,7 @@ class Customer(models.Model):
     billing_address = models.TextField(blank=True)
     shipping_address = models.TextField(blank=True)
     state = models.CharField(max_length=100, blank=True)
+    state_code = models.CharField(max_length=10, blank=True)
     pincode = models.CharField(max_length=20, blank=True)
     customer_type = models.CharField(max_length=10, choices=CUSTOMER_TYPE_CHOICES, default=CUSTOMER_TYPE_B2C)
     gst_registration_type = models.CharField(max_length=20, choices=GST_REGISTRATION_CHOICES, default=GST_REGISTRATION_UNREGISTERED)

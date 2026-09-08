@@ -4,9 +4,9 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
-from billing.models import Invoice, Payment
+from billing.models import Invoice, Payment, BusinessProfile
 from customers.models import Customer
-from inventory.models import Product
+from inventory.models import Product, TaxRate
 
 
 class ReportingEndpointTests(APITestCase):
@@ -22,7 +22,15 @@ class ReportingEndpointTests(APITestCase):
             password="StrongPass123!",
             role="staff",
         )
-        self.customer = Customer.objects.create(name="Report Customer", is_regular=True)
+        self.tax_18 = TaxRate.objects.create(name="18%", rate=Decimal("18.00"))
+        BusinessProfile.objects.create(
+            business_name="Test Business",
+            gstin="29TEST8888",
+            registered_address="Test Addr, 560001",
+            state="Karnataka",
+            state_code="29",
+        )
+        self.customer = Customer.objects.create(name="Report Customer", is_regular=True, state_code="29")
         self.product = self.create_product("Report Product", stock=20, cost=60, price=100)
         self.other_product = self.create_product("Other Product", stock=20, cost=40, price=80)
         self.today = date.today().isoformat()
@@ -35,7 +43,7 @@ class ReportingEndpointTests(APITestCase):
             current_stock=stock,
             cost_price=cost,
             default_price=price,
-            tax_slab=Product.TAX_18,
+            tax=self.tax_18,
         )
 
     def client_as(self, user):
@@ -55,9 +63,11 @@ class ReportingEndpointTests(APITestCase):
                         "product": product.pk,
                         "quantity": str(quantity),
                         "rate_charged": str(product.default_price),
-                        "tax_rate": product.tax_slab,
+                        "tax_rate": product.tax.rate,
                     }
                 ],
+                "place_of_supply": "29",
+                "tax_mode": "exclusive",
             },
             format="json",
         )
@@ -75,10 +85,10 @@ class ReportingEndpointTests(APITestCase):
         self.assertEqual(response.data["invoice_count"], 2)
         self.assertEqual(response.data["invoice_count_by_payment_type"], {"cash": 1, "credit": 1})
         self.assertEqual(response.data["sold_cash_today"], Decimal("118.00"))
-        self.assertEqual(response.data["sold_on_credit_today"], Decimal("188.80"))
+        self.assertEqual(response.data["sold_on_credit_today"], Decimal("188.00"))
         self.assertEqual(response.data["cash_collected_today"], Decimal("118.00"))
-        self.assertEqual(response.data["total_revenue"], Decimal("306.80"))
-        self.assertEqual(response.data["tax_collected_by_slab"]["18"], Decimal("46.80"))
+        self.assertEqual(response.data["total_revenue"], Decimal("306.00"))
+        self.assertEqual(response.data["tax_collected_by_slab"]["18"], Decimal("46.00"))
 
     def test_prior_day_credit_invoice_payment_counts_as_today_cash_collection_only(self):
         client = self.client_as(self.admin)
