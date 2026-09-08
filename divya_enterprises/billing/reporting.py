@@ -158,7 +158,10 @@ class ProfitLossReportView(APIView):
         ).annotate(
             effective_quantity=ExpressionWrapper(F("quantity") - F("reversed_quantity"), output_field=QUANTITY_FIELD),
             effective_revenue=ExpressionWrapper(F("line_total") - F("reversed_revenue"), output_field=MONEY_FIELD),
-            current_cogs=ExpressionWrapper(F("effective_quantity") * F("product__cost_price"), output_field=MONEY_FIELD),
+            current_cogs=ExpressionWrapper(
+                F("cogs_amount") - F("reversed_quantity") * F("cost_price_snapshot"),
+                output_field=MONEY_FIELD,
+            ),
         )
         totals = line_items.aggregate(
             revenue=Coalesce(Sum("effective_revenue"), Value(Decimal("0.00")), output_field=MONEY_FIELD),

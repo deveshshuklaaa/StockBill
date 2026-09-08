@@ -62,7 +62,7 @@ export default function NewInvoicePage() {
   }, [customer])
 
   const filteredCustomers = customers.filter((item) => item.name.toLowerCase().includes(customerSearch.toLowerCase())).slice(0, 8)
-  const filteredProducts = products.filter((item) => item.name.toLowerCase().includes(productSearch.toLowerCase())).slice(0, 8)
+  const filteredProducts = products.filter((item) => item.is_active !== false && item.name.toLowerCase().includes(productSearch.toLowerCase())).slice(0, 8)
   const totals = useMemo(() => lines.reduce((result, line) => {
     const calculated = calculateLine(line)
     result.subtotal += calculated.subtotal

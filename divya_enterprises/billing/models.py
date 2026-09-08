@@ -11,6 +11,10 @@ from inventory.models import Product
 
 
 class Invoice(models.Model):
+    STATE_DRAFT = "DRAFT"
+    STATE_POSTED = "POSTED"
+    STATE_CANCELLED = "CANCELLED"
+    STATE_CHOICES = [(value, value.title()) for value in [STATE_DRAFT, STATE_POSTED, STATE_CANCELLED]]
     PAYMENT_TYPE_CASH = "cash"
     PAYMENT_TYPE_CREDIT = "credit"
     PAYMENT_TYPE_CHOICES = [
@@ -30,6 +34,8 @@ class Invoice(models.Model):
     invoice_number = models.CharField(max_length=50, unique=True)
     invoice_date = models.DateField(auto_now_add=True)
     payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPE_CHOICES, default=PAYMENT_TYPE_CREDIT)
+    state = models.CharField(max_length=12, choices=STATE_CHOICES, default=STATE_POSTED)
+    cancellation_reason = models.TextField(blank=True)
     payment_status = models.CharField(max_length=25, choices=PAYMENT_STATUS_CHOICES, default=PAYMENT_STATUS_CREDIT)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     notes = models.TextField(blank=True)
@@ -76,6 +82,8 @@ class InvoiceLineItem(models.Model):
     tax_rate = models.PositiveIntegerField(default=18)
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     line_total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    cost_price_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    cogs_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -119,6 +127,12 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.customer.name} - {self.amount}"
+
+
+class InvoiceIdempotencyKey(models.Model):
+    key = models.CharField(max_length=255, unique=True)
+    invoice = models.OneToOneField(Invoice, on_delete=models.PROTECT, related_name="idempotency_record")
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 def refresh_invoice_payment_status(invoice):

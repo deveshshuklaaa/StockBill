@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.http import HttpResponse
 from django.template import Context, Template
 from django.utils.text import slugify
+from django.db import IntegrityError, transaction
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 
@@ -11,7 +12,7 @@ try:
 except OSError:
     HTML = None
 
-from .models import CreditNote, Invoice, InvoiceLineItem, Payment
+from .models import CreditNote, Invoice, InvoiceIdempotencyKey, InvoiceLineItem, Payment
 from .serializers import CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
 
 
@@ -19,6 +20,25 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
     queryset = Invoice.objects.select_related("customer", "created_by").prefetch_related("line_items").all().order_by("-created_at")
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        idempotency_key = request.headers.get("Idempotency-Key")
+        if not idempotency_key:
+            return super().create(request, *args, **kwargs)
+        existing = InvoiceIdempotencyKey.objects.select_related("invoice").filter(key=idempotency_key).first()
+        if existing:
+            return Response(self.get_serializer(existing.invoice).data, status=status.HTTP_200_OK)
+        try:
+            with transaction.atomic():
+                serializer = self.get_serializer(data=request.data)
+                serializer.is_valid(raise_exception=True)
+                invoice = serializer.save()
+                InvoiceIdempotencyKey.objects.create(key=idempotency_key, invoice=invoice)
+        except IntegrityError:
+            existing = InvoiceIdempotencyKey.objects.select_related("invoice").get(key=idempotency_key)
+            return Response(self.get_serializer(existing.invoice).data, status=status.HTTP_200_OK)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
 class InvoiceDetailView(generics.RetrieveAPIView):
@@ -33,7 +53,7 @@ class PaymentListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
 
-class PaymentDetailView(generics.RetrieveUpdateDestroyAPIView):
+class PaymentDetailView(generics.RetrieveAPIView):
     queryset = Payment.objects.select_related("customer", "invoice").all()
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]

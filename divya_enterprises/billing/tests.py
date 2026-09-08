@@ -162,3 +162,54 @@ class TransactionalBillingTests(APITestCase):
         self.assertEqual(invoice.payment_status, Invoice.PAYMENT_STATUS_CREDIT)
         self.assertEqual(unrelated_invoice.payment_status, Invoice.PAYMENT_STATUS_CREDIT)
         self.assertEqual(self.customer.outstanding_balance, Decimal("354.00"))
+
+    def test_sale_captures_historical_cost_when_product_cost_changes(self):
+        product = self.create_product("Historical Cost Product", stock=5)
+        response = self.client.post(
+            "/api/invoices/",
+            self.invoice_payload("HISTORICAL-COST-1001", product, quantity=2, customer=self.customer.pk),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        line = Invoice.objects.get(invoice_number="HISTORICAL-COST-1001").line_items.get()
+        product.cost_price = Decimal("95.00")
+        product.save(update_fields=["cost_price", "updated_at"])
+        line.refresh_from_db()
+        self.assertEqual(line.cost_price_snapshot, Decimal("60.00"))
+        self.assertEqual(line.cogs_amount, Decimal("120.00"))
+
+    def test_payment_detail_is_read_only(self):
+        product = self.create_product("Payment Product", stock=5)
+        invoice = Invoice.objects.create(
+            invoice_number="PAYMENT-READONLY-1001",
+            customer=self.customer,
+            payment_type=Invoice.PAYMENT_TYPE_CREDIT,
+            total_amount=Decimal("100.00"),
+            created_by=self.user,
+        )
+        payment = Payment.objects.create(customer=self.customer, invoice=invoice, amount=Decimal("10.00"))
+        response = self.client.patch(f"/api/payments/{payment.pk}/", {"amount": "99.00"}, format="json")
+        self.assertEqual(response.status_code, 405)
+
+    def test_invoice_idempotency_key_returns_original_invoice(self):
+        product = self.create_product("Idempotent Product", stock=5)
+        payload = self.invoice_payload("IDEMPOTENT-1001", product, quantity=1, payment_type="cash")
+        first = self.client.post("/api/invoices/", payload, format="json", HTTP_IDEMPOTENCY_KEY="invoice-test-key")
+        second = self.client.post("/api/invoices/", payload, format="json", HTTP_IDEMPOTENCY_KEY="invoice-test-key")
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertEqual(first.data["id"], second.data["id"])
+        self.assertEqual(Invoice.objects.filter(invoice_number="IDEMPOTENT-1001").count(), 1)
+
+    def test_credit_limit_is_enforced_before_invoice_creation(self):
+        product = self.create_product("Credit Limit Product", stock=5)
+        self.customer.credit_limit = Decimal("100.00")
+        self.customer.save(update_fields=["credit_limit", "updated_at"])
+        response = self.client.post(
+            "/api/invoices/",
+            self.invoice_payload("CREDIT-LIMIT-1001", product, customer=self.customer.pk),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("customer", response.data)
+        self.assertFalse(Invoice.objects.filter(invoice_number="CREDIT-LIMIT-1001").exists())

@@ -9,6 +9,8 @@ from .views import (
     SupplierListCreateView,
     WarehouseDetailView,
     WarehouseListCreateView,
+    InventoryBalanceListView,
+    PurchaseInvoiceListCreateView,
 )
 
 urlpatterns = [
@@ -20,4 +22,6 @@ urlpatterns = [
     path("products/<int:pk>/", ProductDetailView.as_view(), name="product-detail"),
     path("stock-ledger/", StockLedgerListCreateView.as_view(), name="stock-ledger-list-create"),
     path("stock-ledger/<int:pk>/", StockLedgerDetailView.as_view(), name="stock-ledger-detail"),
+    path("inventory-balances/", InventoryBalanceListView.as_view(), name="inventory-balance-list"),
+    path("purchase-invoices/", PurchaseInvoiceListCreateView.as_view(), name="purchase-invoice-list-create"),
 ]

@@ -1,6 +1,6 @@
 from rest_framework import generics, permissions
 
-from .models import Product, StockLedger, Supplier, Warehouse
+from .models import InventoryBalance, Product, PurchaseInvoice, StockLedger, Supplier, Warehouse
 from .permissions import CanManageInventory, IsAdminOrReadOnly
 from .serializers import (
     ProductPublicSerializer,
@@ -8,6 +8,8 @@ from .serializers import (
     StockLedgerSerializer,
     SupplierSerializer,
     WarehouseSerializer,
+    InventoryBalanceSerializer,
+    PurchaseInvoiceSerializer,
 )
 
 
@@ -54,6 +56,10 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
             return ProductPublicSerializer
         return ProductSerializer
 
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "updated_at"])
+
 
 class StockLedgerListCreateView(generics.ListCreateAPIView):
     queryset = StockLedger.objects.select_related("product", "warehouse").all().order_by("-created_at")
@@ -64,4 +70,16 @@ class StockLedgerListCreateView(generics.ListCreateAPIView):
 class StockLedgerDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = StockLedger.objects.select_related("product", "warehouse").all()
     serializer_class = StockLedgerSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+
+class InventoryBalanceListView(generics.ListAPIView):
+    queryset = InventoryBalance.objects.select_related("product", "warehouse").all().order_by("warehouse__code", "product__name")
+    serializer_class = InventoryBalanceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class PurchaseInvoiceListCreateView(generics.ListCreateAPIView):
+    queryset = PurchaseInvoice.objects.select_related("supplier", "warehouse", "created_by").prefetch_related("line_items").all().order_by("-created_at")
+    serializer_class = PurchaseInvoiceSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]

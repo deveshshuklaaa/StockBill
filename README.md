@@ -115,8 +115,19 @@ This milestone aligns the scaffold to the confirmed business rules:
 - credit-note reversal is part of the schema for invoice correction without mutating original invoices
 - walk-in cash sales remain distinct from registered customer credit billing via nullable customer references
 - payment status is exposed as a read-only computed value, not a client-editable field
+- inventory balances are tracked per warehouse and stock changes create structured ledger events
+- sale lines snapshot cost and COGS so later product cost changes do not rewrite historical profit
+- product deletion archives the product, and payment detail endpoints are read-only
+- purchase receipt API updates weighted-average warehouse cost transactionally
+- invoice creation supports an `Idempotency-Key` for safe client retries
 
 ## Future next steps
 
 - add React frontend in a separate phase
+
+## Docker setup
+
+Set `DB_PASSWORD` and `SECRET_KEY` in the root `.env`, then run `docker compose up --build`. The `web` image includes the Linux libraries required by WeasyPrint and waits on the PostgreSQL service. Do not commit `.env` or production credentials.
+
+The current costing method is weighted average per product and warehouse. The current GST implementation stores slab and line-tax snapshots but is not a legal CGST/SGST/IGST compliance engine; see [INVARIANTS.md](INVARIANTS.md) for the explicit boundaries.
 

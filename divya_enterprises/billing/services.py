@@ -4,7 +4,9 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import serializers
 
-from inventory.models import Product
+from customers.models import Customer
+from inventory.models import InventoryBalance, Product, StockLedger
+from inventory.services import adjust_inventory, ensure_inventory_balance, get_default_warehouse
 
 from .models import CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 
@@ -19,10 +21,17 @@ def _money(value):
 def _validate_invoice_lines(line_items):
     product_ids = {item["product"].pk for item in line_items}
     products = Product.objects.select_for_update().in_bulk(product_ids)
+    warehouse = get_default_warehouse()
+    balances = {}
+    for product_id in product_ids:
+        balance = ensure_inventory_balance(product=products[product_id], warehouse=warehouse)
+        balances[product_id] = InventoryBalance.objects.select_for_update().get(pk=balance.pk)
     requested_stock = defaultdict(lambda: Decimal("0"))
 
     for item in line_items:
         product = products[item["product"].pk]
+        if not product.is_active:
+            raise serializers.ValidationError({"line_items": f"{product.name} is inactive and cannot be sold."})
         quantity = Decimal(item["quantity"])
         rate = Decimal(item["rate_charged"])
         tax_rate = item.get("tax_rate")
@@ -38,9 +47,10 @@ def _validate_invoice_lines(line_items):
 
     for product_id, quantity in requested_stock.items():
         product = products[product_id]
-        if quantity > product.current_stock:
+        available = balances.get(product_id).quantity_on_hand if product_id in balances else Decimal("0.000")
+        if quantity > available:
             raise serializers.ValidationError(
-                {"line_items": f"Insufficient stock for {product.name}. Available: {product.current_stock}."}
+                {"line_items": f"Insufficient stock for {product.name}. Available: {available}."}
             )
 
     return products
@@ -50,6 +60,8 @@ def _validate_invoice_lines(line_items):
 def create_invoice(*, customer, invoice_number, notes="", created_by, payment_type, line_items):
     if payment_type == "credit" and customer is None:
         raise serializers.ValidationError({"customer": "A registered customer is required for credit invoices."})
+    if customer is not None:
+        customer = Customer.objects.select_for_update().get(pk=customer.pk)
 
     products = _validate_invoice_lines(line_items)
     calculated_lines = []
@@ -62,8 +74,15 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
         subtotal = _money(quantity * rate)
         tax_amount = _money(subtotal * Decimal(tax_rate) / Decimal("100"))
         line_total = _money(subtotal + tax_amount)
-        calculated_lines.append((product, quantity, rate, tax_rate, tax_amount, line_total))
+        cogs_amount = _money(quantity * product.cost_price)
+        calculated_lines.append((product, quantity, rate, tax_rate, tax_amount, line_total, cogs_amount))
         total_amount += line_total
+
+    if payment_type == "credit" and customer is not None and customer.credit_limit:
+        if customer.outstanding_balance + _money(total_amount) > customer.credit_limit:
+            raise serializers.ValidationError(
+                {"customer": f"Credit limit exceeded. Available credit: {_money(customer.credit_limit - customer.outstanding_balance)}."}
+            )
 
     invoice = Invoice.objects.create(
         customer=customer,
@@ -74,7 +93,7 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
         total_amount=_money(total_amount),
     )
 
-    for product, quantity, rate, tax_rate, tax_amount, line_total in calculated_lines:
+    for product, quantity, rate, tax_rate, tax_amount, line_total, cogs_amount in calculated_lines:
         InvoiceLineItem.objects.create(
             invoice=invoice,
             product=product,
@@ -83,9 +102,18 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
             tax_rate=tax_rate,
             tax_amount=tax_amount,
             line_total=line_total,
+            cost_price_snapshot=product.cost_price,
+            cogs_amount=cogs_amount,
         )
-        product.current_stock -= quantity
-        product.save(update_fields=["current_stock", "updated_at"])
+        adjust_inventory(
+            product=product,
+            quantity_delta=-quantity,
+            movement_type=StockLedger.SALE,
+            created_by=created_by,
+            reference_type="invoice",
+            reference_id=invoice.pk,
+            unit_cost=product.cost_price,
+        )
 
     if payment_type == "cash":
         Payment.objects.create(customer=customer, invoice=invoice, amount=invoice.total_amount)
@@ -142,7 +170,14 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
             tax_amount=tax_amount,
             line_total=line_total,
         )
-        product.current_stock += quantity
-        product.save(update_fields=["current_stock", "updated_at"])
+        adjust_inventory(
+            product=product,
+            quantity_delta=quantity,
+            movement_type=StockLedger.SALES_RETURN,
+            created_by=created_by,
+            reference_type="credit_note",
+            reference_id=credit_note.pk,
+            unit_cost=product.cost_price,
+        )
 
     return credit_note

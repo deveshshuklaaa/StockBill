@@ -19,9 +19,11 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
             "tax_rate",
             "tax_amount",
             "line_total",
+            "cost_price_snapshot",
+            "cogs_amount",
             "created_at",
         ]
-        read_only_fields = ["id", "invoice", "created_at", "product_name", "tax_amount", "line_total"]
+        read_only_fields = ["id", "invoice", "created_at", "product_name", "tax_amount", "line_total", "cost_price_snapshot", "cogs_amount"]
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
