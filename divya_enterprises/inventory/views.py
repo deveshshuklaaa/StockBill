@@ -1,7 +1,9 @@
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from django.db.models import Q
 from rest_framework import generics, permissions
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -291,7 +293,32 @@ class ProductListCreateView(generics.ListCreateAPIView):
             .all()
             .order_by("name")
         )
+        queryset = self._apply_filters(queryset)
         return self._apply_dynamic_filters(queryset)
+
+    def _apply_filters(self, queryset):
+        """Server-side search/category/status filters applied across the whole catalogue."""
+        params = self.request.query_params or {}
+        search = (params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(sku__icontains=search)
+                | Q(brand__icontains=search)
+            )
+        category = (params.get("category") or "").strip()
+        if category:
+            if not category.isdigit():
+                raise ValidationError({"category": ["Category must be a numeric id."]})
+            queryset = queryset.filter(catalogue_category_id=int(category))
+        status = (params.get("is_active") or "").strip().lower()
+        if status:
+            if status not in {"true", "false"}:
+                raise ValidationError(
+                    {"is_active": ["is_active must be 'true' or 'false'."]}
+                )
+            queryset = queryset.filter(is_active=status == "true")
+        return queryset
 
     def _apply_dynamic_filters(self, queryset):
         """Support ?attr_<code>=<value> filters for attributes flagged filterable."""

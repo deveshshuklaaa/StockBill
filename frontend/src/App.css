@@ -33,3 +33,7 @@
 .record-form .eyebrow { margin: 22px 0 10px; display: block; }
 .record-form .eyebrow:first-of-type { margin-top: 0; }
 .record-form .status-message { margin: 0 0 16px; }
+.pager { border-top: 1px solid var(--line); border-bottom: 0; justify-content: space-between; }
+.pager-button { border: 1px solid #cbd5cd; background: #fff; color: #4f6c5b; padding: 7px 13px; font: 500 11px 'IBM Plex Mono', monospace; cursor: pointer; }
+.pager-button:hover:not(:disabled) { border-color: var(--green); color: var(--green-dark); }
+.pager-button:disabled { color: #b6c0b9; cursor: not-allowed; background: #f4f6f3; }

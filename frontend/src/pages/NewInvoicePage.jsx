@@ -37,9 +37,10 @@ function calculateLine(line, taxMode) {
 
 export default function NewInvoicePage() {
   const [customers, setCustomers] = useState([])
-  const [products, setProducts] = useState([])
   const [customerSearch, setCustomerSearch] = useState('')
   const [productSearch, setProductSearch] = useState('')
+  const [productResults, setProductResults] = useState([])
+  const [productBusy, setProductBusy] = useState(false)
   const [customer, setCustomer] = useState(WALK_IN)
   const [paymentType, setPaymentType] = useState('cash')
   const [taxMode, setTaxMode] = useState('exclusive')
@@ -53,14 +54,27 @@ export default function NewInvoicePage() {
   const [success, setSuccess] = useState(null)
 
   useEffect(() => {
-    Promise.all([api.get('/customers/'), api.get('/products/')])
-      .then(([customerResponse, productResponse]) => {
-        setCustomers(rows(customerResponse.data))
-        setProducts(rows(productResponse.data))
-      })
+    api.get('/customers/')
+      .then((customerResponse) => { setCustomers(rows(customerResponse.data)) })
       .catch((err) => setError(apiErrorMessage(err)))
       .finally(() => setLoading(false))
   }, [])
+
+  // Server-side product search: the catalogue is paginated, so never rely on a
+  // single preloaded page. Debounced to avoid a request per keystroke.
+  useEffect(() => {
+    const query = productSearch.trim()
+    if (!query) { setProductResults([]); setProductBusy(false); return undefined }
+    let cancelled = false
+    setProductBusy(true)
+    const timer = setTimeout(() => {
+      api.get('/products/', { params: { search: query, is_active: 'true', page: 1 } })
+        .then(({ data }) => { if (!cancelled) setProductResults(rows(data).slice(0, 8)) })
+        .catch(() => { if (!cancelled) setProductResults([]) })
+        .finally(() => { if (!cancelled) setProductBusy(false) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer); setProductBusy(false) }
+  }, [productSearch])
 
   useEffect(() => {
     if (!customer.id) {
@@ -76,7 +90,6 @@ export default function NewInvoicePage() {
   }, [customer])
 
   const filteredCustomers = customers.filter((item) => item.name.toLowerCase().includes(customerSearch.toLowerCase())).slice(0, 8)
-  const filteredProducts = products.filter((item) => item.is_active !== false && item.name.toLowerCase().includes(productSearch.toLowerCase())).slice(0, 8)
 
   const totals = useMemo(() => lines.reduce((result, line) => {
     const calculated = calculateLine(line, taxMode)
@@ -164,7 +177,7 @@ export default function NewInvoicePage() {
           </div>
         </section>
 
-        <section className="invoice-card lines-card"><div className="section-heading"><div><div className="section-kicker">03 / Items</div><h2>What is going out?</h2></div><span className="line-count">{lines.length} line{lines.length === 1 ? '' : 's'}</span></div><div className="product-search"><input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products by name to add..." aria-label="Search products" />{productSearch && <div className="suggestion-list product-suggestions">{filteredProducts.map((product) => <button type="button" key={product.id} onClick={() => addProduct(product)}><strong>{product.name}</strong><span>{product.current_stock} {product.unit_type} available · {money(product.default_price)}</span></button>)}{!filteredProducts.length && <div className="suggestion-empty">No matching product</div>}</div>}</div>{!lines.length ? <div className="lines-empty">Start typing above to add the first product.</div> : <div className="invoice-lines">{lines.map((line, index) => { const calculated = calculateLine(line, taxMode); const overStock = Number(line.quantity) > Number(line.productData.current_stock); const fixedUnit = Number(line.productData.unit_conversion_factor) <= 1; return <div className="invoice-line" key={line.key}><div className="line-number">{String(index + 1).padStart(2, '0')}</div><div className="line-product"><strong>{line.productData.name}</strong><span>{line.productData.unit_type} · {line.productData.current_stock} available</span></div><label>Qty<input type="number" min="0.001" step={fixedUnit ? '1' : '0.001'} value={line.quantity} onChange={(event) => updateLine(line.key, 'quantity', event.target.value)} className={overStock ? 'input-warning' : ''} /></label><label>Rate<input type="number" min="0" step="0.01" value={line.rate_charged} onChange={(event) => updateLine(line.key, 'rate_charged', event.target.value)} /></label><label>Discount<input type="number" min="0" step="0.01" value={line.discount_amount} onChange={(event) => updateLine(line.key, 'discount_amount', event.target.value)} /></label><div className="line-tax"><span>GST</span><strong>{line.tax_rate}%</strong></div><div className="line-total"><span>Total</span><strong>{money(calculated.total)}</strong></div><button type="button" className="remove-line" onClick={() => removeLine(line.key)} aria-label={`Remove ${line.productData.name}`}>×</button>{overStock && <div className="stock-warning">Quantity exceeds available stock ({line.productData.current_stock}). The server will reject this invoice.</div>}</div> })}</div>}</section>
+        <section className="invoice-card lines-card"><div className="section-heading"><div><div className="section-kicker">03 / Items</div><h2>What is going out?</h2></div><span className="line-count">{lines.length} line{lines.length === 1 ? '' : 's'}</span></div><div className="product-search"><input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products by name to add..." aria-label="Search products" />{productSearch && <div className="suggestion-list product-suggestions">{productBusy && !productResults.length && <div className="suggestion-empty">Searching...</div>}{productResults.map((product) => <button type="button" key={product.id} onClick={() => addProduct(product)}><strong>{product.name}</strong><span>{product.current_stock} {product.unit_type} available · {money(product.default_price)}</span></button>)}{!productBusy && !productResults.length && <div className="suggestion-empty">No matching product</div>}</div>}</div>{!lines.length ? <div className="lines-empty">Start typing above to add the first product.</div> : <div className="invoice-lines">{lines.map((line, index) => { const calculated = calculateLine(line, taxMode); const overStock = Number(line.quantity) > Number(line.productData.current_stock); const fixedUnit = Number(line.productData.unit_conversion_factor) <= 1; return <div className="invoice-line" key={line.key}><div className="line-number">{String(index + 1).padStart(2, '0')}</div><div className="line-product"><strong>{line.productData.name}</strong><span>{line.productData.unit_type} · {line.productData.current_stock} available</span></div><label>Qty<input type="number" min="0.001" step={fixedUnit ? '1' : '0.001'} value={line.quantity} onChange={(event) => updateLine(line.key, 'quantity', event.target.value)} className={overStock ? 'input-warning' : ''} /></label><label>Rate<input type="number" min="0" step="0.01" value={line.rate_charged} onChange={(event) => updateLine(line.key, 'rate_charged', event.target.value)} /></label><label>Discount<input type="number" min="0" step="0.01" value={line.discount_amount} onChange={(event) => updateLine(line.key, 'discount_amount', event.target.value)} /></label><div className="line-tax"><span>GST</span><strong>{line.tax_rate}%</strong></div><div className="line-total"><span>Total</span><strong>{money(calculated.total)}</strong></div><button type="button" className="remove-line" onClick={() => removeLine(line.key)} aria-label={`Remove ${line.productData.name}`}>×</button>{overStock && <div className="stock-warning">Quantity exceeds available stock ({line.productData.current_stock}). The server will reject this invoice.</div>}</div> })}</div>}</section>
       </div>
       <aside className="invoice-summary"><div className="summary-label">Preview summary</div><div className="summary-customer">{customer.id ? customer.name : 'Walk-in sale'}<span>{paymentType === 'cash' ? 'Cash sale' : 'Credit sale'}</span></div><div className="summary-rows"><div><span>Subtotal</span><strong>{money(totals.subtotal)}</strong></div><div><span>Total Discount</span><strong>{money(totals.discount)}</strong></div><div><span>Taxable</span><strong>{money(totals.taxable)}</strong></div>{Object.entries(totals.taxBySlab).sort(([a], [b]) => Number(a) - Number(b)).map(([slab, value]) => <div key={slab}><span>{slab}% GST</span><strong>{money(value)}</strong></div>)}<div className="summary-tax"><span>Total tax preview</span><strong>{money(totals.tax)}</strong></div></div><div className="grand-total"><span>Grand total (Est.)</span><strong>{money(totals.total)}</strong></div><button type="button" className="primary-button submit-invoice" onClick={submit} disabled={submitting || !lines.length}>{submitting ? 'Saving invoice...' : 'Create invoice'}</button><p className="summary-note">Server evaluates taxes with determinism upon submission. Deducts stock immediately.</p></aside>
     </form>
