@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import serializers
 
 from .attribute_services import (
@@ -268,10 +270,11 @@ class ProductSerializer(serializers.ModelSerializer):
         return attrs
 
     def _check_duplicate_variant(self, category):
-        """Reject exact catalogue-variant duplicates: same name + same attribute values.
+        """Reject exact catalogue-variant duplicates.
 
-        Different weight/MRP variants stay separate rows; only a fully identical
-        name + category + attribute set is treated as a duplicate.
+        A duplicate is the same name + category + MRP + full attribute-value set.
+        Any difference in weight, M.Box, MRP, or other attributes keeps the rows
+        separate as distinct sellable variants.
         """
         name = self.initial_data.get("name")
         if not name:
@@ -279,16 +282,26 @@ class ProductSerializer(serializers.ModelSerializer):
         incoming = {
             definition.code: typed for definition, typed in self._validated_attributes
         }
+        mrp = self.initial_data.get("mrp")
         candidates = Product.objects.filter(
             name__iexact=name, catalogue_category=category
         ).exclude(pk=getattr(self.instance, "pk", None))
         for candidate in candidates:
+            if mrp is not None and candidate.mrp is not None:
+                try:
+                    candidate_mrp = Decimal(str(mrp))
+                except (InvalidOperation, TypeError, ValueError):
+                    candidate_mrp = None
+                if candidate_mrp is None or candidate.mrp != candidate_mrp:
+                    continue
+            elif mrp is not None and candidate.mrp is None:
+                continue
             candidate_values = assemble_product_attributes(candidate)
             if candidate_values == incoming:
                 raise serializers.ValidationError(
                     {
                         "attributes": [
-                            "A product with the same name and attribute values already exists."
+                            "A product with the same name, MRP, and attribute values already exists."
                         ]
                     }
                 )

@@ -338,7 +338,9 @@ class CategoryAttributeAssignmentTests(CatalogueTestBase):
 
 
 class ProductAttributeValidationTests(CatalogueTestBase):
-    def create_product(self, attributes, category=None, name="New Product", expect=201):
+    def create_product(
+        self, attributes, category=None, name="New Product", mrp=None, expect=201
+    ):
         payload = {
             "name": name,
             "base_unit": "piece",
@@ -348,6 +350,8 @@ class ProductAttributeValidationTests(CatalogueTestBase):
             "tax": self.tax.pk,
             "attributes": attributes,
         }
+        if mrp is not None:
+            payload["mrp"] = mrp
         response = self.client_as(self.admin).post(
             "/api/products/", payload, format="json"
         )
@@ -568,6 +572,31 @@ class ProductAttributeValidationTests(CatalogueTestBase):
             expect=400,
         )
         self.assertEqual(Product.objects.count(), 1)
+
+    def test_same_attributes_different_mrp_are_distinct_variants(self):
+        # MRP is part of catalogue variant identity: a different printed MRP
+        # creates a separate sellable variant, not a duplicate.
+        self.create_product(
+            {"net_weight": "0.025", "units_per_master_box": 192},
+            name="MRP Variant",
+            mrp="10.00",
+        )
+        self.create_product(
+            {"net_weight": "0.025", "units_per_master_box": 192},
+            name="MRP Variant",
+            mrp="20.00",
+        )
+        self.assertEqual(
+            Product.objects.filter(name="MRP Variant").count(), 2
+        )
+        self.assertEqual(
+            set(
+                Product.objects.filter(name="MRP Variant").values_list(
+                    "mrp", flat=True
+                )
+            ),
+            {Decimal("10.00"), Decimal("20.00")},
+        )
 
 
 class DynamicFilteringTests(CatalogueTestBase):

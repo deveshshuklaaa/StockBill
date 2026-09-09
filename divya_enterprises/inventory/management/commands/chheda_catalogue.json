@@ -1,0 +1,983 @@
+[
+ {
+  "serial": 1,
+  "name": "Chheda's Yellow banana Chips",
+  "net_weight_kg": "0.014",
+  "units_per_master_box": 240,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 2,
+  "name": "Chheda's Lightly Salted Potato Chips - (B)",
+  "net_weight_kg": "0.015",
+  "units_per_master_box": 192,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 3,
+  "name": "Chheda's Lightly Salted Potato Chips - (Y)",
+  "net_weight_kg": "0.015",
+  "units_per_master_box": 192,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 4,
+  "name": "Chheda's Chilli Flaminn’ Potato Chips",
+  "net_weight_kg": "0.020",
+  "units_per_master_box": 180,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 5,
+  "name": "Chheda's Potato Chips Sizzlin Peri Peri",
+  "net_weight_kg": "0.015",
+  "units_per_master_box": 192,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 6,
+  "name": "Chheda's Mexican Tomato Potato Chips",
+  "net_weight_kg": "0.020",
+  "units_per_master_box": 180,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 7,
+  "name": "Chheda's Chipsona Potato Chips Sour Cream n Onion",
+  "net_weight_kg": "0.014",
+  "units_per_master_box": 180,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 8,
+  "name": "Chheda's Chipsona Potato Chips Mast Masala",
+  "net_weight_kg": "0.014",
+  "units_per_master_box": 180,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 9,
+  "name": "Chheda's Farali Potato Chivda",
+  "net_weight_kg": "0.019",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 10,
+  "name": "Chheda's Tikha Farali Chivda",
+  "net_weight_kg": "0.019",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 11,
+  "name": "Chheda's Peanut Bar",
+  "net_weight_kg": "0.018",
+  "units_per_master_box": 360,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 12,
+  "name": "Chheda's 3 in 1 Chikki",
+  "net_weight_kg": "0.018",
+  "units_per_master_box": 360,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 13,
+  "name": "Chheda's Rusk",
+  "net_weight_kg": "0.036",
+  "units_per_master_box": 250,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 14,
+  "name": "Chheda's Papdi Gathiya",
+  "net_weight_kg": "0.022",
+  "units_per_master_box": 240,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 15,
+  "name": "Chheda's Yellow Banana Chips",
+  "net_weight_kg": "0.025",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 16,
+  "name": "Chheda's Coconut Yellow Banana Chips",
+  "net_weight_kg": "0.026",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 17,
+  "name": "Chheda's Potato Chips Lightly Salted",
+  "net_weight_kg": "0.028",
+  "units_per_master_box": 144,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 18,
+  "name": "Chheda's Chilli Flaminn’ Potato Chips",
+  "net_weight_kg": "0.035",
+  "units_per_master_box": 108,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 19,
+  "name": "Chheda's Potato Chips Sizzlin Peri Peri",
+  "net_weight_kg": "0.030",
+  "units_per_master_box": 144,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 20,
+  "name": "Chheda's Khatta Mitha Tomato Potato Chips",
+  "net_weight_kg": "0.028",
+  "units_per_master_box": 108,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 21,
+  "name": "Chheda's Chipsona Potato Chips Sour Cream n Onion",
+  "net_weight_kg": "0.028",
+  "units_per_master_box": 108,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 22,
+  "name": "Chheda's Chipsona Potato Chips Classic Salted",
+  "net_weight_kg": "0.028",
+  "units_per_master_box": 90,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 23,
+  "name": "Chheda's Choco Vanilla Snax",
+  "net_weight_kg": "0.025",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 24,
+  "name": "Chheda's Farali Potato Chivda",
+  "net_weight_kg": "0.032",
+  "units_per_master_box": 180,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 25,
+  "name": "Udupi Munch Sabudana Chivda",
+  "net_weight_kg": "0.042",
+  "units_per_master_box": 180,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 26,
+  "name": "Chheda's Light N Crispy Poha Chivda",
+  "net_weight_kg": "0.042",
+  "units_per_master_box": 228,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 27,
+  "name": "Chheda's Bombay Mix",
+  "net_weight_kg": "0.055",
+  "units_per_master_box": 180,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 28,
+  "name": "Chheda's Peanut Chikki Bar",
+  "net_weight_kg": "0.035",
+  "units_per_master_box": 240,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 29,
+  "name": "Chheda's Rajgeera Bar",
+  "net_weight_kg": "0.035",
+  "units_per_master_box": 288,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 30,
+  "name": "Minilo Vanilla Mawa Cake",
+  "net_weight_kg": "0.025",
+  "units_per_master_box": 300,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 31,
+  "name": "Chheda's Yellow Banana Chips",
+  "net_weight_kg": "0.030",
+  "units_per_master_box": 120,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 32,
+  "name": "Chheda's Lightly Salted Potato Chips",
+  "net_weight_kg": "0.045",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 33,
+  "name": "Chheda's Chilli Flaminn’ Potato Chips",
+  "net_weight_kg": "0.045",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 34,
+  "name": "Chheda's Mexican Tomato Potato Chips",
+  "net_weight_kg": "0.045",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 35,
+  "name": "Chheda's Chipsona Potato Chips Classic Salted",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 36,
+  "name": "Chheda's Chipsona Potato Chips Sour Cream n Onion",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 37,
+  "name": "Chheda's Chipsona Potato Chips Mast Masala",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 38,
+  "name": "Chheda's Chipsona Potato Chips Peri Peri",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 39,
+  "name": "Chheda's Light N Crispy Poha Chivda",
+  "net_weight_kg": "0.062",
+  "units_per_master_box": 228,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 40,
+  "name": "Chheda's Farali Potato Chivda",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 180,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 41,
+  "name": "Chheda's Choco Vanilla Snax",
+  "net_weight_kg": "0.042",
+  "units_per_master_box": 144,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Specialities Foods Pvt. Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 42,
+  "name": "Udupi Munch Sabudana Chivda",
+  "net_weight_kg": "0.021",
+  "units_per_master_box": 360,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 43,
+  "name": "Chheda's Bombay Mix",
+  "net_weight_kg": "0.027",
+  "units_per_master_box": 480,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 44,
+  "name": "Udupi Munch Masala Sabudana Chivda",
+  "net_weight_kg": "0.021",
+  "units_per_master_box": 360,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 45,
+  "name": "Chheda's Salt-n-Pepper Banana Chips",
+  "net_weight_kg": "0.015",
+  "units_per_master_box": 216,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 1
+ },
+ {
+  "serial": 46,
+  "name": "Chheda's Cheese Balls",
+  "net_weight_kg": "0.020",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 47,
+  "name": "Chheda's Tomato Balls",
+  "net_weight_kg": "0.028",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 48,
+  "name": "Chheda's Tomato Wheels",
+  "net_weight_kg": "0.028",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 49,
+  "name": "Chheda's Masala Wheels",
+  "net_weight_kg": "0.024",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 50,
+  "name": "Chheda's Chana Dal",
+  "net_weight_kg": "0.019",
+  "units_per_master_box": 600,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 51,
+  "name": "Chheda's Tasty Nuts",
+  "net_weight_kg": "0.017",
+  "units_per_master_box": 600,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 52,
+  "name": "Chheda's Masala Moon Cups",
+  "net_weight_kg": "0.018",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 53,
+  "name": "Chheda's Moong Dal",
+  "net_weight_kg": "0.018",
+  "units_per_master_box": 600,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 54,
+  "name": "Chheda's Pasta Masala",
+  "net_weight_kg": "0.020",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 55,
+  "name": "Chheda's Krispy Korn Masala",
+  "net_weight_kg": "0.029",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 56,
+  "name": "Chheda's Krispy Korn Peri Peri",
+  "net_weight_kg": "0.024",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 57,
+  "name": "Chheda's Bhel Mix",
+  "net_weight_kg": "0.021",
+  "units_per_master_box": 288,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 58,
+  "name": "Chheda's Masala Sev Murmura",
+  "net_weight_kg": "0.023",
+  "units_per_master_box": 216,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 59,
+  "name": "Chheda's Finger Pops Salted",
+  "net_weight_kg": "0.021",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 60,
+  "name": "Chheda's Finger Pops Masala",
+  "net_weight_kg": "0.018",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 61,
+  "name": "Chheda's Soya Snax",
+  "net_weight_kg": "0.018",
+  "units_per_master_box": 288,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 62,
+  "name": "Chheda's Bhavnagri Gathiya",
+  "net_weight_kg": "0.020",
+  "units_per_master_box": 480,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 63,
+  "name": "Chheda's Manglori Mix",
+  "net_weight_kg": "0.020",
+  "units_per_master_box": 480,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 64,
+  "name": "Chheda's Sev Murmura",
+  "net_weight_kg": "0.026",
+  "units_per_master_box": 288,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 65,
+  "name": "Chheda's Chinese Noodles",
+  "net_weight_kg": "0.022",
+  "units_per_master_box": 144,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 66,
+  "name": "Chheda's Jeera Papad",
+  "net_weight_kg": "0.018",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 67,
+  "name": "Chheda's Masala Papad",
+  "net_weight_kg": "0.018",
+  "units_per_master_box": 120,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 68,
+  "name": "Chheda's Aloo Bhujia",
+  "net_weight_kg": "0.022",
+  "units_per_master_box": 600,
+  "mrp": "5.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 69,
+  "name": "Chheda's Soya Snax",
+  "net_weight_kg": "0.038",
+  "units_per_master_box": 144,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 70,
+  "name": "Chheda's Salt-n-Pepper Banana Chips",
+  "net_weight_kg": "0.030",
+  "units_per_master_box": 144,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 71,
+  "name": "Chheda's Tomato Banana Chips",
+  "net_weight_kg": "0.030",
+  "units_per_master_box": 144,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 72,
+  "name": "Chheda's Masala Banana Chips",
+  "net_weight_kg": "0.030",
+  "units_per_master_box": 144,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 73,
+  "name": "Chheda's Krispy Korn Masala",
+  "net_weight_kg": "0.050",
+  "units_per_master_box": 120,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 74,
+  "name": "Chheda's Krispy Korn Peri Peri",
+  "net_weight_kg": "0.048",
+  "units_per_master_box": 144,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 75,
+  "name": "Chheda's Finger Pops Salted",
+  "net_weight_kg": "0.038",
+  "units_per_master_box": 80,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 76,
+  "name": "Chheda's Finger Pops Masala",
+  "net_weight_kg": "0.038",
+  "units_per_master_box": 80,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 77,
+  "name": "Chheda's Pasta Masala",
+  "net_weight_kg": "0.038",
+  "units_per_master_box": 80,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 78,
+  "name": "Chheda's Potato Corn Stix",
+  "net_weight_kg": "0.030",
+  "units_per_master_box": 120,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 79,
+  "name": "Chheda's Salted French Fries",
+  "net_weight_kg": "0.027",
+  "units_per_master_box": 80,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 80,
+  "name": "Chheda's Masala French Fries",
+  "net_weight_kg": "0.027",
+  "units_per_master_box": 80,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 81,
+  "name": "Chheda's Masala Moon Cups",
+  "net_weight_kg": "0.038",
+  "units_per_master_box": 80,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 82,
+  "name": "Chheda's Bhel Mix",
+  "net_weight_kg": "0.044",
+  "units_per_master_box": 180,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 83,
+  "name": "Chheda's Alu Bhujia",
+  "net_weight_kg": "0.035",
+  "units_per_master_box": 288,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 84,
+  "name": "Chheda's Small Bhakarwadi",
+  "net_weight_kg": "0.038",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 85,
+  "name": "Chheda's Tikhat Sev",
+  "net_weight_kg": "0.038",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 86,
+  "name": "Chheda's Salted Peanuts",
+  "net_weight_kg": "0.032",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 87,
+  "name": "Chheda's Roasted Chana",
+  "net_weight_kg": "0.042",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 88,
+  "name": "Chheda's Tasty Nuts",
+  "net_weight_kg": "0.035",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 89,
+  "name": "Chheda's Moong Dal",
+  "net_weight_kg": "0.034",
+  "units_per_master_box": 336,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 90,
+  "name": "Udupi Munch Madras Mix",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 91,
+  "name": "Udupi Munch Masala Murukku",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 92,
+  "name": "Chheda's Chana Chor",
+  "net_weight_kg": "0.035",
+  "units_per_master_box": 192,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 93,
+  "name": "Chheda's Tikha Gathiya",
+  "net_weight_kg": "0.048",
+  "units_per_master_box": 180,
+  "mrp": "10.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 94,
+  "name": "Chheda's Finger Pops Salted",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 95,
+  "name": "Chheda's Finger Pops Masala",
+  "net_weight_kg": "0.040",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 2
+ },
+ {
+  "serial": 96,
+  "name": "Chheda's Salted French Fries",
+  "net_weight_kg": "0.052",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 97,
+  "name": "Chheda's Masala French Fries",
+  "net_weight_kg": "0.052",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 98,
+  "name": "Chheda's Masala Moon Cups",
+  "net_weight_kg": "0.042",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 99,
+  "name": "Chheda's Pasta Masala",
+  "net_weight_kg": "0.042",
+  "units_per_master_box": 60,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 100,
+  "name": "Chheda's Small Bhakarwadi",
+  "net_weight_kg": "0.035",
+  "units_per_master_box": 200,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 101,
+  "name": "Chheda's Aloo Bhujia",
+  "net_weight_kg": "0.042",
+  "units_per_master_box": 288,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 102,
+  "name": "Chheda's Tasty Nuts",
+  "net_weight_kg": "0.052",
+  "units_per_master_box": 192,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 103,
+  "name": "Chheda's Moong Dal",
+  "net_weight_kg": "0.044",
+  "units_per_master_box": 192,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 104,
+  "name": "Chheda's Bhel Mix",
+  "net_weight_kg": "0.062",
+  "units_per_master_box": 180,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 105,
+  "name": "Chheda's Tikhat Sev",
+  "net_weight_kg": "0.052",
+  "units_per_master_box": 192,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 106,
+  "name": "Soya Snax",
+  "net_weight_kg": "0.043",
+  "units_per_master_box": 144,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 107,
+  "name": "Chheda's Krispy Korn Masala",
+  "net_weight_kg": "0.062",
+  "units_per_master_box": 108,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 108,
+  "name": "Chheda's Krispy Korn Peri Peri",
+  "net_weight_kg": "0.052",
+  "units_per_master_box": 144,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ },
+ {
+  "serial": 109,
+  "name": "Potato Corn Stix Cream-n-Onion 52g",
+  "net_weight_kg": "0.052",
+  "units_per_master_box": 100,
+  "mrp": "20.00",
+  "manufacturer": "Chheda Agro Food Park Private Ltd.",
+  "page": 3
+ }
+]
