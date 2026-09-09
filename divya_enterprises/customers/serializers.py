@@ -13,6 +13,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             "billing_address",
             "shipping_address",
             "state",
+            "state_code",
             "pincode",
             "customer_type",
             "gst_registration_type",

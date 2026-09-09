@@ -100,7 +100,7 @@ export default function NewInvoicePage() {
     if (existing) {
       updateLine(existing.key, 'quantity', Number(existing.quantity || 0) + 1)
     } else {
-      setLines([...lines, { key: product.id, product: product.id, productData: product, quantity: 1, rate_charged: product.default_price, discount_amount: 0, tax_rate: product.tax || 0 }])
+      setLines([...lines, { key: product.id, product: product.id, productData: product, quantity: 1, rate_charged: product.default_price, discount_amount: 0, tax_rate: Number(product.tax_rate) || 0 }])
     }
     setProductSearch('')
   }

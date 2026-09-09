@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import AppShell from './components/AppShell'
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './context/AuthContext'
+import CataloguePage from './pages/CataloguePage'
 import CustomersPage from './pages/CustomersPage'
 import InvoiceDetailPage from './pages/InvoiceDetailPage'
 import NewInvoicePage from './pages/NewInvoicePage'
@@ -14,6 +15,7 @@ function App() {
     <Route path="/login" element={<LoginPage />} />
     <Route element={<ProtectedRoute />}><Route element={<AppShell />}>
       <Route path="/products" element={<ProductsPage />} />
+      <Route path="/catalogue" element={<CataloguePage />} />
       <Route path="/customers" element={<CustomersPage />} />
       <Route path="/invoices/new" element={<NewInvoicePage />} />
       <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
