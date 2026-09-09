@@ -12,5 +12,9 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_STAFF)
 
+    @property
+    def normalized_role(self):
+        return str(self.role or "").strip().lower()
+
     def __str__(self):
         return f"{self.username} ({self.role})"

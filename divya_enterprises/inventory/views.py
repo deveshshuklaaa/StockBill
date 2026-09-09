@@ -1,7 +1,8 @@
 from rest_framework import generics, permissions
 
+from accounts.models import User
 from .models import InventoryBalance, Product, PurchaseInvoice, StockLedger, Supplier, Warehouse
-from .permissions import CanManageInventory, IsAdminOrReadOnly
+from .permissions import IsAdminOrReadOnly
 from .serializers import (
     ProductPublicSerializer,
     ProductSerializer,
@@ -39,20 +40,20 @@ class WarehouseDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class ProductListCreateView(generics.ListCreateAPIView):
     queryset = Product.objects.all().order_by("name")
-    permission_classes = [permissions.IsAuthenticated, CanManageInventory]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
     def get_serializer_class(self):
-        if self.request.user.role == "staff":
+        if self.request.user.normalized_role == User.ROLE_STAFF:
             return ProductPublicSerializer
         return ProductSerializer
 
 
 class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Product.objects.all()
-    permission_classes = [permissions.IsAuthenticated, CanManageInventory]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
     def get_serializer_class(self):
-        if self.request.user.role == "staff":
+        if self.request.user.normalized_role == User.ROLE_STAFF:
             return ProductPublicSerializer
         return ProductSerializer
 

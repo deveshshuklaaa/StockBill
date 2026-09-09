@@ -20,6 +20,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import User
 from accounts.permissions import IsAdminUser, IsStaffUser
 from inventory.models import Product
 
@@ -121,7 +122,7 @@ class StockValuationReportView(APIView):
                 output_field=MONEY_FIELD,
             ),
         )
-        is_admin = request.user.role == "admin"
+        is_admin = request.user.normalized_role == User.ROLE_ADMIN
         rows = []
         for product in products:
             row = {

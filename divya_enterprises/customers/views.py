@@ -3,6 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.permissions import IsAdminOrReadOnly
 from billing.models import Payment
 from .models import Customer
 from .serializers import CustomerSerializer
@@ -11,13 +12,13 @@ from .serializers import CustomerSerializer
 class CustomerListCreateView(generics.ListCreateAPIView):
     queryset = Customer.objects.all().order_by("-created_at")
     serializer_class = CustomerSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
 
 class CustomerDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
 
 class CustomerReportView(APIView):

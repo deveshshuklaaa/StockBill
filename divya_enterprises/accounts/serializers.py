@@ -5,6 +5,8 @@ User = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
+    normalized_role = serializers.CharField(read_only=True)
+
     class Meta:
         model = User
         fields = [
@@ -14,6 +16,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "role",
+            "normalized_role",
             "is_active",
             "date_joined",
         ]
