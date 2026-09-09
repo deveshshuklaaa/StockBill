@@ -26,3 +26,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Runtime state store
+data/state_store.db/
