@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './context/AuthContext'
 import CataloguePage from './pages/CataloguePage'
 import CustomersPage from './pages/CustomersPage'
+import EditProductPage from './pages/EditProductPage'
 import InvoiceDetailPage from './pages/InvoiceDetailPage'
 import NewInvoicePage from './pages/NewInvoicePage'
 import LoginPage from './pages/LoginPage'
@@ -18,6 +19,7 @@ function App() {
     <Route path="/login" element={<LoginPage />} />
     <Route element={<ProtectedRoute />}><Route element={<AppShell />}>
       <Route path="/products" element={<ProductsPage />} />
+      <Route path="/products/:id/edit" element={<EditProductPage />} />
       <Route path="/catalogue" element={<CataloguePage />} />
       <Route path="/customers" element={<CustomersPage />} />
       <Route path="/purchases" element={<PurchasesPage />} />

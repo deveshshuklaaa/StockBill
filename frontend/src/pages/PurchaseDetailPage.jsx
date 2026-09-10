@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import api, { apiErrorMessage } from '../api/client'
+import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { fetchPurchase } from '../api/purchases'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
@@ -31,7 +31,7 @@ export default function PurchaseDetailPage() {
       const { data } = await api.post(`/purchase-invoices/${id}/post/`)
       setPurchase(data)
     } catch (err) {
-      setError(apiErrorMessage(err))
+      setError(apiForbiddenMessage(err, 'post purchases', 'posting purchase'))
     } finally { setBusy(false) }
   }
 
@@ -43,7 +43,7 @@ export default function PurchaseDetailPage() {
       setPurchase(data)
       setShowCancel(false)
     } catch (err) {
-      setError(apiErrorMessage(err))
+      setError(apiForbiddenMessage(err, 'cancel purchases', 'cancelling purchase'))
     } finally { setBusy(false) }
   }
 

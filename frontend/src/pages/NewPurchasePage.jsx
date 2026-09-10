@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import api, { apiErrorMessage } from '../api/client'
+import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { fetchNextPurchaseNumber, fetchSuppliers, fetchWarehouses, searchPurchaseProducts } from '../api/purchases'
 import StatusMessage from '../components/StatusMessage'
 
@@ -11,6 +11,29 @@ function today() { return new Date().toISOString().slice(0, 10) }
 function masterBoxSize(product) {
   const box = Number(product?.attributes?.units_per_master_box)
   return Number.isInteger(box) && box > 0 ? box : null
+}
+
+// Net weight is stored in kg; show grams for small retail packs (0.025 kg → 25 g).
+function formatNetWeight(product) {
+  const kg = Number(product?.attributes?.net_weight)
+  if (!Number.isFinite(kg) || kg <= 0) return ''
+  if (kg < 1) {
+    const grams = kg * 1000
+    return `${Number.isInteger(grams) ? grams : grams.toFixed(1)} g`
+  }
+  return `${kg} kg`
+}
+
+// Variant identity line: weight + MRP distinguish same-name products.
+function variantSummary(product) {
+  const parts = []
+  const weight = formatNetWeight(product)
+  if (weight) parts.push(weight)
+  if (product.mrp != null) parts.push(`MRP: ₹${Number(product.mrp).toFixed(2)}`)
+  if (product.sku) parts.push(`SKU: ${product.sku}`)
+  if (product.category_name) parts.push(product.category_name)
+  if (product.base_unit && product.base_unit !== 'piece') parts.push(product.base_unit)
+  return parts.join(' · ')
 }
 
 function calculateLine(line, taxMode) {
@@ -101,7 +124,6 @@ export default function NewPurchasePage() {
   }, { subtotal: 0, discount: 0, taxable: 0, tax: 0, total: 0 }), [lines, taxMode])
 
   function addProduct(product) {
-    const box = masterBoxSize(product)
     const existing = lines.find((line) => line.product === product.id)
     if (existing) {
       updateLine(existing.key, 'quantity', Number(existing.quantity || 0) + 1)
@@ -187,7 +209,13 @@ export default function NewPurchasePage() {
       })
       navigate(`/purchases/${data.id}`)
     } catch (err) {
-      setError(apiErrorMessage(err))
+      setError(
+        apiForbiddenMessage(
+          err,
+          post ? 'post purchases' : 'save purchase drafts',
+          post ? 'posting purchase' : 'saving purchase draft',
+        ),
+      )
     } finally {
       setSaving(false); setPosting(false)
     }
@@ -244,8 +272,10 @@ export default function NewPurchasePage() {
               {productBusy && !productResults.length && <div className="suggestion-empty">Searching...</div>}
               {productResults.map((product) => {
                 const box = masterBoxSize(product)
+                const summary = variantSummary(product)
                 return <button type="button" key={product.id} onClick={() => addProduct(product)}>
                   <strong>{product.name}</strong>
+                  {summary && <span className="variant-line">{summary}</span>}
                   <span>{box ? `M.Box ${box} · ` : ''}{product.current_stock} in stock</span>
                 </button>
               })}
@@ -260,6 +290,7 @@ export default function NewPurchasePage() {
               return <div className="invoice-line" key={line.key}>
                 <div className="line-product">
                   <strong>{line.productData.name}</strong>
+                  <span className="variant-line">{variantSummary(line.productData) || line.productData.base_unit}</span>
                   <span>
                     {line.purchaseUnit === 'master box' && box
                       ? `${line.quantity || 0} × ${box} = ${calculated.baseQty} pieces`

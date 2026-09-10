@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+
+from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
@@ -12,6 +14,12 @@ ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "localhost,
 CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:5173",
+]
+# Idempotency-Key is sent by purchase/invoice POSTs; without it in the
+# preflight allow-list the browser blocks the request as a CORS error and
+# the frontend misreports it as "server could not be reached".
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "idempotency-key",
 ]
 
 INSTALLED_APPS = [

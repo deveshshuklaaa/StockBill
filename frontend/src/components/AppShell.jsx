@@ -44,11 +44,11 @@ export default function AppShell() {
           <div className="account-block">
             <div className="avatar">{(user?.first_name || user?.username || 'U').slice(0, 1).toUpperCase()}</div>
             <div className="account-copy">
-              <strong>{user?.first_name || user?.username}</strong>
-              <span>{user?.role === 'admin' ? 'Administrator' : 'Staff operator'}</span>
+              <strong>{user?.username || user?.first_name}</strong>
+              <span>{user?.role === 'admin' ? 'ADMINISTRATOR' : 'STAFF'}</span>
             </div>
           </div>
-          <button className="logout-button" onClick={signOut}>Sign out</button>
+          <button className="logout-button" onClick={signOut}>Logout</button>
         </div>
       </aside>
       <main className="main-content">
