@@ -3,10 +3,19 @@ from decimal import Decimal, ROUND_HALF_UP
 TAX_MODE_EXCLUSIVE = "exclusive"
 TAX_MODE_INCLUSIVE = "inclusive"
 
+PAISE_QUANTUM = Decimal("0.01")
+
+
 def round_inr(value):
     return value.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
-def calculate_gst(seller_profile, customer, lines, place_of_supply_state_code=None, tax_mode=TAX_MODE_EXCLUSIVE):
+
+def round_paise(value):
+    """Round to paise; used by purchase lines to mirror supplier bills."""
+    return value.quantize(PAISE_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def calculate_gst(seller_profile, customer, lines, place_of_supply_state_code=None, tax_mode=TAX_MODE_EXCLUSIVE, rounding=round_inr):
     """
     Computes deterministic GST totals across an invoice.
     All calculations operate on python Decimals.
@@ -78,15 +87,15 @@ def calculate_gst(seller_profile, customer, lines, place_of_supply_state_code=No
 
         if is_inter_state:
             igst_rate = tax_rate_val
-            igst_amount = round_inr(total_tax_raw)
+            igst_amount = rounding(total_tax_raw)
         else:
             cgst_rate = half_rate
             sgst_rate = half_rate
             # Strictly speaking, split the raw tax and round
             cgst_raw = taxable_value * (cgst_rate / Decimal(100))
             sgst_raw = taxable_value * (sgst_rate / Decimal(100))
-            cgst_amount = round_inr(cgst_raw)
-            sgst_amount = round_inr(sgst_raw)
+            cgst_amount = rounding(cgst_raw)
+            sgst_amount = rounding(sgst_raw)
 
         # Line level total
         line_tax = cgst_amount + sgst_amount + igst_amount

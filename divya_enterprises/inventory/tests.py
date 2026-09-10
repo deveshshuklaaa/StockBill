@@ -7,8 +7,9 @@ from django.test import TestCase
 from billing.models import Invoice, Payment, BusinessProfile
 from billing.services import create_invoice
 from customers.models import Customer
-from .models import InventoryBalance, Product, StockLedger, Warehouse, TaxRate
-from .services import adjust_inventory, get_default_warehouse, receive_purchase
+from .models import InventoryBalance, Product, StockLedger, Supplier, Warehouse, TaxRate
+from .purchase_services import create_purchase
+from .services import adjust_inventory, get_default_warehouse
 
 
 class InventoryBalanceTests(TestCase):
@@ -115,20 +116,20 @@ class InventoryBalanceTests(TestCase):
         self.assertEqual(self.product.inventory_balances.count(), 1)
 
     def test_purchase_receipt_updates_weighted_cost_balance_and_ledger(self):
-        from .models import Supplier
         supplier = Supplier.objects.create(name="Test Supplier")
-        purchase = receive_purchase(
+        purchase = create_purchase(
             supplier=supplier,
             warehouse=self.warehouse,
-            invoice_number="PURCHASE-1001",
             invoice_date="2026-09-08",
-            created_by=self.user,
             line_items=[
-                {"product": self.product, "quantity": Decimal("5"), "unit_cost": Decimal("80")}
+                {"product": self.product, "quantity": Decimal("5"), "rate": Decimal("80")}
             ],
+            created_by=self.user,
+            post=True,
         )
         balance = InventoryBalance.objects.get(product=self.product, warehouse=self.warehouse)
-        self.assertEqual(purchase.total_amount, Decimal("400"))
+        self.assertEqual(purchase.taxable_total, Decimal("400.00"))
+        self.assertEqual(purchase.total_amount, Decimal("472.00"))
         self.assertEqual(balance.quantity_on_hand, Decimal("5.000"))
         self.assertEqual(balance.average_cost, Decimal("80.00"))
         self.assertEqual(StockLedger.objects.filter(reference_id=purchase.pk, movement_type=StockLedger.PURCHASE).count(), 1)

@@ -1,13 +1,17 @@
 from datetime import date
 from decimal import Decimal, InvalidOperation
+import hashlib
+import json
 
+from django.db import IntegrityError, transaction
 from django.db.models import Q
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from accounts.permissions import IsAdminUser
 from billing.models import AuditLog
 from .attribute_services import get_category_schema
 from .models import (
@@ -18,12 +22,14 @@ from .models import (
     InventoryBalance,
     Product,
     PurchaseInvoice,
+    PurchaseIdempotencyKey,
     StockLedger,
     Supplier,
     TaxRate,
     Warehouse,
 )
 from .permissions import IsAdminOrReadOnly
+from .purchase_services import cancel_purchase, delete_purchase, post_purchase
 from .serializers import (
     AttributeChoiceSerializer,
     AttributeDefinitionSerializer,
@@ -32,7 +38,10 @@ from .serializers import (
     InventoryBalanceSerializer,
     ProductPublicSerializer,
     ProductSerializer,
+    PurchaseInvoiceCreateSerializer,
+    PurchaseInvoiceDetailSerializer,
     PurchaseInvoiceSerializer,
+    PurchaseInvoiceUpdateSerializer,
     StockLedgerSerializer,
     SupplierSerializer,
     TaxRateSerializer,
@@ -375,6 +384,23 @@ class SupplierListCreateView(generics.ListCreateAPIView):
     serializer_class = SupplierSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
+    def get_queryset(self):
+        queryset = Supplier.objects.all().order_by("name")
+        params = self.request.query_params or {}
+        status_param = (params.get("is_active") or "").strip().lower()
+        if status_param:
+            if status_param not in {"true", "false"}:
+                raise ValidationError(
+                    {"is_active": ["is_active must be 'true' or 'false'."]}
+                )
+            queryset = queryset.filter(is_active=status_param == "true")
+        search = (params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(gstin__icontains=search)
+            )
+        return queryset
+
     def perform_create(self, serializer):
         supplier = serializer.save()
         _audit(self.request, "supplier_created", "Supplier", supplier.pk)
@@ -384,6 +410,17 @@ class SupplierDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def perform_update(self, serializer):
+        supplier = serializer.save()
+        _audit(self.request, "supplier_updated", "Supplier", supplier.pk)
+
+    def perform_destroy(self, instance):
+        # Suppliers referenced by purchases or products can never be deleted;
+        # archive instead so history stays intact.
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+        _audit(self.request, "supplier_archived", "Supplier", instance.pk)
 
 
 class WarehouseListCreateView(generics.ListCreateAPIView):
@@ -424,12 +461,191 @@ class InventoryBalanceListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
 
+def _purchase_request_hash(request):
+    return hashlib.sha256(
+        json.dumps(request.data, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+
+
 class PurchaseInvoiceListCreateView(generics.ListCreateAPIView):
-    queryset = (
-        PurchaseInvoice.objects.select_related("supplier", "warehouse", "created_by")
-        .prefetch_related("line_items")
-        .all()
-        .order_by("-created_at")
-    )
-    serializer_class = PurchaseInvoiceSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+    """Admin-only purchase list with server-side filters; create honours
+    Idempotency-Key and can post inline via {"post": true}."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return PurchaseInvoiceCreateSerializer
+        return PurchaseInvoiceSerializer
+
+    def get_queryset(self):
+        queryset = (
+            PurchaseInvoice.objects.select_related("supplier", "warehouse", "created_by")
+            .all()
+            .order_by("-created_at")
+        )
+        params = self.request.query_params or {}
+        supplier = (params.get("supplier") or "").strip()
+        if supplier:
+            if not supplier.isdigit():
+                raise ValidationError({"supplier": ["Supplier must be a numeric id."]})
+            queryset = queryset.filter(supplier_id=int(supplier))
+        state = (params.get("state") or "").strip()
+        if state:
+            if state not in {choice[0] for choice in PurchaseInvoice.STATE_CHOICES}:
+                raise ValidationError(
+                    {"state": ["state must be one of DRAFT, POSTED, CANCELLED."]}
+                )
+            queryset = queryset.filter(state=state)
+        warehouse = (params.get("warehouse") or "").strip()
+        if warehouse:
+            if not warehouse.isdigit():
+                raise ValidationError({"warehouse": ["Warehouse must be a numeric id."]})
+            queryset = queryset.filter(warehouse_id=int(warehouse))
+        from_date = (params.get("from") or "").strip()
+        to_date = (params.get("to") or "").strip()
+        for name, raw in (("from", from_date), ("to", to_date)):
+            if raw:
+                try:
+                    date.fromisoformat(raw)
+                except ValueError:
+                    raise ValidationError(
+                        {name: ["Dates must use YYYY-MM-DD format."]}
+                    )
+        if from_date:
+            queryset = queryset.filter(invoice_date__gte=from_date)
+        if to_date:
+            queryset = queryset.filter(invoice_date__lte=to_date)
+        search = (params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(purchase_number__icontains=search)
+                | Q(supplier_invoice_no__icontains=search)
+                | Q(supplier__name__icontains=search)
+                | Q(notes__icontains=search)
+            )
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        idempotency_key = request.headers.get("Idempotency-Key")
+        request_hash = _purchase_request_hash(request)
+        post_flag = bool(request.data.get("post") if isinstance(request.data, dict) else False)
+
+        if idempotency_key:
+            existing = (
+                PurchaseIdempotencyKey.objects.select_related("purchase")
+                .filter(key=idempotency_key)
+                .first()
+            )
+            if existing:
+                if existing.request_hash != request_hash:
+                    return Response(
+                        {"detail": "Idempotency-Key was already used with a different request."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                return Response(
+                    PurchaseInvoiceDetailSerializer(existing.purchase).data,
+                    status=status.HTTP_200_OK,
+                )
+
+        serializer_context = {"request": request, "post_purchase": post_flag}
+        try:
+            with transaction.atomic():
+                serializer = self.get_serializer(
+                    data=request.data, context=serializer_context
+                )
+                serializer.is_valid(raise_exception=True)
+                purchase = serializer.save()
+                if idempotency_key:
+                    PurchaseIdempotencyKey.objects.create(
+                        key=idempotency_key,
+                        request_hash=request_hash,
+                        purchase=purchase,
+                    )
+        except IntegrityError:
+            existing = (
+                PurchaseIdempotencyKey.objects.select_related("purchase")
+                .filter(key=idempotency_key)
+                .first()
+            )
+            if existing is None:
+                raise
+            if existing.request_hash != request_hash:
+                return Response(
+                    {"detail": "Idempotency-Key was already used with a different request."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            return Response(
+                PurchaseInvoiceDetailSerializer(existing.purchase).data,
+                status=status.HTTP_200_OK,
+            )
+
+        output = PurchaseInvoiceDetailSerializer(purchase).data
+        headers = self.get_success_headers(output)
+        return Response(output, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class PurchaseInvoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get_serializer_class(self):
+        if self.request.method in {"PATCH", "PUT"}:
+            return PurchaseInvoiceUpdateSerializer
+        return PurchaseInvoiceDetailSerializer
+
+    def get_queryset(self):
+        return PurchaseInvoice.objects.select_related(
+            "supplier", "warehouse", "created_by"
+        ).prefetch_related("line_items__product")
+
+    def destroy(self, request, *args, **kwargs):
+        purchase = self.get_object()
+        delete_purchase(purchase_id=purchase.pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PurchaseInvoicePostView(APIView):
+    """Post a draft purchase: receive stock, update WAC, write the ledger."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def post(self, request, pk):
+        purchase = post_purchase(purchase_id=pk, posted_by=request.user)
+        return Response(PurchaseInvoiceDetailSerializer(purchase).data)
+
+
+class PurchaseInvoiceCancelView(APIView):
+    """Cancel a posted purchase with compensating reversal movements."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def post(self, request, pk):
+        reason = (request.data.get("reason", "") or "").strip()
+        if not reason:
+            return Response(
+                {"reason": "A cancellation reason is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        purchase = cancel_purchase(
+            purchase_id=pk, cancelled_by=request.user, reason=reason
+        )
+        return Response(PurchaseInvoiceDetailSerializer(purchase).data)
+
+
+class PurchaseInvoiceNextNumberView(APIView):
+    """Preview the next PI number for the UI (never reserves it)."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        from .purchase_numbering import peek_next_number
+
+        for_date = request.query_params.get("date")
+        try:
+            target = date.fromisoformat(for_date) if for_date else None
+        except ValueError:
+            return Response(
+                {"date": "Dates must use YYYY-MM-DD format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"next_number": peek_next_number(target)})

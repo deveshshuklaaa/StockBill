@@ -106,37 +106,61 @@ class StockValuationReportView(APIView):
     permission_classes = [IsStaffUser]
 
     def get(self, request):
-        products = Product.objects.annotate(
-            cost_value=ExpressionWrapper(F("current_stock") * F("cost_price"), output_field=MONEY_FIELD),
-            selling_value=ExpressionWrapper(F("current_stock") * F("default_price"), output_field=MONEY_FIELD),
-        ).order_by("name")
-        totals = products.aggregate(
-            cost_value=Coalesce(
-                Sum(ExpressionWrapper(F("current_stock") * F("cost_price"), output_field=MONEY_FIELD)),
-                Value(Decimal("0.00")),
+        # Stock is valued at the per-warehouse weighted-average cost the
+        # inventory service maintains: sum(quantity_on_hand x average_cost)
+        # across the product's warehouse balances. Products that have never
+        # been through any receipt fall back to the legacy cost_price.
+        balance_value = Sum(
+            ExpressionWrapper(
+                F("inventory_balances__quantity_on_hand")
+                * F("inventory_balances__average_cost"),
                 output_field=MONEY_FIELD,
-            ),
-            selling_value=Coalesce(
-                Sum(ExpressionWrapper(F("current_stock") * F("default_price"), output_field=MONEY_FIELD)),
-                Value(Decimal("0.00")),
-                output_field=MONEY_FIELD,
-            ),
+            )
         )
+        balance_quantity = Sum("inventory_balances__quantity_on_hand")
+        products = Product.objects.annotate(
+            balance_value_total=Coalesce(
+                balance_value, Value(Decimal("0.00")), output_field=MONEY_FIELD
+            ),
+            balance_quantity_total=Coalesce(
+                balance_quantity, Value(Decimal("0.000")), output_field=QUANTITY_FIELD
+            ),
+        ).annotate(
+            valued_quantity=Case(
+                When(balance_quantity_total__gt=0, then=F("balance_quantity_total")),
+                default=F("current_stock"),
+                output_field=QUANTITY_FIELD,
+            ),
+            cost_value=Case(
+                When(balance_quantity_total__gt=0, then=F("balance_value_total")),
+                default=ExpressionWrapper(
+                    F("current_stock") * F("cost_price"), output_field=MONEY_FIELD
+                ),
+                output_field=MONEY_FIELD,
+            ),
+            selling_value=ExpressionWrapper(
+                F("valued_quantity") * F("default_price"), output_field=MONEY_FIELD
+            ),
+        ).order_by("name")
         is_admin = request.user.normalized_role == User.ROLE_ADMIN
         rows = []
+        total_cost = Decimal("0.00")
+        total_selling = Decimal("0.00")
         for product in products:
             row = {
                 "product_id": product.id,
                 "product_name": product.name,
-                "current_stock": product.current_stock,
+                "current_stock": product.valued_quantity,
                 "stock_value_selling_price": product.selling_value,
             }
+            total_cost += product.cost_value or Decimal("0.00")
+            total_selling += product.selling_value or Decimal("0.00")
             if is_admin:
                 row["stock_value_cost_price"] = product.cost_value
             rows.append(row)
-        response = {"products": rows, "total_valuation_selling_price": totals["selling_value"]}
+        response = {"products": rows, "total_valuation_selling_price": total_selling}
         if is_admin:
-            response["total_valuation_cost_price"] = totals["cost_value"]
+            response["total_valuation_cost_price"] = total_cost
         return Response(response)
 
 

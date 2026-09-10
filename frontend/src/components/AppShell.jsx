@@ -26,6 +26,9 @@ export default function AppShell() {
           <NavLink to="/invoices/new" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">B</span> New invoice
           </NavLink>
+          {isAdmin && <NavLink to="/purchases" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">U</span> Purchases
+          </NavLink>}
           <NavLink to="/products" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">P</span> Products
           </NavLink>

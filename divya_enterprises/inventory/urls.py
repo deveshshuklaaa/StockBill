@@ -13,7 +13,11 @@ from .views import (
     InventoryBalanceListView,
     ProductDetailView,
     ProductListCreateView,
+    PurchaseInvoiceCancelView,
+    PurchaseInvoiceDetailView,
     PurchaseInvoiceListCreateView,
+    PurchaseInvoiceNextNumberView,
+    PurchaseInvoicePostView,
     StockLedgerDetailView,
     StockLedgerListCreateView,
     SupplierDetailView,
@@ -91,5 +95,25 @@ urlpatterns = [
         "purchase-invoices/",
         PurchaseInvoiceListCreateView.as_view(),
         name="purchase-invoice-list-create",
+    ),
+    path(
+        "purchase-invoices/next-number/",
+        PurchaseInvoiceNextNumberView.as_view(),
+        name="purchase-invoice-next-number",
+    ),
+    path(
+        "purchase-invoices/<int:pk>/",
+        PurchaseInvoiceDetailView.as_view(),
+        name="purchase-invoice-detail",
+    ),
+    path(
+        "purchase-invoices/<int:pk>/post/",
+        PurchaseInvoicePostView.as_view(),
+        name="purchase-invoice-post",
+    ),
+    path(
+        "purchase-invoices/<int:pk>/cancel/",
+        PurchaseInvoiceCancelView.as_view(),
+        name="purchase-invoice-cancel",
     ),
 ]

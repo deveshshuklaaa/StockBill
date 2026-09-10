@@ -154,8 +154,38 @@ class CategoryAttributeSerializer(serializers.ModelSerializer):
 class SupplierSerializer(serializers.ModelSerializer):
     class Meta:
         model = Supplier
-        fields = ["id", "name", "contact_info", "created_at"]
+        fields = [
+            "id",
+            "name",
+            "contact_info",
+            "gstin",
+            "address",
+            "state",
+            "state_code",
+            "is_active",
+            "created_at",
+        ]
         read_only_fields = ["id", "created_at"]
+
+    def validate_gstin(self, value):
+        import re
+
+        value = (value or "").strip().upper()
+        if not value:
+            return value
+        if not re.match(Supplier.GSTIN_PATTERN, value):
+            raise serializers.ValidationError(
+                "GSTIN must be a valid 15-character GST identification number."
+            )
+        return value
+
+    def validate_state_code(self, value):
+        value = (value or "").strip()
+        if value and not value.isdigit():
+            raise serializers.ValidationError(
+                "State code must be numeric, e.g. 27 for Maharashtra."
+            )
+        return value
 
 
 class WarehouseSerializer(serializers.ModelSerializer):
@@ -436,37 +466,200 @@ class PurchaseLineItemSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_name",
+            "product_name_snapshot",
+            "sku_snapshot",
+            "hsn_sac_snapshot",
+            "base_unit_snapshot",
             "quantity",
-            "unit_cost",
+            "purchase_unit_name",
+            "conversion_factor",
+            "base_quantity",
+            "rate",
+            "discount_amount",
+            "tax_rate",
+            "cgst_rate",
+            "cgst_amount",
+            "sgst_rate",
+            "sgst_amount",
+            "igst_rate",
+            "igst_amount",
+            "taxable_value",
             "line_total",
+            "unit_cost_snapshot",
         ]
-        read_only_fields = ["id", "product_name", "line_total"]
+        read_only_fields = [
+            "id",
+            "product_name",
+            "product_name_snapshot",
+            "sku_snapshot",
+            "hsn_sac_snapshot",
+            "base_unit_snapshot",
+            "base_quantity",
+            "tax_rate",
+            "cgst_rate",
+            "cgst_amount",
+            "sgst_rate",
+            "sgst_amount",
+            "igst_rate",
+            "igst_amount",
+            "taxable_value",
+            "line_total",
+            "unit_cost_snapshot",
+        ]
+
+
+class PurchaseLineInputSerializer(serializers.Serializer):
+    """Write-side line payload: only transaction-level inputs are accepted."""
+
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.filter(is_active=True)
+    )
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=0.001)
+    purchase_unit_name = serializers.ChoiceField(
+        choices=["piece", "master box"], default="piece"
+    )
+    conversion_factor = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=0.001, default=1
+    )
+    rate = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+    discount_amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=0, required=False, default=0
+    )
+    tax_rate = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False, allow_null=True
+    )
 
 
 class PurchaseInvoiceSerializer(serializers.ModelSerializer):
-    line_items = PurchaseLineItemSerializer(many=True, required=True)
+    line_items = PurchaseLineInputSerializer(many=True, required=False)
+    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    supplier_invoice_no = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+    tax_mode = serializers.ChoiceField(
+        choices=["exclusive", "inclusive"], default="exclusive"
+    )
+    invoice_date = serializers.DateField()
 
     class Meta:
         model = PurchaseInvoice
         fields = [
             "id",
             "supplier",
+            "supplier_name",
             "warehouse",
-            "invoice_number",
+            "warehouse_name",
+            "purchase_number",
+            "supplier_invoice_no",
             "invoice_date",
-            "total_amount",
-            "created_by",
+            "state",
+            "tax_mode",
             "line_items",
+            "supplier_name_snapshot",
+            "supplier_gstin_snapshot",
+            "supplier_state_snapshot",
+            "supplier_state_code_snapshot",
+            "subtotal",
+            "discount_total",
+            "taxable_total",
+            "cgst_total",
+            "sgst_total",
+            "igst_total",
+            "total_amount",
+            "notes",
+            "cancellation_reason",
+            "cancelled_at",
+            "posted_at",
+            "created_by",
             "created_at",
+            "updated_at",
         ]
-        read_only_fields = ["id", "total_amount", "created_by", "created_at"]
+        read_only_fields = [
+            "id",
+            "purchase_number",
+            "supplier_name",
+            "warehouse_name",
+            "state",
+            "supplier_name_snapshot",
+            "supplier_gstin_snapshot",
+            "supplier_state_snapshot",
+            "supplier_state_code_snapshot",
+            "subtotal",
+            "discount_total",
+            "taxable_total",
+            "cgst_total",
+            "sgst_total",
+            "igst_total",
+            "total_amount",
+            "cancellation_reason",
+            "cancelled_at",
+            "posted_at",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class PurchaseInvoiceDetailSerializer(PurchaseInvoiceSerializer):
+    """Read-side representation: full lines with snapshots and cost basis."""
+
+    line_items = PurchaseLineItemSerializer(many=True, read_only=True)
+
+    class Meta(PurchaseInvoiceSerializer.Meta):
+        fields = PurchaseInvoiceSerializer.Meta.fields + ["line_items"]
+
+
+class PurchaseInvoiceCreateSerializer(PurchaseInvoiceSerializer):
+    """Create-side: lines are required and posting can be requested inline."""
+
+    line_items = PurchaseLineInputSerializer(many=True, required=True)
+
+    def validate(self, attrs):
+        if not attrs.get("line_items"):
+            raise serializers.ValidationError(
+                {"line_items": "At least one purchase line is required."}
+            )
+        return attrs
 
     def create(self, validated_data):
-        from .services import receive_purchase
+        from .purchase_services import create_purchase
 
         line_items = validated_data.pop("line_items")
-        return receive_purchase(
+        return create_purchase(
+            supplier=validated_data["supplier"],
+            warehouse=validated_data.get("warehouse"),
+            invoice_date=validated_data["invoice_date"],
+            line_items=line_items,
             created_by=self.context["request"].user,
+            supplier_invoice_no=validated_data.get("supplier_invoice_no", ""),
+            tax_mode=validated_data.get("tax_mode", PurchaseInvoice.TAX_MODE_EXCLUSIVE),
+            notes=validated_data.get("notes", ""),
+            post=bool(self.context.get("post_purchase", False)),
+        )
+
+
+class PurchaseInvoiceUpdateSerializer(PurchaseInvoiceSerializer):
+    """Draft-only update: header fields and full line replacement."""
+
+    line_items = PurchaseLineInputSerializer(many=True, required=False)
+
+    def validate(self, attrs):
+        state = getattr(self.instance, "state", None)
+        if state is not None and state != PurchaseInvoice.STATE_DRAFT:
+            raise serializers.ValidationError(
+                {"state": "Only draft purchases can be edited."}
+            )
+        return attrs
+
+    def update(self, instance, validated_data):
+        from .purchase_services import update_purchase
+
+        line_items = validated_data.pop("line_items", None)
+        purchase = update_purchase(
+            purchase_id=instance.pk,
+            updated_by=self.context["request"].user,
             line_items=line_items,
             **validated_data,
         )
+        return purchase

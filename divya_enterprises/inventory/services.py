@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db import connection, models, transaction
 from rest_framework import serializers
 
-from .models import InventoryBalance, Product, PurchaseInvoice, PurchaseLineItem, StockLedger, Warehouse
+from .models import InventoryBalance, Product, StockLedger, Warehouse
 
 
 DEFAULT_WAREHOUSE_CODE = "MAIN"
@@ -83,63 +83,3 @@ def adjust_inventory(*, product, quantity_delta, movement_type, created_by=None,
     product.save(update_fields=["current_stock", "updated_at"])
     return balance
 
-
-@transaction.atomic
-def receive_purchase(*, supplier, warehouse, invoice_number, invoice_date, created_by, line_items):
-    if not line_items:
-        raise serializers.ValidationError({"line_items": "At least one purchase line is required."})
-    products = Product.objects.select_for_update().in_bulk({item["product"].pk for item in line_items})
-    balances = {}
-    calculated = []
-    total = Decimal("0.00")
-    for item in line_items:
-        product = products[item["product"].pk]
-        quantity = Decimal(item["quantity"])
-        unit_cost = Decimal(item["unit_cost"])
-        if quantity <= 0 or unit_cost < 0:
-            raise serializers.ValidationError({"line_items": "Purchase quantity must be positive and cost cannot be negative."})
-        balance = ensure_inventory_balance(product=product, warehouse=warehouse, created_by=created_by)
-        balances[product.pk] = InventoryBalance.objects.select_for_update().get(pk=balance.pk)
-        line_total = quantity * unit_cost
-        calculated.append((product, quantity, unit_cost, line_total))
-        total += line_total
-
-    purchase = PurchaseInvoice.objects.create(
-        supplier=supplier,
-        warehouse=warehouse,
-        invoice_number=invoice_number,
-        invoice_date=invoice_date,
-        total_amount=total,
-        created_by=created_by,
-    )
-    for product, quantity, unit_cost, line_total in calculated:
-        balance = balances[product.pk]
-        old_value = balance.quantity_on_hand * balance.average_cost
-        new_value = quantity * unit_cost
-        next_quantity = balance.quantity_on_hand + quantity
-        balance.average_cost = (old_value + new_value) / next_quantity if next_quantity else Decimal("0.00")
-        with connection.cursor() as cursor:
-            cursor.execute("SET LOCAL stockbill.allow_inventory_mutation = 'on'")
-        balance._allow_service_update = True
-        balance.save(update_fields=["average_cost", "updated_at"])
-        PurchaseLineItem.objects.create(
-            purchase_invoice=purchase,
-            product=product,
-            quantity=quantity,
-            unit_cost=unit_cost,
-            line_total=line_total,
-        )
-        adjust_inventory(
-            product=product,
-            warehouse=warehouse,
-            quantity_delta=quantity,
-            movement_type=StockLedger.PURCHASE,
-            created_by=created_by,
-            reference_type="purchase_invoice",
-            reference_id=purchase.pk,
-            unit_cost=unit_cost,
-        )
-        product._allow_stock_cache_update = True
-        product.cost_price = unit_cost
-        product.save(update_fields=["cost_price", "updated_at"])
-    return purchase

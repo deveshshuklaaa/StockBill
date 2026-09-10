@@ -37,3 +37,9 @@
 .pager-button { border: 1px solid #cbd5cd; background: #fff; color: #4f6c5b; padding: 7px 13px; font: 500 11px 'IBM Plex Mono', monospace; cursor: pointer; }
 .pager-button:hover:not(:disabled) { border-color: var(--green); color: var(--green-dark); }
 .pager-button:disabled { color: #b6c0b9; cursor: not-allowed; background: #f4f6f3; }
+
+/* Purchases module */
+.state-cancelled { font: 500 11px 'IBM Plex Mono', monospace; color: #8a4740; background: #f3e2df; padding: 4px 7px; }
+.invoice-line label select { display: block; width: 100%; margin-top: 0; border: 1px solid #cbd5cd; background: #fff; color: var(--ink); padding: 9px 6px; outline: none; font-size: 12px; }
+.invoice-line label select:focus { border-color: var(--green); }
+.submit-invoice + .submit-invoice { margin-top: 8px; }
