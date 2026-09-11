@@ -45,7 +45,7 @@ function validationMessage(data) {
         if (typeof value === 'object' && value !== null) {
           // Nested errors: flatten without numeric keys
           const nested = Object.entries(value)
-            .map(([k, v]) => (Array.isArray(v) ? v.join(', ') : String(v)))
+            .map(([_k, v]) => (Array.isArray(v) ? v.join(', ') : String(v)))
             .join('; ')
           return `${key}: ${nested}`
         }
