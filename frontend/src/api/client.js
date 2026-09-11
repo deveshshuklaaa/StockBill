@@ -18,10 +18,44 @@ function isNetworkFailure(error) {
 }
 
 function validationMessage(data) {
+  // Handle string detail responses
   if (typeof data?.detail === 'string') return data.detail
-  return Object.entries(data || {})
-    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
-    .join(' | ')
+
+  // Handle array responses (malformed backend or unexpected error shape)
+  if (Array.isArray(data)) {
+    const messages = data
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item?.detail) return item.detail
+        if (typeof item === 'object') return JSON.stringify(item)
+        return String(item)
+      })
+      .filter(Boolean)
+    return messages.join('; ') || 'An error occurred.'
+  }
+
+  // Handle object responses (field errors)
+  if (typeof data === 'object' && data !== null) {
+    const entries = Object.entries(data)
+      .filter(([key]) => key !== 'detail') // Skip detail if already checked
+      .map(([key, value]) => {
+        if (Array.isArray(value)) {
+          return `${key}: ${value.join(', ')}`
+        }
+        if (typeof value === 'object' && value !== null) {
+          // Nested errors: flatten without numeric keys
+          const nested = Object.entries(value)
+            .map(([k, v]) => (Array.isArray(v) ? v.join(', ') : String(v)))
+            .join('; ')
+          return `${key}: ${nested}`
+        }
+        return `${key}: ${value}`
+      })
+    return entries.join(' | ') || 'An error occurred.'
+  }
+
+  // Fallback for unexpected types
+  return 'An error occurred.'
 }
 
 export function apiErrorMessage(error, { action = 'processing request' } = {}) {
