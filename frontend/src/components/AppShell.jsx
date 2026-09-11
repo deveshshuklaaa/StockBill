@@ -21,8 +21,8 @@ export default function AppShell() {
             <span>StockBill operations</span>
           </div>
         </div>
-        <div className="workspace-label">Operations</div>
         <nav className="primary-nav" aria-label="Primary navigation">
+          <div className="workspace-label">Operations</div>
           <NavLink to="/invoices/new" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">B</span> New invoice
           </NavLink>
@@ -32,9 +32,7 @@ export default function AppShell() {
           {isAdmin && <NavLink to="/purchases" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">U</span> Purchases
           </NavLink>}
-        </nav>
-        <div className="workspace-label">Catalogue</div>
-        <nav className="primary-nav" aria-label="Catalogue navigation">
+          <div className="workspace-label">Catalogue</div>
           <NavLink to="/products" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">P</span> Products
           </NavLink>
@@ -44,10 +42,8 @@ export default function AppShell() {
           <NavLink to="/customers" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">C</span> Customers
           </NavLink>
-        </nav>
-        {isAdmin && <>
-          <div className="workspace-label">Configuration</div>
-          <nav className="primary-nav" aria-label="Configuration navigation">
+          {isAdmin && <>
+            <div className="workspace-label">Configuration</div>
             <NavLink to="/warehouses" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <span className="nav-symbol">W</span> Warehouses
             </NavLink>
@@ -57,14 +53,12 @@ export default function AppShell() {
             <NavLink to="/settings/taxes" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <span className="nav-symbol">T</span> Taxes
             </NavLink>
-          </nav>
-          <div className="workspace-label">Administration</div>
-          <nav className="primary-nav" aria-label="Admin navigation">
+            <div className="workspace-label">Administration</div>
             <NavLink to="/audit-logs" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <span className="nav-symbol">A</span> Audit Logs
             </NavLink>
-          </nav>
-        </>}
+          </>}
+        </nav>
         <div className="sidebar-foot">
           <div className="account-block">
             <div className="avatar">{(user?.first_name || user?.username || 'U').slice(0, 1).toUpperCase()}</div>
