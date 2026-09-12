@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    AuditLogListView,
+    BusinessProfileView,
     CreditNoteDetailView,
     CreditNoteListCreateView,
     InvoiceDetailView,
@@ -16,6 +18,8 @@ from .views import (
 from .reporting import DailySalesReportView, ProfitLossReportView, StockValuationReportView, TopProductsReportView
 
 urlpatterns = [
+    path("business-profile/", BusinessProfileView.as_view(), name="business-profile"),
+    path("audit-logs/", AuditLogListView.as_view(), name="audit-log-list"),
     path("invoices/", InvoiceListCreateView.as_view(), name="invoice-list-create"),
     path("invoices/drafts/", InvoiceDraftCreateView.as_view(), name="invoice-draft-create"),
     path("invoices/<int:pk>/", InvoiceDetailView.as_view(), name="invoice-detail"),

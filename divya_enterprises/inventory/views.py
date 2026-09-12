@@ -460,6 +460,30 @@ class InventoryBalanceListView(generics.ListAPIView):
     serializer_class = InventoryBalanceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        params = self.request.query_params or {}
+
+        # Filter by product if provided
+        product_id = params.get("product")
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+
+        # Filter by warehouse if provided
+        warehouse_id = params.get("warehouse")
+        if warehouse_id:
+            queryset = queryset.filter(warehouse_id=warehouse_id)
+
+        # Search by product name or SKU
+        search = (params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                models.Q(product__name__icontains=search)
+                | models.Q(product__sku__icontains=search)
+            )
+
+        return queryset
+
 
 def _purchase_request_hash(request):
     return hashlib.sha256(

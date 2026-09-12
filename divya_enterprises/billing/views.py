@@ -1,11 +1,14 @@
 from decimal import Decimal
 import hashlib
 import json
+from datetime import date
 
+from django.db.models import Q
 from django.http import HttpResponse
 from django.utils.text import slugify
 from django.db import IntegrityError, transaction
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -15,10 +18,79 @@ except OSError:
     HTML = None
 
 from accounts.permissions import IsAdminUser
-from .models import CreditNote, Invoice, InvoiceIdempotencyKey, InvoiceLineItem, Payment
-from .serializers import CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
+from .models import AuditLog, BusinessProfile, CreditNote, Invoice, InvoiceIdempotencyKey, InvoiceLineItem, Payment
+from .serializers import AuditLogSerializer, BusinessProfileSerializer, CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
 from .services import cancel_invoice, post_invoice, reverse_payment
 from .pdf import render_invoice_html
+
+
+class BusinessProfileView(generics.RetrieveUpdateAPIView):
+    """Single-row business profile used by invoices and the tax engine.
+
+    Admin-only for both read and write: the profile drives GST place-of-supply
+    and invoice snapshots, so it is configuration rather than shop data.
+    """
+
+    serializer_class = BusinessProfileSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get_object(self):
+        profile = BusinessProfile.objects.first()
+        if profile is None:
+            profile = BusinessProfile.objects.create(
+                business_name="",
+                gstin="",
+                registered_address="",
+                state="",
+                state_code="",
+            )
+        return profile
+
+    def perform_update(self, serializer):
+        serializer.save()
+        AuditLog.objects.create(
+            user=self.request.user,
+            action="business_profile_updated",
+            entity_type="BusinessProfile",
+            entity_id=serializer.instance.pk,
+        )
+
+
+class AuditLogListView(generics.ListAPIView):
+    """Admin-only, read-only audit trail with server-side filters."""
+
+    serializer_class = AuditLogSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get_queryset(self):
+        queryset = AuditLog.objects.select_related("user").all()
+        params = self.request.query_params or {}
+        search = (params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(action__icontains=search)
+                | Q(entity_type__icontains=search)
+                | Q(user__username__icontains=search)
+            )
+        entity_type = (params.get("entity_type") or "").strip()
+        if entity_type:
+            queryset = queryset.filter(entity_type__iexact=entity_type)
+        action = (params.get("action") or "").strip()
+        if action:
+            queryset = queryset.filter(action__iexact=action)
+        from_date = (params.get("from") or "").strip()
+        to_date = (params.get("to") or "").strip()
+        for name, raw in (("from", from_date), ("to", to_date)):
+            if raw:
+                try:
+                    date.fromisoformat(raw)
+                except ValueError:
+                    raise ValidationError({name: [f"{name} must use YYYY-MM-DD format."]})
+        if from_date:
+            queryset = queryset.filter(created_at__date__gte=from_date)
+        if to_date:
+            queryset = queryset.filter(created_at__date__lte=to_date)
+        return queryset
 
 
 class InvoiceListCreateView(generics.ListCreateAPIView):

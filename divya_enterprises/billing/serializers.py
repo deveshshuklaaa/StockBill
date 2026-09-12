@@ -1,6 +1,40 @@
 from rest_framework import serializers
 
-from .models import CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
+from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
+
+
+class BusinessProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BusinessProfile
+        fields = [
+            "id",
+            "business_name",
+            "trade_name",
+            "gstin",
+            "registered_address",
+            "state",
+            "state_code",
+            "contact_details",
+        ]
+        read_only_fields = ["id"]
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username", read_only=True, allow_null=True)
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            "id",
+            "user",
+            "username",
+            "action",
+            "entity_type",
+            "entity_id",
+            "metadata",
+            "created_at",
+        ]
+        read_only_fields = fields
 
 
 class InvoiceLineItemSerializer(serializers.ModelSerializer):
