@@ -98,6 +98,42 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        params = self.request.query_params or {}
+
+        search = (params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(invoice_number__icontains=search)
+                | Q(customer_name_snapshot__icontains=search)
+                | Q(customer__name__icontains=search)
+                | Q(notes__icontains=search)
+            )
+        state = (params.get("state") or "").strip()
+        if state:
+            if state not in {choice[0] for choice in Invoice.STATE_CHOICES}:
+                raise ValidationError({"state": ["state must be one of DRAFT, POSTED, CANCELLED."]})
+            queryset = queryset.filter(state=state)
+        payment_type = (params.get("payment_type") or "").strip()
+        if payment_type:
+            if payment_type not in {choice[0] for choice in Invoice.PAYMENT_TYPE_CHOICES}:
+                raise ValidationError({"payment_type": ["payment_type must be cash or credit."]})
+            queryset = queryset.filter(payment_type=payment_type)
+        from_date = (params.get("from") or "").strip()
+        to_date = (params.get("to") or "").strip()
+        for name, raw in (("from", from_date), ("to", to_date)):
+            if raw:
+                try:
+                    date.fromisoformat(raw)
+                except ValueError:
+                    raise ValidationError({name: [f"{name} must use YYYY-MM-DD format."]})
+        if from_date:
+            queryset = queryset.filter(invoice_date__gte=from_date)
+        if to_date:
+            queryset = queryset.filter(invoice_date__lte=to_date)
+        return queryset
+
     def create(self, request, *args, **kwargs):
         idempotency_key = request.headers.get("Idempotency-Key")
         if not idempotency_key:

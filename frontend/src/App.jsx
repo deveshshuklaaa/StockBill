@@ -9,6 +9,7 @@ import CustomersPage from './pages/CustomersPage'
 import EditProductPage from './pages/EditProductPage'
 import InventoryPage from './pages/InventoryPage'
 import InvoiceDetailPage from './pages/InvoiceDetailPage'
+import InvoicesPage from './pages/InvoicesPage'
 import NewInvoicePage from './pages/NewInvoicePage'
 import LoginPage from './pages/LoginPage'
 import NewPurchasePage from './pages/NewPurchasePage'
@@ -39,6 +40,7 @@ function App() {
       <Route path="/settings/business" element={<BusinessProfilePage />} />
       <Route path="/settings/taxes" element={<TaxConfigurationPage />} />
       <Route path="/audit-logs" element={<AuditLogsPage />} />
+      <Route path="/invoices" element={<InvoicesPage />} />
       <Route path="/invoices/new" element={<NewInvoicePage />} />
       <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
       <Route path="*" element={<Navigate to="/products" replace />} />
