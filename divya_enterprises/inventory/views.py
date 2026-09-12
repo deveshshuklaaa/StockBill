@@ -509,50 +509,113 @@ class WarehouseDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class StockLedgerListCreateView(generics.ListAPIView):
-    queryset = (
-        StockLedger.objects.select_related("product", "warehouse")
-        .all()
-        .order_by("-created_at")
-    )
     serializer_class = StockLedgerSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
+    def get_queryset(self):
+        queryset = (
+            StockLedger.objects.select_related(
+                "product", "product__catalogue_category", "warehouse", "created_by"
+            )
+            .all()
+            .order_by("-created_at")
+        )
+        params = self.request.query_params or {}
+
+        product = (params.get("product") or "").strip()
+        if product:
+            if not product.isdigit():
+                raise ValidationError({"product": ["Product must be a numeric id."]})
+            queryset = queryset.filter(product_id=int(product))
+
+        warehouse = (params.get("warehouse") or "").strip()
+        if warehouse:
+            if not warehouse.isdigit():
+                raise ValidationError(
+                    {"warehouse": ["Warehouse must be a numeric id."]}
+                )
+            queryset = queryset.filter(warehouse_id=int(warehouse))
+
+        movement_type = (params.get("movement_type") or "").strip()
+        if movement_type:
+            valid_types = {choice[0] for choice in StockLedger.MOVEMENT_CHOICES}
+            if movement_type not in valid_types:
+                raise ValidationError(
+                    {
+                        "movement_type": [
+                            f"Must be one of: {', '.join(sorted(valid_types))}."
+                        ]
+                    }
+                )
+            queryset = queryset.filter(movement_type=movement_type)
+
+        from_date = (params.get("from") or "").strip()
+        to_date = (params.get("to") or "").strip()
+        for name, raw in (("from", from_date), ("to", to_date)):
+            if raw:
+                try:
+                    date.fromisoformat(raw)
+                except ValueError:
+                    raise ValidationError(
+                        {name: ["Dates must use YYYY-MM-DD format."]}
+                    )
+        if from_date:
+            queryset = queryset.filter(created_at__date__gte=from_date)
+        if to_date:
+            queryset = queryset.filter(created_at__date__lte=to_date)
+
+        reference = (params.get("reference") or "").strip()
+        if reference:
+            queryset = queryset.filter(reference__icontains=reference)
+
+        return queryset
+
 
 class StockLedgerDetailView(generics.RetrieveAPIView):
-    queryset = StockLedger.objects.select_related("product", "warehouse").all()
+    queryset = StockLedger.objects.select_related(
+        "product", "product__catalogue_category", "warehouse", "created_by"
+    ).all()
     serializer_class = StockLedgerSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
 
 class InventoryBalanceListView(generics.ListAPIView):
-    queryset = (
-        InventoryBalance.objects.select_related("product", "warehouse")
-        .all()
-        .order_by("warehouse__code", "product__name")
-    )
     serializer_class = InventoryBalanceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = (
+            InventoryBalance.objects.select_related(
+                "product", "product__catalogue_category", "warehouse"
+            )
+            .prefetch_related(
+                "product__attribute_values__attribute_definition",
+                "product__attribute_values__value_choice",
+            )
+            .all()
+            .order_by("warehouse__code", "product__name")
+        )
         params = self.request.query_params or {}
 
-        # Filter by product if provided
-        product_id = params.get("product")
-        if product_id:
-            queryset = queryset.filter(product_id=product_id)
+        product = (params.get("product") or "").strip()
+        if product:
+            if not product.isdigit():
+                raise ValidationError({"product": ["Product must be a numeric id."]})
+            queryset = queryset.filter(product_id=int(product))
 
-        # Filter by warehouse if provided
-        warehouse_id = params.get("warehouse")
-        if warehouse_id:
-            queryset = queryset.filter(warehouse_id=warehouse_id)
+        warehouse = (params.get("warehouse") or "").strip()
+        if warehouse:
+            if not warehouse.isdigit():
+                raise ValidationError(
+                    {"warehouse": ["Warehouse must be a numeric id."]}
+                )
+            queryset = queryset.filter(warehouse_id=int(warehouse))
 
-        # Search by product name or SKU
         search = (params.get("search") or "").strip()
         if search:
             queryset = queryset.filter(
-                models.Q(product__name__icontains=search)
-                | models.Q(product__sku__icontains=search)
+                Q(product__name__icontains=search)
+                | Q(product__sku__icontains=search)
             )
 
         return queryset

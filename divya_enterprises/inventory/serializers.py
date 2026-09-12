@@ -406,7 +406,13 @@ class ProductPublicSerializer(serializers.ModelSerializer):
 
 class StockLedgerSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
+    product_sku = serializers.CharField(
+        source="product.sku", read_only=True, allow_null=True
+    )
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    created_by_username = serializers.CharField(
+        source="created_by.username", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = StockLedger
@@ -414,6 +420,7 @@ class StockLedgerSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_name",
+            "product_sku",
             "warehouse",
             "warehouse_name",
             "quantity_change",
@@ -425,20 +432,43 @@ class StockLedgerSerializer(serializers.ModelSerializer):
             "unit_cost",
             "reason",
             "created_by",
+            "created_by_username",
             "created_at",
         ]
         read_only_fields = [
             "id",
             "created_at",
             "product_name",
+            "product_sku",
             "warehouse_name",
             "quantity_delta",
             "created_by",
+            "created_by_username",
         ]
 
 
 class InventoryBalanceSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
+    product_sku = serializers.CharField(
+        source="product.sku", read_only=True, allow_null=True
+    )
+    product_mrp = serializers.DecimalField(
+        source="product.mrp",
+        read_only=True,
+        max_digits=12,
+        decimal_places=2,
+        allow_null=True,
+    )
+    product_base_unit = serializers.CharField(
+        source="product.base_unit", read_only=True
+    )
+    product_category_name = serializers.CharField(
+        source="product.catalogue_category.name", read_only=True, allow_null=True
+    )
+    product_is_active = serializers.BooleanField(
+        source="product.is_active", read_only=True
+    )
+    product_attributes = serializers.SerializerMethodField()
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
 
     class Meta:
@@ -447,6 +477,12 @@ class InventoryBalanceSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_name",
+            "product_sku",
+            "product_mrp",
+            "product_base_unit",
+            "product_category_name",
+            "product_is_active",
+            "product_attributes",
             "warehouse",
             "warehouse_name",
             "quantity_on_hand",
@@ -455,6 +491,11 @@ class InventoryBalanceSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+    def get_product_attributes(self, obj):
+        # Matches the products API attribute payload so the same variant
+        # identification (net weight, master box size) renders everywhere.
+        return assemble_product_attributes(obj.product)
 
 
 class PurchaseLineItemSerializer(serializers.ModelSerializer):

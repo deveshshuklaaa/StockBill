@@ -127,6 +127,61 @@ class InventoryNavigationTests(APITestCase):
                            f"Expected product {self.product_a.pk}, got {item['product']}")
             self.assertEqual(item["product_name"], "Flour - Premium White")
 
+    def test_two_different_products_return_different_balances(self):
+        """Regression: /inventory/3 and /inventory/124 must not render identically.
+
+        The detail page derives its header/totals from the ?product= filter.
+        If the filter is ignored, both routes show the same first row of the
+        unfiltered list. The API contract: exactly the requested product's
+        rows, different quantities, and per-product WAC.
+        """
+        responses = {}
+        for product in (self.product_a, self.product_b):
+            response = self.client_as(self.admin).get(
+                "/api/inventory-balances/", {"product": product.pk}
+            )
+            self.assertEqual(response.status_code, 200)
+            items = response.data["results"]
+            self.assertEqual(len(items), 1, f"Expected exactly one row for {product.name}")
+            self.assertEqual(items[0]["product"], product.pk)
+            responses[product.pk] = items[0]
+
+        row_a = responses[self.product_a.pk]
+        row_b = responses[self.product_b.pk]
+        self.assertNotEqual(row_a["product_name"], row_b["product_name"])
+        self.assertNotEqual(
+            Decimal(row_a["quantity_on_hand"]), Decimal(row_b["quantity_on_hand"])
+        )
+        self.assertNotEqual(Decimal(row_a["average_cost"]), Decimal(row_b["average_cost"]))
+        # WAC must be the balance values, never MRP or another product's cost.
+        self.assertEqual(Decimal(row_a["average_cost"]), Decimal("200.00"))
+        self.assertEqual(Decimal(row_b["average_cost"]), Decimal("250.00"))
+
+    def test_stock_ledger_filters_to_requested_product(self):
+        """The movement history must be scoped to the requested product."""
+        from inventory.services import adjust_inventory
+
+        for product in (self.product_a, self.product_b):
+            adjust_inventory(
+                product=product,
+                quantity_delta=Decimal("10"),
+                movement_type=StockLedger.ADJUSTMENT,
+                created_by=self.admin,
+            )
+
+        for product in (self.product_a, self.product_b):
+            response = self.client_as(self.admin).get(
+                "/api/stock-ledger/", {"product": product.pk}
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertGreater(response.data["count"], 0)
+            for row in response.data["results"]:
+                self.assertEqual(
+                    row["product"],
+                    product.pk,
+                    f"Ledger for product {product.pk} leaked row for {row['product']}",
+                )
+
 
 class AdminPagesAccessTests(APITestCase):
     """BUG 3: Verify admin pages return correct data without errors."""

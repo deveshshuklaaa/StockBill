@@ -43,16 +43,44 @@ export default function ProductStockDetailPage() {
   const latestLoad = useRef(0)
 
   useEffect(() => {
-    setBusy(true); setError('')
+    // Route changed: drop the previous product's data immediately so a stale
+    // render can never show the old product as the current one.
+    const requestId = ++latestLoad.current
+    setProductBalances([])
+    setMovements([])
+    setPage(1)
+    setBusy(true)
+    setError('')
     fetchProductInventory(productId)
       .then((data) => {
+        if (requestId !== latestLoad.current) return
         setProductBalances(data)
       })
-      .catch((err) => setError(apiErrorMessage(err)))
-      .finally(() => setBusy(false))
+      .catch((err) => {
+        if (requestId !== latestLoad.current) return
+        setError(apiErrorMessage(err))
+      })
+      .finally(() => {
+        if (requestId === latestLoad.current) setBusy(false)
+      })
+    fetchStockLedger({ page: 1, product: productId })
+      .then((data) => {
+        if (requestId !== latestLoad.current) return
+        setMovements(Array.isArray(data) ? data : data.results || [])
+        setTotal(Number(data.count ?? 0))
+        setHasNext(Boolean(data.next))
+        setHasPrevious(Boolean(data.previous))
+      })
+      .catch(() => {
+        if (requestId !== latestLoad.current) return
+      })
+      .finally(() => {
+        if (requestId === latestLoad.current) setMovementsBusy(false)
+      })
   }, [productId])
 
   useEffect(() => {
+    if (page === 1) return
     const requestId = ++latestLoad.current
     setMovementsBusy(true)
     fetchStockLedger({ page, product: productId })
@@ -70,20 +98,32 @@ export default function ProductStockDetailPage() {
       .finally(() => { if (requestId === latestLoad.current) setMovementsBusy(false) })
   }, [page, productId])
 
-  if (busy) {
-    return <section className="page-section"><div className="empty-state">Loading product details...</div></section>
-  }
-
-  if (productBalances.length === 0) {
+  if (busy || productBalances.length === 0) {
     return <section className="page-section">
-      <StatusMessage>{error || 'Product not found in inventory.'}</StatusMessage>
-      <Link to="/inventory" className="secondary-button">← Back to inventory</Link>
+      <StatusMessage>{productBalances.length === 0 && !busy ? (error || 'Product not found in inventory.') : ''}</StatusMessage>
+      {productBalances.length === 0 && !busy
+        ? <Link to="/inventory" className="secondary-button">← Back to inventory</Link>
+        : <div className="empty-state">Loading product details...</div>}
     </section>
   }
 
-  const firstBalance = productBalances[0]
-  const totalStock = productBalances.reduce((sum, b) => sum + Number(b.quantity_on_hand), 0)
-  const totalValue = productBalances.reduce((sum, b) => sum + Number(b.quantity_on_hand) * Number(b.average_cost), 0)
+  // Defensive: only render balances that belong to the requested product.
+  // The backend filter guarantees this, but the header must never be taken
+  // from an unrelated row (e.g. first of an unfiltered page).
+  const requestedId = Number(productId)
+  const productRows = productBalances.filter(
+    (balance) => Number(balance.product) === requestedId
+  )
+
+  // Rows not matching the route (stale response from a previous product)
+  // must never render as the current product.
+  if (productRows.length === 0) {
+    return <section className="page-section"><div className="empty-state">Loading product details...</div></section>
+  }
+
+  const firstBalance = productRows[0]
+  const totalStock = productRows.reduce((sum, b) => sum + Number(b.quantity_on_hand), 0)
+  const totalValue = productRows.reduce((sum, b) => sum + Number(b.quantity_on_hand) * Number(b.average_cost), 0)
   const attrs = formatAttributes(firstBalance.product_attributes)
 
   const totalPages = Math.max(1, Math.ceil(total / 25))
@@ -136,7 +176,7 @@ export default function ProductStockDetailPage() {
             </tr>
           </thead>
           <tbody>
-            {productBalances.map((balance) => (
+            {productRows.map((balance) => (
               <tr key={balance.id}>
                 <td><strong>{balance.warehouse_name}</strong></td>
                 <td style={{ textAlign: 'right' }}>{qty(balance.quantity_on_hand)}</td>
@@ -171,7 +211,7 @@ export default function ProductStockDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {movements.map((movement) => {
+              {movements.filter((movement) => Number(movement.product) === requestedId).map((movement) => {
                 const isReversal = movement.movement_type.includes('REVERSAL')
                 return (
                   <tr key={movement.id} className={isReversal ? 'archived-row' : ''}>
