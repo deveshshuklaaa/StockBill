@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
@@ -158,6 +158,79 @@ class TaxRateListView(generics.ListAPIView):
     queryset = TaxRate.objects.filter(is_active=True).order_by("rate")
     serializer_class = TaxRateSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+
+class TaxRateAdminListCreateView(generics.ListCreateAPIView):
+    """Admin-only tax rate management: list all (active/inactive), create new."""
+
+    queryset = TaxRate.objects.all().order_by("rate")
+    serializer_class = TaxRateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def perform_create(self, serializer):
+        tax_rate = serializer.save()
+        _audit(self.request, "tax_rate_created", "TaxRate", tax_rate.pk)
+
+
+class TaxRateAdminDetailView(generics.RetrieveUpdateAPIView):
+    """Admin-only: retrieve, update (including is_active flag) individual tax rates."""
+
+    queryset = TaxRate.objects.all()
+    serializer_class = TaxRateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def perform_update(self, serializer):
+        was_active = serializer.instance.is_active
+        tax_rate = serializer.save()
+        action = "tax_rate_updated"
+        if not was_active and tax_rate.is_active:
+            action = "tax_rate_activated"
+        elif was_active and not tax_rate.is_active:
+            action = "tax_rate_deactivated"
+        _audit(self.request, action, "TaxRate", tax_rate.pk)
+
+
+class WarehouseSummaryView(APIView):
+    """Read-only per-warehouse inventory summary derived from InventoryBalance.
+
+    Stock value is quantity_on_hand x average_cost summed per warehouse —
+    the same authoritative WAC basis the inventory service maintains.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        summaries = []
+        warehouses = Warehouse.objects.all().order_by("name")
+        balance_rows = (
+            InventoryBalance.objects.filter(quantity_on_hand__gt=0)
+            .values("warehouse_id")
+            .annotate(
+                product_count=models.Count("product", distinct=True),
+                total_quantity=models.Sum("quantity_on_hand"),
+                total_value=models.Sum(
+                    models.F("quantity_on_hand") * models.F("average_cost")
+                ),
+            )
+        )
+        by_warehouse = {row["warehouse_id"]: row for row in balance_rows}
+        for warehouse in warehouses:
+            row = by_warehouse.get(warehouse.pk)
+            summaries.append(
+                {
+                    "warehouse": warehouse.pk,
+                    "name": warehouse.name,
+                    "code": warehouse.code,
+                    "product_count": row["product_count"] if row else 0,
+                    "total_quantity": row["total_quantity"] if row else Decimal("0.000"),
+                    "total_value": (
+                        row["total_value"].quantize(Decimal("0.01"))
+                        if row and row["total_value"] is not None
+                        else Decimal("0.00")
+                    ),
+                }
+            )
+        return Response(summaries)
 
 
 class AttributeDefinitionListCreateView(generics.ListCreateAPIView):

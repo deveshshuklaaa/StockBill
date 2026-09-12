@@ -22,9 +22,12 @@ from .views import (
     StockLedgerListCreateView,
     SupplierDetailView,
     SupplierListCreateView,
+    TaxRateAdminDetailView,
+    TaxRateAdminListCreateView,
     TaxRateListView,
     WarehouseDetailView,
     WarehouseListCreateView,
+    WarehouseSummaryView,
 )
 
 urlpatterns = [
@@ -32,6 +35,11 @@ urlpatterns = [
     path("suppliers/<int:pk>/", SupplierDetailView.as_view(), name="supplier-detail"),
     path(
         "warehouses/", WarehouseListCreateView.as_view(), name="warehouse-list-create"
+    ),
+    path(
+        "warehouses/summary/",
+        WarehouseSummaryView.as_view(),
+        name="warehouse-summary",
     ),
     path(
         "warehouses/<int:pk>/", WarehouseDetailView.as_view(), name="warehouse-detail"
@@ -76,6 +84,8 @@ urlpatterns = [
     path("products/", ProductListCreateView.as_view(), name="product-list-create"),
     path("products/<int:pk>/", ProductDetailView.as_view(), name="product-detail"),
     path("tax-rates/", TaxRateListView.as_view(), name="tax-rate-list"),
+    path("tax-rates/admin/", TaxRateAdminListCreateView.as_view(), name="tax-rate-admin-list-create"),
+    path("tax-rates/admin/<int:pk>/", TaxRateAdminDetailView.as_view(), name="tax-rate-admin-detail"),
     path(
         "stock-ledger/",
         StockLedgerListCreateView.as_view(),

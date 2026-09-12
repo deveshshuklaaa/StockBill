@@ -209,21 +209,61 @@ class AdminPagesAccessTests(APITestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_warehouse_summary_returns_results_wrapper(self):
-        """Warehouse summary must return wrapped in 'results' key.
+        """Warehouse summary must return array of warehouse inventory summaries."""
+        # Create a warehouse with some inventory
+        warehouse = Warehouse.objects.first() or Warehouse.objects.create(
+            name="Test Warehouse", code="TW"
+        )
+        # Ensure there's inventory to summarize
+        product = Product.objects.first() or Product.objects.create(
+            name="Test Product", base_unit=Product.UNIT_PIECE
+        )
+        InventoryBalance.objects.get_or_create(
+            product=product,
+            warehouse=warehouse,
+            defaults={"quantity_on_hand": Decimal("10.000"), "average_cost": Decimal("100.00")}
+        )
 
-        NOTE: This endpoint is not yet implemented in the backend.
-        Skipping for now - to be implemented as part of backend completion.
-        """
-        pass
+        response = self.client_as(self.admin).get("/api/warehouses/summary/")
+        self.assertEqual(response.status_code, 200, f"Response: {response.data}")
+
+        # Response must be an array of warehouse summaries
+        self.assertIsInstance(response.data, list)
+        self.assertGreater(len(response.data), 0)
+
+        # Each item must have required fields
+        for item in response.data:
+            self.assertIn("warehouse", item)
+            self.assertIn("name", item)
+            self.assertIn("code", item)
+            self.assertIn("product_count", item)
+            self.assertIn("total_quantity", item)
+            self.assertIn("total_value", item)
 
     def test_tax_rates_admin_returns_array(self):
-        """Tax rates admin endpoint.
+        """Tax rates admin endpoint must return paginated array of tax rates."""
+        response = self.client_as(self.admin).get("/api/tax-rates/admin/")
+        self.assertEqual(response.status_code, 200, f"Response: {response.data}")
 
-        NOTE: This endpoint path may not be registered in current URLs.
-        Endpoint is being called from frontend but not in billing/urls.py.
-        """
-        # This test is skipped as the endpoint is not yet wired in billing/urls.py
-        pass
+        # Response should be paginated dict with results
+        if isinstance(response.data, dict):
+            # If paginated
+            self.assertIn("results", response.data)
+            items = response.data["results"]
+        else:
+            # If direct array
+            items = response.data
+
+        self.assertIsInstance(items, list)
+        # Should have at least our test tax rate
+        self.assertGreater(len(items), 0)
+
+        # Each tax rate must have required fields
+        for item in items:
+            self.assertIn("id", item)
+            self.assertIn("name", item)
+            self.assertIn("rate", item)
+            self.assertIn("is_active", item)
 
 
 class ErrorFormattingTests(APITestCase):
