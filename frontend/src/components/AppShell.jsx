@@ -22,6 +22,10 @@ export default function AppShell() {
           </div>
         </div>
         <nav className="primary-nav" aria-label="Primary navigation">
+          <div className="workspace-label">Overview</div>
+          <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">D</span> Dashboard
+          </NavLink>
           <div className="workspace-label">Operations</div>
           <NavLink to="/invoices/new" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">B</span> New invoice
@@ -38,6 +42,36 @@ export default function AppShell() {
           {isAdmin && <NavLink to="/suppliers" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">V</span> Suppliers
           </NavLink>}
+          <div className="workspace-label">Reports</div>
+          <NavLink to="/reports/sales" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">R</span> Sales
+          </NavLink>
+          <NavLink to="/reports/products" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">M</span> Product Sales
+          </NavLink>
+          {isAdmin && <NavLink to="/reports/purchases" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">N</span> Purchases
+          </NavLink>}
+          <NavLink to="/reports/inventory" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">E</span> Stock Valuation
+          </NavLink>
+          <NavLink to="/reports/stock-movement" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">L</span> Stock Movement
+          </NavLink>
+          <NavLink to="/reports/top-products" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+            <span className="nav-symbol">Q</span> Top Products
+          </NavLink>
+          {isAdmin && <>
+            <NavLink to="/reports/customers" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <span className="nav-symbol">X</span> Customer Sales
+            </NavLink>
+            <NavLink to="/reports/tax" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <span className="nav-symbol">Z</span> GST Summary
+            </NavLink>
+            <NavLink to="/reports/profit" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <span className="nav-symbol">F</span> Profit
+            </NavLink>
+          </>}
           <div className="workspace-label">Catalogue</div>
           <NavLink to="/products" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">P</span> Products

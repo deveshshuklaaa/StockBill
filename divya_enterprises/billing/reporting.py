@@ -60,13 +60,21 @@ class DailySalesReportView(APIView):
             return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
 
         invoices = Invoice.objects.filter(invoice_date=report_date)
+        # POSTED is the active-sales basis: DRAFT is an unposted promise and
+        # CANCELLED is reversed, so both are excluded from every sales figure.
+        # Cancelled count/value are surfaced separately for visibility.
+        active_invoices = invoices.filter(state=Invoice.STATE_POSTED)
+        cancelled_invoices = invoices.filter(state=Invoice.STATE_CANCELLED)
         tax_totals = (
-            InvoiceLineItem.objects.filter(invoice__invoice_date=report_date)
+            InvoiceLineItem.objects.filter(
+                invoice__invoice_date=report_date,
+                invoice__state=Invoice.STATE_POSTED,
+            )
             .values("tax_rate")
             .annotate(total=Coalesce(Sum("tax_amount"), Value(Decimal("0.00")), output_field=MONEY_FIELD))
             .order_by("tax_rate")
         )
-        totals = invoices.aggregate(
+        totals = active_invoices.aggregate(
             total=Count("id"),
             cash_count=Count("id", filter=Q(payment_type=Invoice.PAYMENT_TYPE_CASH)),
             credit_count=Count("id", filter=Q(payment_type=Invoice.PAYMENT_TYPE_CREDIT)),
@@ -85,6 +93,10 @@ class DailySalesReportView(APIView):
         cash_collected = Payment.objects.filter(payment_date=report_date).aggregate(
             total=Coalesce(Sum("amount"), Value(Decimal("0.00")), output_field=MONEY_FIELD)
         )["total"]
+        cancelled_totals = cancelled_invoices.aggregate(
+            count=Count("id"),
+            value=Coalesce(Sum("total_amount"), Value(Decimal("0.00")), output_field=MONEY_FIELD),
+        )
         return Response(
             {
                 "date": report_date,
@@ -94,6 +106,8 @@ class DailySalesReportView(APIView):
                 "sold_on_credit_today": totals["sold_credit"],
                 "cash_collected_today": cash_collected,
                 "total_revenue": totals["revenue"],
+                "cancelled_invoice_count": cancelled_totals["count"],
+                "cancelled_invoice_value": cancelled_totals["value"],
                 "tax_collected_by_slab": {
                     format(row["tax_rate"].normalize(), "f").rstrip("0").rstrip(".") or "0": row["total"]
                     for row in tax_totals
@@ -225,37 +239,73 @@ class TopProductsReportView(APIView):
         except ValueError:
             return Response({"detail": "limit must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
         sort_by = request.query_params.get("sort_by", "quantity")
-        if sort_by not in {"quantity", "revenue"} or limit < 1:
-            return Response({"detail": "sort_by must be quantity or revenue, and limit must be positive."}, status=status.HTTP_400_BAD_REQUEST)
+        if sort_by not in {"quantity", "revenue", "profit"} or limit < 1:
+            return Response({"detail": "sort_by must be quantity, revenue, or profit, and limit must be positive."}, status=status.HTTP_400_BAD_REQUEST)
 
-        line_items = InvoiceLineItem.objects.filter(invoice__invoice_date__range=(from_date, to_date)).annotate(
+        # POSTED lines only: DRAFT promises and CANCELLED (reversed) sales
+        # must never rank as sold products.
+        line_items = InvoiceLineItem.objects.filter(
+            invoice__state=Invoice.STATE_POSTED,
+            invoice__invoice_date__range=(from_date, to_date)
+        ).annotate(
             reversed_quantity=Coalesce(_credit_note_total_subquery("quantity"), Value(Decimal("0.00")), output_field=QUANTITY_FIELD),
             reversed_revenue=Coalesce(_credit_note_total_subquery("line_total"), Value(Decimal("0.00")), output_field=MONEY_FIELD),
         ).annotate(
             effective_quantity=ExpressionWrapper(F("quantity") - F("reversed_quantity"), output_field=QUANTITY_FIELD),
             effective_revenue=ExpressionWrapper(F("line_total") - F("reversed_revenue"), output_field=MONEY_FIELD),
         )
-        ranking = "-total_revenue" if sort_by == "revenue" else "-total_quantity"
+        if sort_by == "profit":
+            line_items = line_items.annotate(
+                effective_cogs=ExpressionWrapper(
+                    F("cogs_amount") - F("reversed_quantity") * F("cost_price_snapshot"),
+                    output_field=MONEY_FIELD,
+                )
+            )
+            ranking = "-total_profit"
+            annotations = {
+                "total_quantity": Sum("effective_quantity"),
+                "total_revenue": Sum("effective_revenue"),
+                "total_cogs": Sum("effective_cogs"),
+            }
+        else:
+            ranking = "-total_revenue" if sort_by == "revenue" else "-total_quantity"
+            annotations = {
+                "total_quantity": Sum("effective_quantity"),
+                "total_revenue": Sum("effective_revenue"),
+                "total_cogs": Sum("cogs_amount"),
+            }
         products = (
             line_items.values("product_id", "product__name")
-            .annotate(
-                total_quantity=Sum("effective_quantity"),
-                total_revenue=Sum("effective_revenue"),
-            )
+            .annotate(**annotations)
             .filter(total_quantity__gt=0)
-            .order_by(ranking, "product__name")[:limit]
         )
+        if sort_by == "profit":
+            products = products.annotate(
+                total_profit=ExpressionWrapper(
+                    F("total_revenue") - F("total_cogs"), output_field=MONEY_FIELD
+                )
+            )
+        else:
+            products = products.annotate(
+                total_profit=ExpressionWrapper(
+                    F("total_revenue") - F("total_cogs"), output_field=MONEY_FIELD
+                )
+            )
+        products = products.order_by(ranking, "product__name")[:limit]
         return Response(
             {
                 "from": from_date,
                 "to": to_date,
                 "sort_by": sort_by,
+                "rules": "POSTED lines only; historical line snapshots and COGS.",
                 "products": [
                     {
                         "product_id": row["product_id"],
                         "product_name": row["product__name"],
                         "total_quantity": row["total_quantity"],
                         "total_revenue": row["total_revenue"],
+                        "total_cogs": row["total_cogs"],
+                        "total_profit": row["total_profit"],
                     }
                     for row in products
                 ],

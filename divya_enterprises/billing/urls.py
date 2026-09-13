@@ -16,6 +16,17 @@ from .views import (
     InvoicePostView,
 )
 from .reporting import DailySalesReportView, ProfitLossReportView, StockValuationReportView, TopProductsReportView
+from .reports import (
+    CustomerSalesReportView,
+    DashboardReportView,
+    InventoryValuationReportView,
+    ProductSalesReportView,
+    ProfitReportView,
+    PurchaseSummaryReportView,
+    SalesSummaryReportView,
+    StockMovementReportView,
+    TaxSummaryReportView,
+)
 
 urlpatterns = [
     path("business-profile/", BusinessProfileView.as_view(), name="business-profile"),
@@ -35,4 +46,13 @@ urlpatterns = [
     path("reports/stock-valuation/", StockValuationReportView.as_view(), name="stock-valuation-report"),
     path("reports/profit-loss/", ProfitLossReportView.as_view(), name="profit-loss-report"),
     path("reports/top-products/", TopProductsReportView.as_view(), name="top-products-report"),
+    path("reports/sales/", SalesSummaryReportView.as_view(), name="sales-report"),
+    path("reports/purchases/", PurchaseSummaryReportView.as_view(), name="purchases-report"),
+    path("reports/inventory/", InventoryValuationReportView.as_view(), name="inventory-report"),
+    path("reports/stock-movement/", StockMovementReportView.as_view(), name="stock-movement-report"),
+    path("reports/products/", ProductSalesReportView.as_view(), name="products-report"),
+    path("reports/customers/", CustomerSalesReportView.as_view(), name="customers-report"),
+    path("reports/tax/", TaxSummaryReportView.as_view(), name="tax-report"),
+    path("reports/profit/", ProfitReportView.as_view(), name="profit-report"),
+    path("reports/dashboard/", DashboardReportView.as_view(), name="dashboard-report"),
 ]
