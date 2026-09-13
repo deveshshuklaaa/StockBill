@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiErrorMessage } from '../api/client'
-import { fetchPurchases, fetchSuppliers } from '../api/purchases'
+import { fetchPurchases } from '../api/purchases'
+import { fetchSuppliers } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 
@@ -36,7 +37,7 @@ export default function PurchasesPage() {
   }, [searchInput])
 
   useEffect(() => {
-    fetchSuppliers().then(setSuppliers).catch(() => {})
+    fetchSuppliers({ page: 1 }).then((data) => setSuppliers(data.results || [])).catch(() => {})
   }, [])
 
   useEffect(() => {

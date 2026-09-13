@@ -470,7 +470,9 @@ class SupplierListCreateView(generics.ListCreateAPIView):
         search = (params.get("search") or "").strip()
         if search:
             queryset = queryset.filter(
-                Q(name__icontains=search) | Q(gstin__icontains=search)
+                Q(name__icontains=search)
+                | Q(gstin__icontains=search)
+                | Q(contact_info__icontains=search)
             )
         return queryset
 

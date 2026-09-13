@@ -89,7 +89,9 @@ export default function PurchaseDetailPage() {
       <div className="detail-parties">
         <div>
           <span>Supplier</span>
-          <strong>{purchase.supplier_name_snapshot || purchase.supplier_name}</strong>
+          {/* Show the snapshot the document was created with; the link goes
+              to the live master record for two-way navigation. */}
+          <strong><Link className="text-button" to={`/suppliers/${purchase.supplier}`}>{purchase.supplier_name_snapshot || purchase.supplier_name}</Link></strong>
           <span>{purchase.supplier_gstin_snapshot || 'Unregistered'}</span>
           <span>{purchase.supplier_state_snapshot}{purchase.supplier_state_code_snapshot ? ` (${purchase.supplier_state_code_snapshot})` : ''}</span>
         </div>

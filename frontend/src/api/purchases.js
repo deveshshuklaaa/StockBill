@@ -2,12 +2,6 @@ import api from '../api/client'
 
 export function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
 
-export async function fetchSuppliers(search = '') {
-  const params = {}
-  if (search) params.search = search
-  return rows((await api.get('/suppliers/', { params })).data)
-}
-
 export async function fetchWarehouses() {
   return rows((await api.get('/warehouses/')).data)
 }

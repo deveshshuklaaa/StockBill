@@ -19,6 +19,8 @@ import ProductStockDetailPage from './pages/ProductStockDetailPage'
 import PurchaseDetailPage from './pages/PurchaseDetailPage'
 import PurchasesPage from './pages/PurchasesPage'
 import StockLedgerPage from './pages/StockLedgerPage'
+import SupplierDetailPage from './pages/SupplierDetailPage'
+import SuppliersPage from './pages/SuppliersPage'
 import TaxConfigurationPage from './pages/TaxConfigurationPage'
 import WarehousesPage from './pages/WarehousesPage'
 import './App.css'
@@ -38,6 +40,8 @@ function App() {
       <Route path="/purchases" element={<PurchasesPage />} />
       <Route path="/purchases/new" element={<NewPurchasePage />} />
       <Route path="/purchases/:id" element={<PurchaseDetailPage />} />
+      <Route path="/suppliers" element={<SuppliersPage />} />
+      <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
       <Route path="/warehouses" element={<WarehousesPage />} />
       <Route path="/settings/business" element={<BusinessProfilePage />} />
       <Route path="/settings/taxes" element={<TaxConfigurationPage />} />

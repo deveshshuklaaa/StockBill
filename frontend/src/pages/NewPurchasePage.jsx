@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
-import { fetchNextPurchaseNumber, fetchSuppliers, fetchWarehouses, searchPurchaseProducts } from '../api/purchases'
+import { fetchNextPurchaseNumber, fetchWarehouses, searchPurchaseProducts } from '../api/purchases'
+import { fetchActiveSuppliers } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
 
 function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
@@ -58,10 +59,11 @@ function calculateLine(line, taxMode) {
 
 export default function NewPurchasePage() {
   const navigate = useNavigate()
-  const [suppliers, setSuppliers] = useState([])
   const [warehouses, setWarehouses] = useState([])
   const [supplier, setSupplier] = useState(null)
   const [supplierSearch, setSupplierSearch] = useState('')
+  const [supplierResults, setSupplierResults] = useState([])
+  const [supplierBusy, setSupplierBusy] = useState(false)
   const [invoiceDate, setInvoiceDate] = useState(today())
   const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('')
   const [warehouseId, setWarehouseId] = useState('')
@@ -79,15 +81,30 @@ export default function NewPurchasePage() {
   const [posting, setPosting] = useState(false)
 
   useEffect(() => {
-    Promise.all([fetchSuppliers(), fetchWarehouses()])
-      .then(([supplierRows, warehouseRows]) => {
-        setSuppliers(supplierRows)
+    fetchWarehouses()
+      .then((warehouseRows) => {
         setWarehouses(warehouseRows)
         if (warehouseRows.length === 1) setWarehouseId(String(warehouseRows[0].id))
       })
       .catch((err) => setError(apiErrorMessage(err)))
       .finally(() => setLoading(false))
   }, [])
+
+  // Server-side supplier search, debounced; only active suppliers are
+  // offered because the backend rejects inactive ones for new purchases.
+  useEffect(() => {
+    const query = supplierSearch.trim()
+    if (!query || supplier?.id) { setSupplierResults([]); setSupplierBusy(false); return undefined }
+    let cancelled = false
+    setSupplierBusy(true)
+    const timer = setTimeout(() => {
+      fetchActiveSuppliers(query)
+        .then((results) => { if (!cancelled) setSupplierResults(results.slice(0, 8)) })
+        .catch(() => { if (!cancelled) setSupplierResults([]) })
+        .finally(() => { if (!cancelled) setSupplierBusy(false) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer); setSupplierBusy(false) }
+  }, [supplierSearch, supplier])
 
   useEffect(() => {
     let cancelled = false
@@ -110,8 +127,6 @@ export default function NewPurchasePage() {
     }, 300)
     return () => { cancelled = true; clearTimeout(timer); setProductBusy(false) }
   }, [productSearch])
-
-  const filteredSuppliers = suppliers.filter((item) => item.name.toLowerCase().includes(supplierSearch.toLowerCase())).slice(0, 8)
 
   const totals = useMemo(() => lines.reduce((result, line) => {
     const calculated = calculateLine(line, taxMode)
@@ -235,10 +250,14 @@ export default function NewPurchasePage() {
         <section className="invoice-card customer-card">
           <div className="section-kicker">01 / Supplier</div>
           <div className="customer-picker">
-            <input value={supplier?.id ? supplier.name : supplierSearch} onChange={(event) => { setSupplierSearch(event.target.value); if (supplier?.id) setSupplier(null) }} placeholder="Search supplier by name..." aria-label="Search supplier" />
+            <input value={supplier?.id ? supplier.name : supplierSearch} onChange={(event) => { setSupplierSearch(event.target.value); if (supplier?.id) setSupplier(null) }} placeholder="Search active suppliers by name, GSTIN, or phone..." aria-label="Search supplier" />
             {supplierSearch && !supplier?.id && <div className="suggestion-list">
-              {filteredSuppliers.map((item) => <button type="button" key={item.id} onClick={() => chooseSupplier(item)}><strong>{item.name}</strong><span>{item.state || 'State not set'}{item.gstin ? ` · ${item.gstin}` : ''}</span></button>)}
-              {!filteredSuppliers.length && <div className="suggestion-empty">No matching supplier</div>}
+              {supplierBusy && !supplierResults.length && <div className="suggestion-empty">Searching...</div>}
+              {supplierResults.map((item) => <button type="button" key={item.id} onClick={() => chooseSupplier(item)}>
+                <strong>{item.name}</strong>
+                <span>{item.gstin || 'Unregistered'}{item.state ? ` · ${item.state}` : ''}{item.contact_info ? ` · ${item.contact_info}` : ''}</span>
+              </button>)}
+              {!supplierBusy && !supplierResults.length && <div className="suggestion-empty">No active supplier matches. Archived suppliers cannot receive purchases.</div>}
             </div>}
           </div>
           {supplier?.id && <div className="customer-context">
