@@ -40,7 +40,10 @@ class InvoiceHistoryAPITests(APITestCase):
             state="Maharashtra",
             state_code="27",
         )
-        cls.tax = TaxRate.objects.create(name="GST 5%", rate=Decimal("5.00"))
+        # Data migration 0007 seeds the default GST slabs into every fresh
+        # database, so reuse the seeded row instead of colliding on its
+        # unique name.
+        cls.tax, _ = TaxRate.objects.get_or_create(name="GST 5%", defaults={"rate": Decimal("5.00")})
         cls.product = Product.objects.create(
             name="Chikki 3 in 1",
             base_unit=Product.UNIT_PIECE,

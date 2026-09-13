@@ -195,6 +195,16 @@ def post_invoice(*, invoice_id, posted_by):
     products, balances = _validate_invoice_lines(
         [{"product": line.product, "quantity": line.quantity, "rate_charged": line.rate_charged, "tax_rate": line.tax_rate, "discount_amount": line.discount_amount} for line in line_items]
     )
+    if (
+        invoice.payment_type == Invoice.PAYMENT_TYPE_CREDIT
+        and invoice.customer is not None
+        and invoice.customer.credit_limit
+    ):
+        customer = Customer.objects.select_for_update().get(pk=invoice.customer_id)
+        if customer.outstanding_balance + _money(invoice.total_amount) > customer.credit_limit:
+            raise serializers.ValidationError(
+                {"customer": f"Credit limit exceeded. Available credit: {_money(customer.credit_limit - customer.outstanding_balance)}."}
+            )
     for line in line_items:
         product = products[line.product_id]
         line.cost_price_snapshot = balances[product.pk].average_cost
@@ -337,7 +347,23 @@ def reverse_payment(*, payment_id, amount, reversed_by, reason):
 
 
 @transaction.atomic
-def create_payment(*, customer, invoice, amount, actor, notes=""):
-    payment = Payment.objects.create(customer=customer, invoice=invoice, amount=amount, notes=notes)
+def create_payment(*, customer, invoice, amount, actor, notes="", payment_method=Payment.METHOD_CASH, reference_number=""):
+    amount = _money(amount)
+    if amount <= 0:
+        raise serializers.ValidationError({"amount": "Payment amount must be greater than zero."})
+    if invoice is not None:
+        invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
+        if invoice.state != Invoice.STATE_POSTED:
+            raise serializers.ValidationError({"invoice": "Payments can only be recorded against posted invoices."})
+        if customer is not None and invoice.customer_id != customer.pk:
+            raise serializers.ValidationError({"invoice": "This invoice does not belong to the selected customer."})
+    payment = Payment.objects.create(
+        customer=customer,
+        invoice=invoice,
+        amount=amount,
+        payment_method=payment_method,
+        reference_number=reference_number,
+        notes=notes,
+    )
     AuditLog.objects.create(user=actor, action="payment_received", entity_type="Payment", entity_id=payment.pk)
     return payment

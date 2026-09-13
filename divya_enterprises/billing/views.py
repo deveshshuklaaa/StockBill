@@ -94,7 +94,9 @@ class AuditLogListView(generics.ListAPIView):
 
 
 class InvoiceListCreateView(generics.ListCreateAPIView):
-    queryset = Invoice.objects.select_related("customer", "created_by").prefetch_related("line_items").all().order_by("-created_at")
+    # -id tiebreak: created_at is the transaction-start timestamp, so rows
+    # created in one transaction share a value and need a stable ordering.
+    queryset = Invoice.objects.select_related("customer", "created_by").prefetch_related("line_items").all().order_by("-created_at", "-id")
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -168,9 +170,40 @@ class InvoiceDetailView(generics.RetrieveAPIView):
 
 
 class PaymentListCreateView(generics.ListCreateAPIView):
-    queryset = Payment.objects.select_related("customer", "invoice").all().order_by("-created_at")
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = Payment.objects.select_related("customer", "invoice").prefetch_related("reversals").all().order_by("-created_at")
+        params = self.request.query_params or {}
+        customer = (params.get("customer") or "").strip()
+        if customer:
+            if not customer.isdigit():
+                raise ValidationError({"customer": ["customer must be a numeric id."]})
+            queryset = queryset.filter(customer_id=int(customer))
+        invoice = (params.get("invoice") or "").strip()
+        if invoice:
+            if not invoice.isdigit():
+                raise ValidationError({"invoice": ["invoice must be a numeric id."]})
+            queryset = queryset.filter(invoice_id=int(invoice))
+        payment_method = (params.get("payment_method") or "").strip()
+        if payment_method:
+            if payment_method not in {choice[0] for choice in Payment.METHOD_CHOICES}:
+                raise ValidationError({"payment_method": ["payment_method must be cash, upi, bank, card, or cheque."]})
+            queryset = queryset.filter(payment_method=payment_method)
+        from_date = (params.get("from") or "").strip()
+        to_date = (params.get("to") or "").strip()
+        for name, raw in (("from", from_date), ("to", to_date)):
+            if raw:
+                try:
+                    date.fromisoformat(raw)
+                except ValueError:
+                    raise ValidationError({name: [f"{name} must use YYYY-MM-DD format."]})
+        if from_date:
+            queryset = queryset.filter(payment_date__gte=from_date)
+        if to_date:
+            queryset = queryset.filter(payment_date__lte=to_date)
+        return queryset
 
 
 class PaymentDetailView(generics.RetrieveAPIView):

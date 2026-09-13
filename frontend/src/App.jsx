@@ -6,6 +6,7 @@ import AuditLogsPage from './pages/AuditLogsPage'
 import BusinessProfilePage from './pages/BusinessProfilePage'
 import CataloguePage from './pages/CataloguePage'
 import CustomersPage from './pages/CustomersPage'
+import CustomerDetailPage from './pages/CustomerDetailPage'
 import EditProductPage from './pages/EditProductPage'
 import InventoryPage from './pages/InventoryPage'
 import InvoiceDetailPage from './pages/InvoiceDetailPage'
@@ -30,6 +31,7 @@ function App() {
       <Route path="/products/:id/edit" element={<EditProductPage />} />
       <Route path="/catalogue" element={<CataloguePage />} />
       <Route path="/customers" element={<CustomersPage />} />
+      <Route path="/customers/:id" element={<CustomerDetailPage />} />
       <Route path="/inventory" element={<InventoryPage />} />
       <Route path="/inventory/:productId" element={<ProductStockDetailPage />} />
       <Route path="/stock-ledger" element={<StockLedgerPage />} />

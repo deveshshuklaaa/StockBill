@@ -228,9 +228,23 @@ class CreditNoteLineItem(models.Model):
 
 
 class Payment(models.Model):
+    METHOD_CASH = "cash"
+    METHOD_UPI = "upi"
+    METHOD_BANK = "bank"
+    METHOD_CARD = "card"
+    METHOD_CHEQUE = "cheque"
+    METHOD_CHOICES = [
+        (METHOD_CASH, "Cash"),
+        (METHOD_UPI, "UPI"),
+        (METHOD_BANK, "Bank Transfer"),
+        (METHOD_CARD, "Card"),
+        (METHOD_CHEQUE, "Cheque"),
+    ]
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT, null=True, blank=True, related_name="payments")
     invoice = models.ForeignKey(Invoice, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
     amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    payment_method = models.CharField(max_length=10, choices=METHOD_CHOICES, default=METHOD_CASH)
+    reference_number = models.CharField(max_length=100, blank=True)
     payment_date = models.DateField(default=timezone.localdate)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

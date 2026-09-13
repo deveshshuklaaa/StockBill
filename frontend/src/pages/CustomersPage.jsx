@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
+import { fetchCustomers } from '../api/customers'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
+
+function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
+function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
 const emptyCustomer = {
   name: '', contact_info: '', customer_type: 'B2C',
@@ -11,28 +16,62 @@ const emptyCustomer = {
   credit_limit: '0', credit_days: '0', is_regular: false,
 }
 
-function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
-function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-
 export default function CustomersPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const [customers, setCustomers] = useState([])
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [activeFilter, setActiveFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [hasNext, setHasNext] = useState(false)
+  const [hasPrevious, setHasPrevious] = useState(false)
+  const [busy, setBusy] = useState(true)
+  const [error, setError] = useState('')
+  const latestLoad = useRef(0)
+
   const [form, setForm] = useState(emptyCustomer)
   const [sameAsBilling, setSameAsBilling] = useState(true)
   const [editing, setEditing] = useState(null)
   const [showForm, setShowForm] = useState(false)
-  const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
 
-  async function loadCustomers() {
+  useEffect(() => {
+    const timer = setTimeout(() => { setSearch(searchInput.trim()); setPage(1) }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  useEffect(() => {
+    const requestId = ++latestLoad.current
     setBusy(true); setError('')
-    try { setCustomers(rows((await api.get('/customers/')).data)) }
-    catch (err) { setError(apiErrorMessage(err)) }
-    finally { setBusy(false) }
+    fetchCustomers({ page, search, isActive: activeFilter })
+      .then((data) => {
+        if (requestId !== latestLoad.current) return
+        setCustomers(rows(data))
+        setTotal(Number(data.count ?? 0))
+        setHasNext(Boolean(data.next))
+        setHasPrevious(Boolean(data.previous))
+      })
+      .catch((err) => {
+        if (requestId !== latestLoad.current) return
+        if (err?.response?.status === 404 && page > 1) { setPage(1); return }
+        setError(apiErrorMessage(err))
+      })
+      .finally(() => { if (requestId === latestLoad.current) setBusy(false) })
+  }, [page, search, activeFilter])
+
+  async function reload() {
+    try {
+      const data = await fetchCustomers({ page, search, isActive: activeFilter })
+      setCustomers(rows(data))
+      setTotal(Number(data.count ?? 0))
+      setHasNext(Boolean(data.next))
+      setHasPrevious(Boolean(data.previous))
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    }
   }
-  useEffect(() => { loadCustomers() }, [])
 
   function beginCreate() { setEditing(null); setForm(emptyCustomer); setSameAsBilling(true); setShowForm(true) }
   function beginEdit(customer) {
@@ -76,25 +115,28 @@ export default function CustomersPage() {
     try {
       if (editing) await api.patch(`/customers/${editing}/`, payload)
       else await api.post('/customers/', payload)
-      setShowForm(false); await loadCustomers()
+      setShowForm(false); await reload()
     } catch (err) { setError(apiErrorMessage(err)) }
     finally { setSaving(false) }
   }
 
   async function archive(customer) {
     if (!window.confirm(`Archive ${customer.name}? Their history is preserved.`)) return
-    try { await api.delete(`/customers/${customer.id}/`); await loadCustomers() }
+    try { await api.delete(`/customers/${customer.id}/`); await reload() }
     catch (err) { setError(apiErrorMessage(err)) }
   }
 
   async function reactivate(customer) {
-    try { await api.patch(`/customers/${customer.id}/`, { is_active: true }); await loadCustomers() }
+    try { await api.patch(`/customers/${customer.id}/`, { is_active: true }); await reload() }
     catch (err) { setError(apiErrorMessage(err)) }
   }
 
+  const totalPages = Math.max(1, Math.ceil(total / 25))
+  const filtersActive = search || activeFilter
+
   return <section className="page-section">
     <header className="page-header">
-      <div><p className="eyebrow">Relationships / ledger</p><h1>Customers</h1><p className="page-subtitle">Accounts, tax identity, addresses, and credit terms.</p></div>
+      <div><p className="eyebrow">Relationships / ledger</p><h1>Customers</h1><p className="page-subtitle">Accounts, tax identity, credit terms, and authoritative outstanding balances.</p></div>
       {isAdmin && <button className="primary-button" onClick={beginCreate}>Add customer</button>}
     </header>
     <StatusMessage>{error}</StatusMessage>
@@ -147,24 +189,37 @@ export default function CustomersPage() {
     </form>}
 
     <div className="table-frame">
-      <div className="table-meta"><span>{customers.length} customers</span><span className="table-note">GST identity and credit terms per account</span></div>
-      {busy ? <div className="empty-state">Loading customers...</div> : customers.length === 0 ? <div className="empty-state">No customers yet.</div> : <div className="table-scroll"><table>
-        <thead><tr><th>Customer</th><th>Phone</th><th>GSTIN</th><th>State</th><th>Regular</th><th>Status</th>{isAdmin && <th aria-label="Actions" />}</tr></thead>
+      <div className="table-meta">
+        <span>{busy ? 'Loading customers...' : `${total} customer${total === 1 ? '' : 's'}`}</span>
+        <div className="filter-row">
+          <label className="filter-field">Search<input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Name, phone, GSTIN" aria-label="Search customers" /></label>
+          <label className="filter-field">Status<select value={activeFilter} onChange={(e) => { setActiveFilter(e.target.value); setPage(1) }} aria-label="Filter by status"><option value="">All</option><option value="true">Active</option><option value="false">Archived</option></select></label>
+        </div>
+      </div>
+      {busy ? <div className="empty-state">Loading customers...</div> : customers.length === 0 ? <div className="empty-state">{filtersActive ? 'No customers match your filters.' : 'No customers yet.'}</div> : <div className="table-scroll"><table>
+        <thead><tr><th>Customer</th><th>Phone</th><th>GSTIN</th><th>State</th><th>Credit limit</th><th>Outstanding</th><th>Status</th><th aria-label="Actions" /></tr></thead>
         <tbody>{customers.map((customer) => <tr key={customer.id} className={customer.is_active ? '' : 'archived-row'}>
-          <td><strong>{customer.name}</strong><small>{customer.customer_type}{customer.credit_limit > 0 ? ` · limit ${money(customer.credit_limit)}` : ''}</small></td>
+          <td><strong><Link className="text-button" to={`/customers/${customer.id}`}>{customer.name}</Link></strong><small>{customer.customer_type}{customer.is_regular ? ' · regular' : ''}</small></td>
           <td>{customer.contact_info || '-'}</td>
           <td>{customer.gstin || '-'}</td>
-          <td>{customer.state || '-'}</td>
-          <td>{customer.is_regular ? 'Yes' : 'No'}</td>
+          <td>{customer.state || customer.state_code || '-'}</td>
+          <td className="stock-value">{Number(customer.credit_limit) > 0 ? money(customer.credit_limit) : '—'}</td>
+          <td><strong className={Number(customer.outstanding_balance) > 0 ? 'balance due' : 'stock-value'}>{money(customer.outstanding_balance)}</strong></td>
           <td>{customer.is_active ? 'Active' : 'Archived'}</td>
-          {isAdmin && <td><div className="row-actions">
-            <button className="text-button" onClick={() => beginEdit(customer)}>Edit</button>
-            {customer.is_active
+          <td><div className="row-actions">
+            <Link className="text-button" to={`/customers/${customer.id}`}>View</Link>
+            {isAdmin && <button className="text-button" onClick={() => beginEdit(customer)}>Edit</button>}
+            {isAdmin && (customer.is_active
               ? <button className="text-button danger" onClick={() => archive(customer)}>Archive</button>
-              : <button className="text-button" onClick={() => reactivate(customer)}>Reactivate</button>}
-          </div></td>}
+              : <button className="text-button" onClick={() => reactivate(customer)}>Reactivate</button>)}
+          </div></td>
         </tr>)}</tbody>
       </table></div>}
+      <div className="table-meta pager" role="navigation" aria-label="Customer pagination">
+        <button className="pager-button" onClick={() => setPage((c) => Math.max(1, c - 1))} disabled={!hasPrevious || busy}>← Previous</button>
+        <span>Page {page} of {totalPages}{total > 0 ? ` · ${total} customers` : ''}</span>
+        <button className="pager-button" onClick={() => setPage((c) => c + 1)} disabled={!hasNext || busy}>Next →</button>
+      </div>
     </div>
   </section>
 }

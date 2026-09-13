@@ -47,3 +47,7 @@ class Customer(models.Model):
         credit_note_total = self.invoices.aggregate(total=Sum("credit_notes__total_amount"))["total"] or Decimal("0.00")
         debit_note_total = self.debit_notes.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
         return self.opening_balance + invoice_total + debit_note_total - payment_total + reversal_total - credit_note_total
+
+    @property
+    def available_credit(self):
+        return self.credit_limit - self.outstanding_balance

@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from decimal import Decimal
+
 from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 
 
@@ -172,6 +174,7 @@ class CreditNoteSerializer(serializers.ModelSerializer):
 class PaymentSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     invoice_number = serializers.CharField(source="invoice.invoice_number", read_only=True)
+    reversed_amount = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
@@ -182,13 +185,22 @@ class PaymentSerializer(serializers.ModelSerializer):
             "invoice",
             "invoice_number",
             "amount",
+            "payment_method",
+            "reference_number",
             "payment_date",
             "notes",
+            "reversed_amount",
             "created_at",
         ]
-        read_only_fields = ["id", "customer_name", "invoice_number", "payment_date", "created_at"]
+        read_only_fields = ["id", "customer_name", "invoice_number", "payment_date", "created_at", "reversed_amount"]
+
+    def get_reversed_amount(self, obj):
+        from django.db.models import Sum
+
+        return obj.reversals.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
 
     def create(self, validated_data):
         from .services import create_payment
 
+        validated_data.setdefault("invoice", None)
         return create_payment(actor=self.context["request"].user, **validated_data)

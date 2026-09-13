@@ -77,11 +77,28 @@ export default function NewInvoicePage() {
   const [success, setSuccess] = useState(null)
 
   useEffect(() => {
-    api.get('/customers/')
+    // Seed the picker with the first page so the field is usable before the
+    // first keystroke; active customers only.
+    api.get('/customers/', { params: { is_active: 'true', page: 1 } })
       .then((customerResponse) => { setCustomers(rows(customerResponse.data)) })
       .catch((err) => setError(apiErrorMessage(err)))
       .finally(() => setLoading(false))
   }, [])
+
+  // Server-side customer search: the customer list is paginated, so typed
+  // queries hit the backend instead of filtering a single preloaded page.
+  // Debounced to avoid a request per keystroke.
+  useEffect(() => {
+    const query = customerSearch.trim()
+    if (!query) return undefined
+    let cancelled = false
+    const timer = setTimeout(() => {
+      api.get('/customers/', { params: { search: query, is_active: 'true', page: 1 } })
+        .then(({ data }) => { if (!cancelled) setCustomers(rows(data).slice(0, 8)) })
+        .catch(() => { if (!cancelled) setCustomers([]) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [customerSearch])
 
   // Server-side product search: the catalogue is paginated, so never rely on a
   // single preloaded page. Debounced to avoid a request per keystroke.
@@ -112,7 +129,7 @@ export default function NewInvoicePage() {
       .catch((err) => setError(apiErrorMessage(err)))
   }, [customer])
 
-  const filteredCustomers = customers.filter((item) => item.name.toLowerCase().includes(customerSearch.toLowerCase())).slice(0, 8)
+  const filteredCustomers = customers.slice(0, 8)
 
   const totals = useMemo(() => lines.reduce((result, line) => {
     const calculated = calculateLine(line, taxMode)
@@ -196,7 +213,7 @@ export default function NewInvoicePage() {
     <StatusMessage>{error}</StatusMessage>
     <form onSubmit={submit} className="invoice-layout">
       <div className="invoice-workspace">
-        <section className="invoice-card customer-card"><div className="section-kicker">01 / Customer</div><div className="customer-picker"><input value={customer.id ? customer.name : customerSearch} onChange={(event) => { setCustomerSearch(event.target.value); if (customer.id) setCustomer(WALK_IN) }} placeholder="Search customer by name..." aria-label="Search customer" />{customerSearch && <div className="suggestion-list">{filteredCustomers.map((item) => <button type="button" key={item.id} onClick={() => chooseCustomer(item)}><strong>{item.name}</strong><span>{item.customer_type}{item.gstin ? ` · ${item.gstin}` : ''}</span></button>)}{!filteredCustomers.length && <div className="suggestion-empty">No matching customer</div>}</div>}</div><button type="button" className={customer.id ? 'walk-in-option' : 'walk-in-option selected'} onClick={() => chooseCustomer(WALK_IN)}>Walk-in (no account)<span>{customer.id ? 'Switch' : 'Selected'}</span></button>{customer.id && <div className="customer-context"><strong>{customer.name}</strong><span>{customer.customer_type} account</span><b>{balance === null ? 'Loading balance...' : `${money(balance)} outstanding`}</b></div>}</section>
+        <section className="invoice-card customer-card"><div className="section-kicker">01 / Customer</div><div className="customer-picker"><input value={customer.id ? customer.name : customerSearch} onChange={(event) => { setCustomerSearch(event.target.value); if (customer.id) setCustomer(WALK_IN) }} placeholder="Search customer by name..." aria-label="Search customer" />{customerSearch && <div className="suggestion-list">{filteredCustomers.map((item) => <button type="button" key={item.id} onClick={() => chooseCustomer(item)}><strong>{item.name}</strong><span>{[item.customer_type, item.contact_info, item.gstin].filter(Boolean).join(' · ')}</span></button>)}{!filteredCustomers.length && <div className="suggestion-empty">No matching customer</div>}</div>}</div><button type="button" className={customer.id ? 'walk-in-option' : 'walk-in-option selected'} onClick={() => chooseCustomer(WALK_IN)}>Walk-in (no account)<span>{customer.id ? 'Switch' : 'Selected'}</span></button>{customer.id && <div className="customer-context"><strong>{customer.name}</strong><span>{customer.customer_type} account</span><b>{balance === null ? 'Loading balance...' : `${money(balance)} outstanding`}</b></div>}</section>
         <section className="invoice-card"><div className="section-heading"><div><div className="section-kicker">02 / Configuration</div><h2>Payment & Tax</h2></div><div className="payment-toggle"><button type="button" className={paymentType === 'cash' ? 'selected' : ''} onClick={() => setPaymentType('cash')}>Cash</button><button type="button" className={paymentType === 'credit' ? 'selected' : ''} onClick={() => setPaymentType('credit')} disabled={!customer.id}>Credit</button></div></div>
           {!customer.id && <p className="inline-note" style={{ marginBottom: 10 }}>Walk-in sales are cash only.</p>}
           <div style={{ display: 'flex', gap: '20px', marginTop: '10px' }}>
