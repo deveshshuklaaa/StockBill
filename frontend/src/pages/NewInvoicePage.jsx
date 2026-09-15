@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatQuantityWithUnit, formatStockWithBoxes, masterBoxSize } from '../utils/format'
@@ -47,6 +47,7 @@ function calculateLine(line, taxMode) {
 }
 
 export default function NewInvoicePage() {
+  const navigate = useNavigate()
   const [customers, setCustomers] = useState([])
   const [customerSearch, setCustomerSearch] = useState('')
   const [productSearch, setProductSearch] = useState('')
@@ -62,7 +63,6 @@ export default function NewInvoicePage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [success, setSuccess] = useState(null)
 
   useEffect(() => {
     api.get('/customers/', { params: { is_active: 'true', page: 1 } })
@@ -171,7 +171,8 @@ export default function NewInvoicePage() {
   }
 
   async function submit(event) {
-    event.preventDefault()
+    if (event) event.preventDefault()
+    if (submitting) return
     setError('')
     if (!lines.length) {
       setError('Add at least one product before creating the invoice.')
@@ -199,37 +200,15 @@ export default function NewInvoicePage() {
       const { data } = await api.post('/invoices/', payload, {
         headers: { 'Idempotency-Key': idempotencyKey },
       })
-      setSuccess(data)
+      navigate(`/invoices/${data.id}`)
     } catch (err) {
-      setError(apiErrorMessage(err))
+      setError(apiErrorMessage(err, { action: 'creating invoice' }))
     } finally {
       setSubmitting(false)
     }
   }
 
-  function startOver() {
-    setSuccess(null)
-    setLines([])
-    setCustomer(WALK_IN)
-    setPaymentType('cash')
-    setError('')
-  }
-
   if (loading) return <section className="page-section"><div className="empty-state">Loading invoice workspace...</div></section>
-  if (success) return (
-    <section className="page-section success-page">
-      <p className="eyebrow">Transaction complete</p>
-      <div className="success-mark">OK</div>
-      <h1>Invoice created</h1>
-      <p className="success-number">{success.invoice_number}</p>
-      <p className="page-subtitle">The stock movement and ledger entry were saved successfully.</p>
-      <div className="success-actions">
-        <Link className="primary-button" to={`/invoices/${success.id}`}>View / print invoice</Link>
-        <Link className="quiet-button" to="/invoices">Invoice history</Link>
-        <button className="quiet-button" onClick={startOver}>New invoice</button>
-      </div>
-    </section>
-  )
 
   return (
     <section className="page-section invoice-page">

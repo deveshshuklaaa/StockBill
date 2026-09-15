@@ -552,16 +552,16 @@ class PurchaseLineInputSerializer(serializers.Serializer):
     product = serializers.PrimaryKeyRelatedField(
         queryset=Product.objects.filter(is_active=True)
     )
-    quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=0.001)
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal("0.001"))
     purchase_unit_name = serializers.ChoiceField(
         choices=["piece", "master box"], default="piece"
     )
     conversion_factor = serializers.DecimalField(
-        max_digits=12, decimal_places=3, min_value=0.001, default=1
+        max_digits=12, decimal_places=3, min_value=Decimal("0.001"), default=1
     )
-    rate = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+    rate = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
     discount_amount = serializers.DecimalField(
-        max_digits=12, decimal_places=2, min_value=0, required=False, default=0
+        max_digits=12, decimal_places=2, min_value=Decimal("0"), required=False, default=0
     )
     tax_rate = serializers.DecimalField(
         max_digits=5, decimal_places=2, required=False, allow_null=True

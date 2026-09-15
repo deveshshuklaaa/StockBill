@@ -47,7 +47,7 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
     tax_rate = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     sales_unit_name = serializers.ChoiceField(choices=["piece", "master box"], default="piece")
     conversion_factor = serializers.DecimalField(
-        max_digits=12, decimal_places=3, min_value=0.001, default=Decimal("1.000")
+        max_digits=12, decimal_places=3, min_value=Decimal("0.001"), default=Decimal("1.000")
     )
 
     class Meta:

@@ -11,6 +11,25 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text()
+        try {
+          error.response.data = JSON.parse(text)
+        } catch {
+          if (text) error.response.data = { detail: text }
+        }
+      } catch {
+        // preserve original blob
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
 // A request that never got a response: server down, refused, or blocked by
 // the browser (CORS). err.response is undefined in all of these cases.
 function isNetworkFailure(error) {
@@ -65,8 +84,11 @@ export function apiErrorMessage(error, { action = 'processing request' } = {}) {
   const status = error.response?.status
   const data = error.response?.data
   if (data instanceof Blob) {
-    if (status === 503) return 'PDF generation is unavailable because the server is missing its WeasyPrint native libraries.'
     return 'The server returned an unreadable error response.'
+  }
+  if (status === 503) {
+    const message = typeof data?.detail === 'string' ? data.detail : ''
+    return message || 'Service is temporarily unavailable.'
   }
   if (status === 400) {
     const message = validationMessage(data)
