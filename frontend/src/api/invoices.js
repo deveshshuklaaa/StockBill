@@ -71,3 +71,24 @@ export async function printInvoicePdf(id, { copy = 'original', invoiceNumber = '
     throw err
   }
 }
+
+export async function updateDraftInvoice(id, payload) {
+  const { data } = await api.patch(`/invoices/${id}/draft/`, payload)
+  return data
+}
+
+export async function postInvoice(id) {
+  const { data } = await api.post(`/invoices/${id}/post/`)
+  return data
+}
+
+export async function fetchCorrectionEligibility(id) {
+  const { data } = await api.get(`/invoices/${id}/correction-eligibility/`)
+  return data // { eligible: bool, reason: string }
+}
+
+export async function amendInvoice(id, payload) {
+  const { data } = await api.post(`/invoices/${id}/amend/`, payload)
+  return data // { original: Invoice, replacement: Invoice }
+}
+

@@ -86,6 +86,26 @@ class Invoice(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Amendment links — set atomically during the correction workflow.
+    # replacement_invoice: on the CANCELLED original, points to the new replacement.
+    # amended_from_invoice: on the replacement, points back to the cancelled original.
+    # Both are nullable on normal invoices; the immutability guard does not cover them
+    # (they are links, not financial data) so they may be set after posting.
+    replacement_invoice = models.OneToOneField(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="replaces",
+    )
+    amended_from_invoice = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="amendments",
+    )
+
     def __str__(self):
         return self.invoice_number
 

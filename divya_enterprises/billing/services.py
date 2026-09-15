@@ -475,6 +475,273 @@ def cancel_invoice(*, invoice_id, cancelled_by, reason):
 
 
 @transaction.atomic
+def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, notes="", updated_by, place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE):
+    """Replace all fields and lines of a DRAFT invoice.
+
+    No stock, payment, ledger, or WAC changes — the draft is still uncommitted.
+    Validation mirrors the draft-creation path exactly.
+    """
+    invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
+    if invoice.state != Invoice.STATE_DRAFT:
+        raise serializers.ValidationError({"state": "Only draft invoices can be edited."})
+
+    if payment_type == "credit" and customer is None:
+        raise serializers.ValidationError({"customer": "A registered customer is required for credit invoices."})
+    if customer is not None:
+        customer = Customer.objects.select_for_update().get(pk=customer.pk)
+
+    seller = BusinessProfile.objects.first()
+
+    # Validate lines (draft path: no stock check, just metadata validation)
+    product_ids = {item["product"].pk for item in line_items}
+    products = Product.objects.select_related("tax").in_bulk(product_ids)
+    warehouse = get_default_warehouse()
+    draft_balances = {
+        balance.product_id: balance
+        for balance in InventoryBalance.objects.filter(product_id__in=product_ids, warehouse=warehouse)
+    }
+    balances = {
+        product_id: draft_balances.get(product_id)
+        or type("Balance", (), {"average_cost": Decimal("0.00")})()
+        for product_id in product_ids
+    }
+
+    for item in line_items:
+        quantity = Decimal(item["quantity"])
+        if quantity <= 0:
+            raise serializers.ValidationError({"line_items": "Quantity must be greater than zero."})
+        sales_unit_name = str(item.get("sales_unit_name") or SALES_UNIT_PIECE).strip() or SALES_UNIT_PIECE
+        conversion_factor = Decimal(str(item.get("conversion_factor", 1) or 1))
+        if sales_unit_name not in SALES_UNIT_CHOICES:
+            raise serializers.ValidationError(
+                {"line_items": f"Unknown sales unit '{sales_unit_name}'; use 'piece' or 'master box'."}
+            )
+        if sales_unit_name == SALES_UNIT_MASTER_BOX:
+            master_box = _master_box_size(products[item["product"].pk])
+            if master_box is None:
+                raise serializers.ValidationError(
+                    {"line_items": f"{products[item['product'].pk].name} has no master box size; sell it in base units."}
+                )
+            if conversion_factor != master_box:
+                raise serializers.ValidationError(
+                    {"line_items": f"Master box conversion for {products[item['product'].pk].name} must be {master_box} (got {conversion_factor})."}
+                )
+        elif conversion_factor <= 0:
+            raise serializers.ValidationError({"line_items": "Conversion factor must be positive."})
+        item["base_quantity"] = _quantity(quantity * conversion_factor)
+
+    # Build GST calculation inputs
+    calculated_lines_input = []
+    for item in line_items:
+        product = products[item["product"].pk]
+        calculated_lines_input.append({
+            "product": product,
+            "quantity": str(item["base_quantity"]),
+            "rate_charged": str(item.get("rate_charged", 0)),
+            "discount_amount": str(item.get("discount_amount", 0)),
+            "tax_rate": str(item.get("tax_rate", product.tax.rate if product.tax else 0)),
+        })
+
+    calc_result = calculate_gst(
+        seller_profile=seller,
+        customer=customer,
+        lines=calculated_lines_input,
+        place_of_supply_state_code=place_of_supply,
+        tax_mode=tax_mode,
+    )
+
+    total_amount = calc_result["totals"]["grand_total"]
+
+    # Delete existing lines (permitted for DRAFT by model)
+    invoice.line_items.all().delete()
+
+    # Update the invoice header — update only mutable fields (state is DRAFT, so
+    # financial snapshots are still writable)
+    invoice.customer = customer
+    invoice.payment_type = payment_type
+    invoice.notes = notes
+    invoice.total_amount = total_amount
+    invoice.place_of_supply = calc_result["place_of_supply"]
+    invoice.tax_mode = calc_result["tax_mode"]
+    invoice.customer_name_snapshot = customer.name if customer else "Walk-in customer"
+    invoice.customer_gstin_snapshot = customer.gstin or "" if customer else ""
+    invoice.customer_registration_type_snapshot = customer.gst_registration_type if customer else ""
+    invoice.customer_state_code_snapshot = customer.state_code or "" if customer else ""
+    invoice.billing_address_snapshot = customer.billing_address or "" if customer else ""
+    invoice.shipping_address_snapshot = customer.shipping_address or "" if customer else ""
+    invoice.state_snapshot = customer.state or "" if customer else ""
+    invoice.pincode_snapshot = customer.pincode or "" if customer else ""
+    invoice.seller_business_name_snapshot = seller.business_name if seller else ""
+    invoice.seller_gstin_snapshot = seller.gstin if seller else ""
+    invoice.seller_address_snapshot = seller.registered_address if seller else ""
+    invoice.seller_state_snapshot = seller.state if seller else ""
+    invoice.seller_state_code_snapshot = seller.state_code if seller else ""
+    invoice.save(update_fields=[
+        "customer", "payment_type", "notes", "total_amount",
+        "place_of_supply", "tax_mode",
+        "customer_name_snapshot", "customer_gstin_snapshot", "customer_registration_type_snapshot",
+        "customer_state_code_snapshot", "billing_address_snapshot", "shipping_address_snapshot",
+        "state_snapshot", "pincode_snapshot",
+        "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
+        "seller_state_snapshot", "seller_state_code_snapshot",
+        "updated_at",
+    ])
+
+    # Recreate lines (no stock adjustment for DRAFT)
+    for idx, line_result in enumerate(calc_result["lines"]):
+        item = line_items[idx]
+        product = calculated_lines_input[idx]["product"]
+        quantity = Decimal(str(item.get("quantity", 1)))
+        base_quantity = item["base_quantity"]
+        cost_price = balances[product.pk].average_cost
+        cogs_amount = _money(base_quantity * cost_price)
+
+        InvoiceLineItem.objects.create(
+            invoice=invoice,
+            product=product,
+            quantity=quantity,
+            sales_unit_name=item.get("sales_unit_name") or SALES_UNIT_PIECE,
+            conversion_factor=Decimal(str(item.get("conversion_factor", 1) or 1)),
+            base_quantity=base_quantity,
+            rate_charged=line_result["rate_charged"],
+            discount_amount=line_result["discount_amount"],
+            tax_rate=Decimal(str(calculated_lines_input[idx]["tax_rate"])),
+            tax_amount=line_result["tax_amount"],
+            cgst_rate=line_result["cgst_rate"],
+            cgst_amount=line_result["cgst_amount"],
+            sgst_rate=line_result["sgst_rate"],
+            sgst_amount=line_result["sgst_amount"],
+            igst_rate=line_result["igst_rate"],
+            igst_amount=line_result["igst_amount"],
+            line_total=line_result["line_total"],
+            cost_price_snapshot=cost_price,
+            cogs_amount=cogs_amount,
+            product_name_snapshot=product.name,
+            base_unit_snapshot=product.base_unit,
+            hsn_sac_snapshot=product.hsn_sac,
+            taxable_value_snapshot=line_result["taxable_value"],
+            mrp_snapshot=product.mrp or Decimal("0.00"),
+        )
+
+    AuditLog.objects.create(
+        user=updated_by,
+        action="invoice_draft_updated",
+        entity_type="Invoice",
+        entity_id=invoice.pk,
+        metadata={"invoice_number": invoice.invoice_number},
+    )
+    invoice.refresh_from_db()
+    return invoice
+
+
+def check_invoice_correction_eligibility(invoice_id):
+    """Return (eligible: bool, reason: str) for the amendment workflow.
+
+    Blocks if:
+    - A replacement already exists (checked first — most informative for amended invoices)
+    - Invoice is not POSTED
+    - Any credit note exists (stock may have already been partially restored)
+    - Any payment exists (prevents accounting ambiguity in V1)
+    """
+    try:
+        invoice = Invoice.objects.prefetch_related("credit_notes", "payments").get(pk=invoice_id)
+    except Invoice.DoesNotExist:
+        return False, "Invoice not found."
+
+    # One replacement per invoice — check this first so amended invoices get an
+    # informative message even though they are also CANCELLED.
+    if invoice.replacement_invoice_id is not None:
+        return False, "A replacement invoice already exists for this invoice."
+
+    if invoice.state == Invoice.STATE_CANCELLED:
+        return False, "Invoice is already cancelled."
+    if invoice.state == Invoice.STATE_DRAFT:
+        return False, "Draft invoices cannot be amended — edit them instead."
+    if invoice.state != Invoice.STATE_POSTED:
+        return False, "Only posted invoices can be corrected."
+
+    # Credit note protection — partial reversals complicate cancellation
+    if invoice.credit_notes.exists():
+        return False, "Correction unavailable: credit note already issued against this invoice."
+
+    # Payment protection — no automatic transfer in V1
+    if invoice.payments.exists():
+        return False, "Correction unavailable: payment already recorded."
+
+    return True, ""
+
+
+
+@transaction.atomic
+def amend_invoice(*, invoice_id, corrected_line_items, customer, payment_type, notes="", place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE, new_invoice_number, amended_by, reason):
+    """Correct a posted invoice with no payments or credit notes.
+
+    Atomically:
+    1. Re-validates eligibility (inside the DB lock).
+    2. Cancels the original (stock reversal).
+    3. Creates a replacement invoice (new number, new stock deduction).
+    4. Links original ↔ replacement.
+    5. Writes a single audit event linking both.
+    """
+    # Re-validate inside the lock
+    invoice = Invoice.objects.select_for_update().prefetch_related("credit_notes", "payments", "line_items").get(pk=invoice_id)
+
+    if invoice.state != Invoice.STATE_POSTED:
+        raise serializers.ValidationError({"state": "Only posted invoices can be corrected."})
+    if invoice.replacement_invoice_id is not None:
+        raise serializers.ValidationError({"invoice": "A replacement invoice already exists for this invoice."})
+    if invoice.credit_notes.exists():
+        raise serializers.ValidationError({"invoice": "Correction blocked: a credit note has been issued against this invoice."})
+    if invoice.payments.exists():
+        raise serializers.ValidationError({"invoice": "Correction blocked: a payment has been recorded against this invoice."})
+
+    # Step 1: Cancel original (stock reversal)
+    cancel_invoice(invoice_id=invoice_id, cancelled_by=amended_by, reason=f"[AMENDMENT] {reason}")
+
+    # Step 2: Create replacement invoice (full posted workflow with stock deduction)
+    replacement = create_invoice(
+        customer=customer,
+        invoice_number=new_invoice_number,
+        notes=notes,
+        created_by=amended_by,
+        payment_type=payment_type,
+        line_items=corrected_line_items,
+        state=Invoice.STATE_POSTED,
+        place_of_supply=place_of_supply,
+        tax_mode=tax_mode,
+    )
+
+    # Step 3: Link the two invoices
+    original = Invoice.objects.select_for_update().get(pk=invoice_id)
+    original.replacement_invoice = replacement
+    original.save(update_fields=["replacement_invoice", "updated_at"])
+
+    replacement = Invoice.objects.select_for_update().get(pk=replacement.pk)
+    replacement.amended_from_invoice = original
+    replacement.save(update_fields=["amended_from_invoice", "updated_at"])
+
+    # Step 4: Audit event linking both
+    AuditLog.objects.create(
+        user=amended_by,
+        action="invoice_amended",
+        entity_type="Invoice",
+        entity_id=original.pk,
+        metadata={
+            "original_invoice_id": original.pk,
+            "original_invoice_number": original.invoice_number,
+            "replacement_invoice_id": replacement.pk,
+            "replacement_invoice_number": replacement.invoice_number,
+            "reason": reason,
+        },
+    )
+
+    original.refresh_from_db()
+    replacement.refresh_from_db()
+    return original, replacement
+
+
+
+@transaction.atomic
 def reverse_payment(*, payment_id, amount, reversed_by, reason):
     payment = Payment.objects.select_for_update().get(pk=payment_id)
     amount = _money(amount)

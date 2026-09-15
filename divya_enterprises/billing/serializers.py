@@ -79,6 +79,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
     line_items = InvoiceLineItemSerializer(many=True, required=True)
     payment_status = serializers.ReadOnlyField(source="computed_payment_status")
     payment_type = serializers.ChoiceField(choices=["cash", "credit"], default="credit")
+    replacement_invoice_number = serializers.SerializerMethodField()
+    amended_from_invoice_number = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -92,6 +94,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
             "seller_state_snapshot", "seller_state_code_snapshot",
             "total_amount", "notes", "created_by", "line_items", "created_at", "updated_at",
+            "replacement_invoice", "replacement_invoice_number",
+            "amended_from_invoice", "amended_from_invoice_number",
         ]
         read_only_fields = [
             "id", "customer_name", "invoice_date", "created_at", "updated_at",
@@ -101,11 +105,23 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "customer_state_code_snapshot", "billing_address_snapshot",
             "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
             "seller_business_name_snapshot", "seller_gstin_snapshot",
-            "seller_address_snapshot", "seller_state_snapshot", "seller_state_code_snapshot"
+            "seller_address_snapshot", "seller_state_snapshot", "seller_state_code_snapshot",
+            "replacement_invoice", "replacement_invoice_number",
+            "amended_from_invoice", "amended_from_invoice_number",
         ]
 
     def get_customer_name(self, obj):
         return obj.customer_name_snapshot or (obj.customer.name if obj.customer else "Walk-in customer")
+
+    def get_replacement_invoice_number(self, obj):
+        if obj.replacement_invoice_id:
+            return getattr(obj, "replacement_invoice", None) and obj.replacement_invoice.invoice_number
+        return None
+
+    def get_amended_from_invoice_number(self, obj):
+        if obj.amended_from_invoice_id:
+            return getattr(obj, "amended_from_invoice", None) and obj.amended_from_invoice.invoice_number
+        return None
 
     def validate(self, attrs):
         payment_type = attrs.get("payment_type", "credit")

@@ -101,16 +101,26 @@ export default function InvoicesPage() {
           <td><strong>{money(invoice.total_amount)}</strong></td>
           <td><span className={STATE_BADGE[invoice.state] || 'type-chip'}>{invoice.state}</span></td>
           <td>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <Link className="text-button" to={`/invoices/${invoice.id}`}>View</Link>
+              {invoice.state === 'DRAFT' && (
+                <Link className="text-button" to={`/invoices/new?edit=${invoice.id}`} aria-label={`Edit draft invoice ${invoice.invoice_number}`}>Edit</Link>
+              )}
               {invoice.state === 'POSTED' && <>
                 <button className="text-button" onClick={() => handlePrint(invoice.id, 'original', invoice.invoice_number)} aria-label={`Print original invoice ${invoice.invoice_number}`}>Original</button>
                 <button className="text-button" onClick={() => handlePrint(invoice.id, 'duplicate', invoice.invoice_number)} aria-label={`Print duplicate invoice ${invoice.invoice_number}`}>Duplicate</button>
                 <button className="text-button" onClick={() => handlePrint(invoice.id, 'reprint', invoice.invoice_number)} aria-label={`Print reprint invoice ${invoice.invoice_number}`}>Reprint</button>
               </>}
+              {invoice.state === 'CANCELLED' && invoice.replacement_invoice && (
+                <Link className="text-button" to={`/invoices/${invoice.replacement_invoice}`} aria-label={`View replacement for invoice ${invoice.invoice_number}`}>Replacement →</Link>
+              )}
+              {invoice.amended_from_invoice && (
+                <Link className="text-button" to={`/invoices/${invoice.amended_from_invoice}`} aria-label={`View original invoice for ${invoice.invoice_number}`}>← Original</Link>
+              )}
             </div>
           </td>
         </tr>)}</tbody>
+
       </table></div>}
       <div className="table-meta pager" role="navigation" aria-label="Invoice pagination">
         <button className="pager-button" onClick={() => setPage((c) => Math.max(1, c - 1))} disabled={!hasPrevious || busy}>← Previous</button>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
+import { amendInvoice, fetchInvoice, updateDraftInvoice } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatQuantityWithUnit, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 
@@ -50,6 +51,13 @@ function calculateLine(line, taxMode) {
 
 export default function NewInvoicePage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const editDraftId = searchParams.get('edit')   // ?edit=<draftId>  → edit DRAFT
+  const amendId     = searchParams.get('amend')  // ?amend=<id>      → correct POSTED
+
+  const isEditMode  = Boolean(editDraftId)
+  const isAmendMode = Boolean(amendId)
+
   const [customers, setCustomers] = useState([])
   const [customerSearch, setCustomerSearch] = useState('')
   const [productSearch, setProductSearch] = useState('')
@@ -59,6 +67,7 @@ export default function NewInvoicePage() {
   const [paymentType, setPaymentType] = useState('cash')
   const [taxMode, setTaxMode] = useState('exclusive')
   const [placeOfSupply, setPlaceOfSupply] = useState('')
+  const [notes, setNotes] = useState('')
 
   const [balance, setBalance] = useState(null)
   const [lines, setLines] = useState([])
@@ -66,12 +75,63 @@ export default function NewInvoicePage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
+  // Amendment-only
+  const [amendReason, setAmendReason] = useState('')
+  const [originalInvoice, setOriginalInvoice] = useState(null)
+
+  // Load initial customer list
   useEffect(() => {
     api.get('/customers/', { params: { is_active: 'true', page: 1 } })
       .then((customerResponse) => { setCustomers(rows(customerResponse.data)) })
       .catch((err) => setError(apiErrorMessage(err)))
+      .finally(() => { if (!isEditMode && !isAmendMode) setLoading(false) })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Preload draft (edit mode) or original invoice (amend mode)
+  useEffect(() => {
+    const sourceId = editDraftId || amendId
+    if (!sourceId) { setLoading(false); return }
+
+    fetchInvoice(sourceId)
+      .then(async (inv) => {
+        if (isAmendMode) setOriginalInvoice(inv)
+        if (inv.customer) {
+          try {
+            const { data: cust } = await api.get(`/customers/${inv.customer}/`)
+            setCustomer(cust)
+            setPlaceOfSupply(cust.state_code || inv.place_of_supply || '')
+          } catch { setCustomer(WALK_IN) }
+        } else {
+          setCustomer(WALK_IN)
+        }
+        setPaymentType(inv.payment_type || 'cash')
+        setTaxMode(inv.tax_mode || 'exclusive')
+        setPlaceOfSupply((prev) => prev || inv.place_of_supply || '')
+        setNotes(inv.notes || '')
+
+        const lineDetails = await Promise.all(
+          (inv.line_items || []).map(async (line) => {
+            try {
+              const { data: product } = await api.get(`/products/${line.product}/`)
+              return {
+                key: `${line.product}-${Math.random()}`,
+                product: line.product,
+                productData: product,
+                quantity: Number(line.quantity),
+                salesUnit: line.sales_unit_name || 'piece',
+                conversionFactor: Number(line.conversion_factor || 1),
+                rate_charged: Number(line.rate_charged),
+                discount_amount: Number(line.discount_amount || 0),
+                tax_rate: Number(line.tax_rate || 0),
+              }
+            } catch { return null }
+          })
+        )
+        setLines(lineDetails.filter(Boolean))
+      })
+      .catch((err) => setError(apiErrorMessage(err)))
       .finally(() => setLoading(false))
-  }, [])
+  }, [editDraftId, amendId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const query = customerSearch.trim()
@@ -103,14 +163,14 @@ export default function NewInvoicePage() {
     if (!customer.id) {
       setBalance(null)
       setPaymentType('cash')
-      setPlaceOfSupply('')
+      if (!isEditMode && !isAmendMode) setPlaceOfSupply('')
       return
     }
-    setPlaceOfSupply(customer.state_code || '')
+    if (!isEditMode && !isAmendMode) setPlaceOfSupply(customer.state_code || '')
     api.get(`/customers/${customer.id}/report/`)
       .then(({ data }) => setBalance(data.outstanding_balance))
       .catch((err) => setError(apiErrorMessage(err)))
-  }, [customer])
+  }, [customer]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredCustomers = customers.slice(0, 8)
 
@@ -172,7 +232,7 @@ export default function NewInvoicePage() {
     setLines(lines.filter((line) => line.key !== key))
   }
 
-  async function submit(event) {
+  async function submit(event, asDraft = false) {
     if (event) event.preventDefault()
     if (submitting) return
     setError('')
@@ -180,31 +240,73 @@ export default function NewInvoicePage() {
       setError('Add at least one product before creating the invoice.')
       return
     }
+    if (isAmendMode && !amendReason.trim()) {
+      setError('A correction reason is required before submitting.')
+      return
+    }
     setSubmitting(true)
+
+    const lineItems = lines.map((line) => ({
+      product: line.product,
+      quantity: Number(line.quantity),
+      sales_unit_name: line.salesUnit,
+      conversion_factor: Number(line.conversionFactor),
+      // rate_charged is ALWAYS per base unit/piece
+      rate_charged: Number(line.rate_charged),
+      discount_amount: Number(line.discount_amount || 0),
+      tax_rate: line.tax_rate,
+    }))
+
     try {
+      if (isEditMode) {
+        const payload = {
+          customer: customer.id,
+          payment_type: customer.id ? paymentType : 'cash',
+          tax_mode: taxMode,
+          place_of_supply: placeOfSupply,
+          notes,
+          line_items: lineItems,
+        }
+        const data = await updateDraftInvoice(editDraftId, payload)
+        navigate(`/invoices/${data.id}`)
+        return
+      }
+
+      if (isAmendMode) {
+        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
+        const payload = {
+          reason: amendReason.trim(),
+          invoice_number: `INV-${stamp}`,
+          customer: customer.id,
+          payment_type: customer.id ? paymentType : 'cash',
+          tax_mode: taxMode,
+          place_of_supply: placeOfSupply,
+          notes,
+          line_items: lineItems,
+        }
+        const result = await amendInvoice(amendId, payload)
+        navigate(`/invoices/${result.replacement.id}`)
+        return
+      }
+
+      // Normal creation (draft or posted)
       const payload = {
         invoice_number: makeInvoiceNumber(),
         customer: customer.id,
         payment_type: customer.id ? paymentType : 'cash',
         tax_mode: taxMode,
         place_of_supply: placeOfSupply,
-        line_items: lines.map((line) => ({
-          product: line.product,
-          quantity: Number(line.quantity),
-          sales_unit_name: line.salesUnit,
-          conversion_factor: Number(line.conversionFactor),
-          rate_charged: Number(line.rate_charged),
-          discount_amount: Number(line.discount_amount || 0),
-          tax_rate: line.tax_rate,
-        })),
+        notes,
+        line_items: lineItems,
       }
       const idempotencyKey = `invoice-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-      const { data } = await api.post('/invoices/', payload, {
+      const url = asDraft ? '/invoices/drafts/' : '/invoices/'
+      const { data } = await api.post(url, payload, {
         headers: { 'Idempotency-Key': idempotencyKey },
       })
       navigate(`/invoices/${data.id}`)
     } catch (err) {
-      setError(apiErrorMessage(err, { action: 'creating invoice' }))
+      setError(apiErrorMessage(err, { action: isEditMode ? 'saving draft' : isAmendMode ? 'correcting invoice' : asDraft ? 'saving draft' : 'creating invoice' }))
     } finally {
       setSubmitting(false)
     }
@@ -212,17 +314,52 @@ export default function NewInvoicePage() {
 
   if (loading) return <section className="page-section"><div className="empty-state">Loading invoice workspace...</div></section>
 
+  const pageTitle    = isEditMode ? 'Edit draft invoice' : isAmendMode ? 'Correct invoice' : 'New invoice'
+  const pageEyebrow  = isEditMode ? 'Billing / edit draft' : isAmendMode ? `Billing / correct ${originalInvoice?.invoice_number || ''}` : 'Billing / new transaction'
+  const submitLabel  = isEditMode ? 'Save draft' : isAmendMode ? 'Create correction' : 'Create invoice'
+  const submitNote   = isEditMode ? 'Draft saved without stock movement.' : isAmendMode ? 'Original cancelled + replacement created atomically.' : 'Server evaluates taxes with determinism upon submission. Deducts stock immediately.'
+
   return (
     <section className="page-section invoice-page">
       <header className="page-header invoice-header">
         <div>
-          <p className="eyebrow">Billing / new transaction</p>
-          <h1>New invoice</h1>
-          <p className="page-subtitle">Exact GST splits are computed deterministically when saved.</p>
+          <p className="eyebrow">{pageEyebrow}</p>
+          <h1>{pageTitle}</h1>
+          <p className="page-subtitle">
+            {isEditMode && 'Changes are saved to draft. Stock is not affected until posted.'}
+            {isAmendMode && 'The original invoice will be cancelled and replaced atomically. Rate is always per piece/base unit.'}
+            {!isEditMode && !isAmendMode && 'Exact GST splits are computed deterministically when saved.'}
+          </p>
         </div>
-        <Link className="quiet-button" to="/products">Back to products</Link>
+        {isAmendMode && <Link className="quiet-button" to={`/invoices/${amendId}`}>← Back to original</Link>}
+        {isEditMode  && <Link className="quiet-button" to={`/invoices/${editDraftId}`}>← Back to draft</Link>}
+        {!isEditMode && !isAmendMode && <Link className="quiet-button" to="/products">Back to products</Link>}
       </header>
       <StatusMessage>{error}</StatusMessage>
+
+      {isAmendMode && (
+        <div className="record-form" style={{ marginBottom: 20 }}>
+          <div className="form-heading"><div><p className="eyebrow">Amendment</p><h2>Correction reason (required)</h2></div></div>
+          <label style={{ display: 'block' }}>
+            Reason
+            <textarea
+              id="amend-reason"
+              style={{ display: 'block', width: '100%', marginTop: 6, border: '1px solid #cbd5cd', padding: '10px 11px', fontFamily: 'inherit', resize: 'vertical', borderRadius: 6 }}
+              rows={2}
+              value={amendReason}
+              onChange={(e) => setAmendReason(e.target.value)}
+              placeholder="Why is this invoice being corrected? (e.g. wrong quantity, wrong rate)"
+              aria-label="Correction reason"
+            />
+          </label>
+          {originalInvoice && (
+            <p style={{ marginTop: 8, fontSize: 13, color: '#666' }}>
+              Original invoice <strong>{originalInvoice.invoice_number}</strong> will be cancelled and a new replacement will be created. Payments against the original must be re-recorded against the replacement.
+            </p>
+          )}
+        </div>
+      )}
+
       <form onSubmit={submit} className="invoice-layout">
         <div className="invoice-workspace">
           <section className="invoice-card customer-card">
@@ -277,6 +414,7 @@ export default function NewInvoicePage() {
               <label style={{ flex: 1 }}>Place of supply (State Code)<input value={placeOfSupply} onChange={e => setPlaceOfSupply(e.target.value)} maxLength="2" placeholder="e.g 27" style={{ marginTop: '5px' }} /></label>
               <label style={{ flex: 1 }}>Tax Mode<select value={taxMode} onChange={e => setTaxMode(e.target.value)} style={{ marginTop: '5px', padding: '10px' }}><option value="exclusive">Exclusive</option><option value="inclusive">Inclusive</option></select></label>
             </div>
+            <label style={{ display: 'block', marginTop: '10px' }}>Notes<input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes on invoice" style={{ marginTop: '5px' }} /></label>
           </section>
 
           <section className="invoice-card lines-card">
@@ -371,8 +509,15 @@ export default function NewInvoicePage() {
             <div className="summary-tax"><span>Total tax preview</span><strong>{money(totals.tax)}</strong></div>
           </div>
           <div className="grand-total"><span>Grand total (Est.)</span><strong>{money(totals.total)}</strong></div>
-          <button type="button" className="primary-button submit-invoice" onClick={submit} disabled={submitting || !lines.length}>{submitting ? 'Saving invoice...' : 'Create invoice'}</button>
-          <p className="summary-note">Server evaluates taxes with determinism upon submission. Deducts stock immediately.</p>
+          <button type="button" id="submit-invoice-btn" className="primary-button submit-invoice" onClick={(e) => submit(e, false)} disabled={submitting || !lines.length}>
+            {submitting ? 'Saving...' : submitLabel}
+          </button>
+          {!isEditMode && !isAmendMode && (
+            <button type="button" id="save-draft-btn" className="quiet-button submit-invoice" style={{ marginTop: 8 }} onClick={(e) => submit(e, true)} disabled={submitting || !lines.length}>
+              Save as draft
+            </button>
+          )}
+          <p className="summary-note">{submitNote}</p>
         </aside>
       </form>
     </section>

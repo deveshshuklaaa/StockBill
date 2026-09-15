@@ -15,7 +15,14 @@ from rest_framework.views import APIView
 from accounts.permissions import IsAdminUser
 from .models import AuditLog, BusinessProfile, CreditNote, Invoice, InvoiceIdempotencyKey, InvoiceLineItem, Payment
 from .serializers import AuditLogSerializer, BusinessProfileSerializer, CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
-from .services import cancel_invoice, post_invoice, reverse_payment
+from .services import (
+    amend_invoice,
+    cancel_invoice,
+    check_invoice_correction_eligibility,
+    post_invoice,
+    reverse_payment,
+    update_draft_invoice,
+)
 from .pdf import render_invoice_html
 from .pdf_engine import build_invoice_a5_pdf
 
@@ -92,7 +99,13 @@ class AuditLogListView(generics.ListAPIView):
 class InvoiceListCreateView(generics.ListCreateAPIView):
     # -id tiebreak: created_at is the transaction-start timestamp, so rows
     # created in one transaction share a value and need a stable ordering.
-    queryset = Invoice.objects.select_related("customer", "created_by").prefetch_related("line_items").all().order_by("-created_at", "-id")
+    queryset = (
+        Invoice.objects
+        .select_related("customer", "created_by", "replacement_invoice", "amended_from_invoice")
+        .prefetch_related("line_items")
+        .all()
+        .order_by("-created_at", "-id")
+    )
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -160,7 +173,12 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
 
 
 class InvoiceDetailView(generics.RetrieveAPIView):
-    queryset = Invoice.objects.select_related("customer", "created_by").prefetch_related("line_items").all()
+    queryset = (
+        Invoice.objects
+        .select_related("customer", "created_by", "replacement_invoice", "amended_from_invoice")
+        .prefetch_related("line_items")
+        .all()
+    )
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -284,3 +302,164 @@ class PaymentReverseView(APIView):
         except (TypeError, ValueError):
             return Response({"amount": "A valid reversal amount is required."}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"id": reversal.id, "payment": reversal.payment_id, "amount": reversal.amount, "reason": reversal.reason}, status=status.HTTP_201_CREATED)
+
+
+class InvoiceDraftUpdateView(APIView):
+    """PATCH a DRAFT invoice's lines and header fields.
+
+    Replaces all existing lines atomically. Does not touch stock, payments,
+    ledger, or WAC — the draft is still uncommitted.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            invoice = Invoice.objects.get(pk=pk)
+        except Invoice.DoesNotExist:
+            return Response({"detail": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+        if invoice.state != Invoice.STATE_DRAFT:
+            return Response({"state": "Only draft invoices can be edited."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Parse line items from request the same way InvoiceSerializer does
+        line_items_raw = request.data.get("line_items", [])
+        if not line_items_raw:
+            return Response({"line_items": "At least one line item is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from inventory.models import Product
+        line_items = []
+        for raw in line_items_raw:
+            try:
+                product = Product.objects.get(pk=raw["product"])
+            except (Product.DoesNotExist, KeyError):
+                return Response({"line_items": f"Product {raw.get('product')} not found."}, status=status.HTTP_400_BAD_REQUEST)
+            line_items.append({
+                "product": product,
+                "quantity": raw.get("quantity", 1),
+                "sales_unit_name": raw.get("sales_unit_name", "piece"),
+                "conversion_factor": raw.get("conversion_factor", 1),
+                "rate_charged": raw.get("rate_charged", 0),
+                "discount_amount": raw.get("discount_amount", 0),
+                "tax_rate": raw.get("tax_rate"),
+            })
+
+        customer_id = request.data.get("customer")
+        from customers.models import Customer
+        customer = None
+        if customer_id:
+            try:
+                customer = Customer.objects.get(pk=customer_id)
+            except Customer.DoesNotExist:
+                return Response({"customer": "Customer not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_type = request.data.get("payment_type", "cash")
+        tax_mode = request.data.get("tax_mode", Invoice.TAX_MODE_EXCLUSIVE)
+        place_of_supply = request.data.get("place_of_supply", "")
+        notes = request.data.get("notes", "")
+
+        try:
+            updated = update_draft_invoice(
+                invoice_id=pk,
+                customer=customer,
+                payment_type=payment_type,
+                line_items=line_items,
+                notes=notes,
+                updated_by=request.user,
+                place_of_supply=place_of_supply,
+                tax_mode=tax_mode,
+            )
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(InvoiceSerializer(updated).data)
+
+
+class InvoiceCorrectionEligibilityView(APIView):
+    """Return whether an invoice is eligible for amendment.
+
+    Eligible means: POSTED, no payments, no credit notes, no existing replacement.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        eligible, reason = check_invoice_correction_eligibility(pk)
+        return Response({"eligible": eligible, "reason": reason})
+
+
+class InvoiceAmendView(APIView):
+    """Atomically cancel a POSTED invoice and create a replacement.
+
+    Admin-only. Blocked if any payment or credit note exists against the invoice.
+    The replacement receives a new invoice number; the original is preserved.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def post(self, request, pk):
+        reason = (request.data.get("reason") or "").strip()
+        if not reason:
+            return Response({"reason": "A correction reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_invoice_number = (request.data.get("invoice_number") or "").strip()
+        if not new_invoice_number:
+            return Response({"invoice_number": "A new invoice number is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        line_items_raw = request.data.get("line_items", [])
+        if not line_items_raw:
+            return Response({"line_items": "At least one line item is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from inventory.models import Product
+        line_items = []
+        for raw in line_items_raw:
+            try:
+                product = Product.objects.get(pk=raw["product"])
+            except (Product.DoesNotExist, KeyError):
+                return Response({"line_items": f"Product {raw.get('product')} not found."}, status=status.HTTP_400_BAD_REQUEST)
+            line_items.append({
+                "product": product,
+                "quantity": raw.get("quantity", 1),
+                "sales_unit_name": raw.get("sales_unit_name", "piece"),
+                "conversion_factor": raw.get("conversion_factor", 1),
+                "rate_charged": raw.get("rate_charged", 0),
+                "discount_amount": raw.get("discount_amount", 0),
+                "tax_rate": raw.get("tax_rate"),
+            })
+
+        customer_id = request.data.get("customer")
+        from customers.models import Customer
+        customer = None
+        if customer_id:
+            try:
+                customer = Customer.objects.get(pk=customer_id)
+            except Customer.DoesNotExist:
+                return Response({"customer": "Customer not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_type = request.data.get("payment_type", "cash")
+        tax_mode = request.data.get("tax_mode", Invoice.TAX_MODE_EXCLUSIVE)
+        place_of_supply = request.data.get("place_of_supply", "")
+        notes = request.data.get("notes", "")
+
+        try:
+            with transaction.atomic():
+                original, replacement = amend_invoice(
+                    invoice_id=pk,
+                    corrected_line_items=line_items,
+                    customer=customer,
+                    payment_type=payment_type,
+                    notes=notes,
+                    place_of_supply=place_of_supply,
+                    tax_mode=tax_mode,
+                    new_invoice_number=new_invoice_number,
+                    amended_by=request.user,
+                    reason=reason,
+                )
+        except ValidationError as exc:
+            return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                "original": InvoiceSerializer(original).data,
+                "replacement": InvoiceSerializer(replacement).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
