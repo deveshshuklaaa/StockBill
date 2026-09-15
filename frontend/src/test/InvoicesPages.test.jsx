@@ -346,4 +346,39 @@ describe('InvoiceDetailPage', () => {
       expect(screen.getByText('CANCELLED')).toBeInTheDocument()
     })
   })
+
+  it('renders Print Original and Print Duplicate on detail and triggers print', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DETAIL)
+    const printSpy = vi.spyOn(invoicesApi, 'printInvoicePdf').mockResolvedValue('blob:url')
+
+    mountPage('detail', { route: '/invoices/11' })
+    await screen.findByText('INV-20260912-1')
+
+    const origBtn = screen.getByRole('button', { name: 'Print Original' })
+    const dupBtn = screen.getByRole('button', { name: 'Print Duplicate' })
+    expect(origBtn).toBeInTheDocument()
+    expect(dupBtn).toBeInTheDocument()
+
+    await user.click(origBtn)
+    expect(printSpy).toHaveBeenCalledWith('11', { copy: 'original', invoiceNumber: 'INV-20260912-1' })
+
+    await user.click(dupBtn)
+    expect(printSpy).toHaveBeenCalledWith('11', { copy: 'duplicate', invoiceNumber: 'INV-20260912-1' })
+  })
+
+  it('renders Print Original and Print Duplicate on posted history rows', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue(PAGE_1)
+    const printSpy = vi.spyOn(invoicesApi, 'printInvoicePdf').mockResolvedValue('blob:url')
+
+    mountPage('list')
+    await screen.findByText('INV-20260912-1')
+
+    const origButtons = screen.getAllByRole('button', { name: /Print original invoice/i })
+    expect(origButtons.length).toBe(2) // 2 posted invoices in PAGE_1
+
+    await user.click(origButtons[0])
+    expect(printSpy).toHaveBeenCalledWith(11, { copy: 'original', invoiceNumber: 'INV-20260912-1' })
+  })
 })

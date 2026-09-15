@@ -19,6 +19,12 @@ class BusinessProfile(models.Model):
     state = models.CharField(max_length=100)
     state_code = models.CharField(max_length=10)
     contact_details = models.CharField(max_length=255, blank=True)
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.CharField(max_length=100, blank=True)
+    terms_and_conditions = models.TextField(
+        blank=True,
+        default="Goods once sold will not be taken back or exchanged.\nBills not paid due date will attract 24% interest.",
+    )
 
     def __str__(self):
         return self.business_name
@@ -155,6 +161,7 @@ class InvoiceLineItem(models.Model):
     base_unit_snapshot = models.CharField(max_length=20, blank=True)
     hsn_sac_snapshot = models.CharField(max_length=50, blank=True)
     taxable_value_snapshot = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    mrp_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -170,6 +177,7 @@ class InvoiceLineItem(models.Model):
                     "tax_amount", "cgst_rate", "cgst_amount", "sgst_rate", "sgst_amount", "igst_rate", "igst_amount",
                     "line_total", "cost_price_snapshot", "cogs_amount",
                     "product_name_snapshot", "base_unit_snapshot", "hsn_sac_snapshot", "taxable_value_snapshot",
+                    "mrp_snapshot",
                 ]
                 if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
                     raise ValueError("Posted and cancelled invoice lines are immutable.")

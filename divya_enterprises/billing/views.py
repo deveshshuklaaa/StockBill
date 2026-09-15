@@ -12,16 +12,12 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-try:
-    from weasyprint import HTML
-except OSError:
-    HTML = None
-
 from accounts.permissions import IsAdminUser
 from .models import AuditLog, BusinessProfile, CreditNote, Invoice, InvoiceIdempotencyKey, InvoiceLineItem, Payment
 from .serializers import AuditLogSerializer, BusinessProfileSerializer, CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
 from .services import cancel_invoice, post_invoice, reverse_payment
 from .pdf import render_invoice_html
+from .pdf_engine import build_invoice_a5_pdf
 
 
 class BusinessProfileView(generics.RetrieveUpdateAPIView):
@@ -229,18 +225,17 @@ class InvoicePdfView(generics.GenericAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        if HTML is None:
-            return Response(
-                {"detail": "PDF generation is unavailable because the native WeasyPrint libraries are not installed on this system."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
         invoice = self.get_object()
-        html = render_invoice_html(invoice)
-        pdf_bytes = HTML(string=html).write_pdf()
-        filename = f"invoice-{slugify(invoice.invoice_number)}.pdf"
+        copy_type = request.query_params.get("copy", "original").strip().lower()
+        if copy_type not in ["original", "duplicate", "triplicate"]:
+            copy_type = "original"
+        pdf_bytes = build_invoice_a5_pdf(invoice, copy_type=copy_type)
+        filename = f"invoice-{slugify(invoice.invoice_number)}-{slugify(copy_type)}.pdf"
+        disposition = request.query_params.get("disposition", "inline").strip().lower()
+        if disposition not in ["inline", "attachment"]:
+            disposition = "inline"
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
         return response
 
 

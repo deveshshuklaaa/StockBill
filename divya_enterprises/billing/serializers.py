@@ -17,6 +17,9 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "state",
             "state_code",
             "contact_details",
+            "phone",
+            "email",
+            "terms_and_conditions",
         ]
         read_only_fields = ["id"]
 
@@ -56,14 +59,15 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
             "cgst_rate", "cgst_amount", "sgst_rate", "sgst_amount",
             "igst_rate", "igst_amount", "line_total", "cost_price_snapshot",
             "cogs_amount", "created_at", "hsn_sac_snapshot", "taxable_value_snapshot",
-            "base_unit_snapshot", "product_name_snapshot"
+            "base_unit_snapshot", "product_name_snapshot", "mrp_snapshot"
         ]
         read_only_fields = [
             "id", "invoice", "created_at", "product_name", "tax_amount",
             "cgst_rate", "cgst_amount", "sgst_rate", "sgst_amount",
             "igst_rate", "igst_amount", "line_total", "cost_price_snapshot",
             "cogs_amount", "hsn_sac_snapshot", "taxable_value_snapshot",
-            "base_unit_snapshot", "product_name_snapshot", "base_quantity"
+            "base_unit_snapshot", "product_name_snapshot", "base_quantity",
+            "mrp_snapshot"
         ]
 
     def get_product_name(self, obj):

@@ -279,6 +279,7 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
             base_unit_snapshot=product.base_unit,
             hsn_sac_snapshot=product.hsn_sac,
             taxable_value_snapshot=line_result["taxable_value"],
+            mrp_snapshot=product.mrp or Decimal("0.00"),
         )
         if state == Invoice.STATE_DRAFT:
             continue
@@ -341,7 +342,8 @@ def post_invoice(*, invoice_id, posted_by):
         line.cogs_amount = _money(line.base_quantity * line.cost_price_snapshot)
         line.product_name_snapshot = product.name
         line.base_unit_snapshot = product.base_unit
-        line.save(update_fields=["cost_price_snapshot", "cogs_amount", "product_name_snapshot", "base_unit_snapshot"])
+        line.mrp_snapshot = product.mrp or Decimal("0.00")
+        line.save(update_fields=["cost_price_snapshot", "cogs_amount", "product_name_snapshot", "base_unit_snapshot", "mrp_snapshot"])
         adjust_inventory(product=product, quantity_delta=-line.base_quantity, movement_type=StockLedger.SALE, created_by=posted_by, reference_type="invoice", reference_id=invoice.pk, unit_cost=line.cost_price_snapshot)
     invoice.state = Invoice.STATE_POSTED
     invoice._allow_lifecycle_transition = True

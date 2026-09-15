@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiErrorMessage } from '../api/client'
-import { fetchInvoices } from '../api/invoices'
+import { fetchInvoices, printInvoicePdf } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 
@@ -26,23 +26,30 @@ export default function InvoicesPage() {
   const [total, setTotal] = useState(0)
   const [hasNext, setHasNext] = useState(false)
   const [hasPrevious, setHasPrevious] = useState(false)
-  const [busy, setBusy] = useState(true)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const latestLoad = useRef(0)
 
   useEffect(() => {
-    const timer = setTimeout(() => { setSearch(searchInput.trim()); setPage(1) }, 300)
-    return () => clearTimeout(timer)
+    const handle = setTimeout(() => { setSearch(searchInput.trim()); setPage(1) }, 250)
+    return () => clearTimeout(handle)
   }, [searchInput])
 
   useEffect(() => {
     const requestId = ++latestLoad.current
     setBusy(true); setError('')
-    fetchInvoices({ page, search, state: stateFilter, paymentType: paymentFilter, from: fromFilter, to: toFilter })
+    fetchInvoices({
+      page,
+      search,
+      state: stateFilter,
+      paymentType: paymentFilter,
+      from: fromFilter,
+      to: toFilter,
+    })
       .then((data) => {
         if (requestId !== latestLoad.current) return
-        setInvoices(Array.isArray(data) ? data : data.results || [])
-        setTotal(Number(data.count ?? 0))
+        setInvoices(data.results || [])
+        setTotal(data.count || 0)
         setHasNext(Boolean(data.next))
         setHasPrevious(Boolean(data.previous))
       })
@@ -53,6 +60,14 @@ export default function InvoicesPage() {
       })
       .finally(() => { if (requestId === latestLoad.current) setBusy(false) })
   }, [page, search, stateFilter, paymentFilter, fromFilter, toFilter])
+
+  async function handlePrint(id, copy, invoiceNumber) {
+    try {
+      await printInvoicePdf(id, { copy, invoiceNumber })
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    }
+  }
 
   const totalPages = Math.max(1, Math.ceil(total / 25))
   const filtersActive = search || stateFilter || paymentFilter || fromFilter || toFilter
@@ -85,7 +100,15 @@ export default function InvoicesPage() {
           <td><span className={invoice.payment_status === 'paid' ? 'tax-chip' : 'balance due'}>{invoice.payment_status}</span></td>
           <td><strong>{money(invoice.total_amount)}</strong></td>
           <td><span className={STATE_BADGE[invoice.state] || 'type-chip'}>{invoice.state}</span></td>
-          <td><Link className="text-button" to={`/invoices/${invoice.id}`}>View</Link></td>
+          <td>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <Link className="text-button" to={`/invoices/${invoice.id}`}>View</Link>
+              {invoice.state === 'POSTED' && <>
+                <button className="text-button" onClick={() => handlePrint(invoice.id, 'original', invoice.invoice_number)} aria-label={`Print original invoice ${invoice.invoice_number}`}>Original</button>
+                <button className="text-button" onClick={() => handlePrint(invoice.id, 'duplicate', invoice.invoice_number)} aria-label={`Print duplicate invoice ${invoice.invoice_number}`}>Duplicate</button>
+              </>}
+            </div>
+          </td>
         </tr>)}</tbody>
       </table></div>}
       <div className="table-meta pager" role="navigation" aria-label="Invoice pagination">

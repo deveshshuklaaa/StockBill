@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
-import { cancelInvoice, fetchInvoice } from '../api/invoices'
+import { cancelInvoice, fetchInvoice, printInvoicePdf } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 import { formatQuantity, formatQuantityWithUnit } from '../utils/format'
@@ -20,7 +20,7 @@ export default function InvoiceDetailPage() {
   const isAdmin = user?.role === 'admin'
   const [invoice, setInvoice] = useState(null)
   const [error, setError] = useState('')
-  const [downloading, setDownloading] = useState(false)
+  const [downloading, setDownloading] = useState(null)
   const [showCancel, setShowCancel] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -33,33 +33,33 @@ export default function InvoiceDetailPage() {
     return () => { cancelled = true }
   }, [id])
 
-  async function downloadPdf() {
-    setDownloading(true)
+  async function handlePrint(copy = 'original') {
+    setDownloading(copy)
     setError('')
     try {
-      const response = await api.get(`/invoices/${id}/pdf/`, { responseType: 'blob' })
-      const url = URL.createObjectURL(response.data)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `invoice-${invoice.invoice_number}.pdf`
-      link.click()
-      URL.revokeObjectURL(url)
+      await printInvoicePdf(id, { copy, invoiceNumber: invoice?.invoice_number })
     } catch (err) {
       setError(apiErrorMessage(err))
     } finally {
-      setDownloading(false)
+      setDownloading(null)
     }
   }
 
   async function cancel() {
     if (!reason.trim()) { setError('Enter a cancellation reason.'); return }
-    setBusy(true); setError('')
+    setBusy(true)
+    setError('')
     try {
-      const data = await cancelInvoice(id, reason.trim())
-      setInvoice(data)
+      const updated = await cancelInvoice(id, reason.trim())
+      setInvoice(updated)
       setShowCancel(false)
+      setReason('')
     } catch (err) {
-      setError(apiForbiddenMessage(err, 'cancel invoices', 'cancelling invoice'))
+      if (err.response?.status === 403) {
+        setError(apiForbiddenMessage(err, 'cancel invoices'))
+      } else {
+        setError(apiErrorMessage(err, { action: 'cancelling invoice' }))
+      }
     } finally {
       setBusy(false)
     }
@@ -80,8 +80,12 @@ export default function InvoiceDetailPage() {
     <header className="detail-toolbar">
       <Link className="quiet-button" to="/invoices">← Invoices</Link>
       <div className="detail-actions">
-        <button className="quiet-button" onClick={() => window.print()}>Print</button>
-        <button className="quiet-button" onClick={downloadPdf} disabled={downloading}>{downloading ? 'Preparing PDF...' : 'Download PDF'}</button>
+        <button className="quiet-button" onClick={() => handlePrint('original')} disabled={Boolean(downloading)}>
+          {downloading === 'original' ? 'Preparing...' : 'Print Original'}
+        </button>
+        <button className="quiet-button" onClick={() => handlePrint('duplicate')} disabled={Boolean(downloading)}>
+          {downloading === 'duplicate' ? 'Preparing...' : 'Print Duplicate'}
+        </button>
         {isAdmin && isPosted && <button className="quiet-button" style={{ color: 'var(--red)' }} onClick={() => setShowCancel(true)} disabled={busy}>Cancel invoice</button>}
       </div>
     </header>
