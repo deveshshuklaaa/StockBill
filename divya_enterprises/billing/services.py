@@ -193,14 +193,14 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
     calculated_lines_input = []
     for item in line_items:
         product = products[item["product"].pk]
-        quantity = str(item.get("quantity", 1))
+        base_quantity = str(item["base_quantity"])
         rate_charged = str(item.get("rate_charged", 0))
         discount_amount = str(item.get("discount_amount", 0))
         tax_rate = str(item.get("tax_rate", product.tax.rate if product.tax else 0))
 
         calculated_lines_input.append({
             "product": product,
-            "quantity": quantity,
+            "quantity": base_quantity,
             "rate_charged": rate_charged,
             "discount_amount": discount_amount,
             "tax_rate": tax_rate,
@@ -250,7 +250,7 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
     for idx, line_result in enumerate(calc_result["lines"]):
         item = line_items[idx]
         product = calculated_lines_input[idx]["product"]
-        quantity = Decimal(line_result["quantity"])
+        quantity = Decimal(str(item.get("quantity", 1)))
         base_quantity = item["base_quantity"]
         cost_price = balances[product.pk].average_cost
         cogs_amount = _money(base_quantity * cost_price)
@@ -392,11 +392,10 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
             raise serializers.ValidationError({"line_items": "A reversal cannot exceed the quantity originally billed."})
         product = products[original_line.product_id]
         tax_rate = original_line.tax_rate
-        # Proportions compare in base units so master-box lines (rate per
-        # box, entered quantity 2, base 384) reverse correctly.
+        # Proportions compare in base units.
         base_quantity = original_line.base_quantity
         proportion = quantity / base_quantity
-        per_base_rate = original_line.rate_charged / original_line.conversion_factor
+        per_base_rate = original_line.rate_charged
         discount_amount = _money(original_line.discount_amount * proportion)
         subtotal = _money((quantity * per_base_rate) - discount_amount)
 

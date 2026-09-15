@@ -24,12 +24,13 @@ function variantSummary(product) {
 
 function calculateLine(line, taxMode) {
   const quantity = Number(line.quantity) || 0
+  const factor = Number(line.conversion_factor) || 1
+  const baseQty = quantity * factor
   const rate = Number(line.rate) || 0
   const discount = Number(line.discount_amount) || 0
-  const factor = Number(line.conversion_factor) || 1
   const taxRate = Number(line.taxRate) || 0
 
-  const gross = quantity * rate
+  const gross = baseQty * rate
   const net = gross - discount
   let taxable = net
   let tax = net * taxRate / 100
@@ -37,7 +38,6 @@ function calculateLine(line, taxMode) {
     taxable = net / (1 + taxRate / 100)
     tax = net - taxable
   }
-  const baseQty = quantity * factor
   const unitCost = baseQty > 0 ? taxable / baseQty : 0
   return { gross, discount, taxable, tax, total: taxable + tax, baseQty, unitCost }
 }
@@ -307,7 +307,7 @@ export default function NewPurchasePage() {
                   {box && <option value="master box">Master box ({box})</option>}
                 </select></label>
                 <label>Qty<input type="number" min="0.001" step={line.purchaseUnit === 'piece' ? '1' : '0.001'} value={line.quantity} onChange={(e) => updateLine(line.key, 'quantity', e.target.value)} /></label>
-                <label>Rate<input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => updateLine(line.key, 'rate', e.target.value)} placeholder={line.purchaseUnit === 'master box' ? 'Per box' : 'Per piece'} /></label>
+                <label>Rate / Piece<input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => updateLine(line.key, 'rate', e.target.value)} placeholder="₹ / piece" aria-label={`Purchase rate per piece for ${line.productData.name}`} /></label>
                 <label>Disc<input type="number" min="0" step="0.01" value={line.discountAmount} onChange={(e) => updateLine(line.key, 'discountAmount', e.target.value)} /></label>
                 <div className="line-tax">{calculated.taxRate}%</div>
                 <div className="line-total">{money(calculated.total)}</div>

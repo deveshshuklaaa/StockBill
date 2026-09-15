@@ -120,12 +120,6 @@ def _resolve_lines(*, line_items, supplier, tax_mode):
             raise serializers.ValidationError(
                 {"line_items": f"Discount for {product.name} cannot be negative."}
             )
-        gross = quantity * rate
-        if discount_amount > gross:
-            raise serializers.ValidationError(
-                {"line_items": f"Discount for {product.name} exceeds the line gross."}
-            )
-
         purchase_unit_name = str(item.get("purchase_unit_name") or PURCHASE_UNIT_PIECE).strip() or PURCHASE_UNIT_PIECE
         conversion_factor = Decimal(str(item.get("conversion_factor", 1) or 1))
         if conversion_factor <= 0:
@@ -167,6 +161,12 @@ def _resolve_lines(*, line_items, supplier, tax_mode):
                 {"line_items": f"Base quantity for {product.name} must be positive."}
             )
 
+        gross = base_quantity * rate
+        if discount_amount > gross:
+            raise serializers.ValidationError(
+                {"line_items": f"Discount for {product.name} exceeds the line gross."}
+            )
+
         product_tax_rate = product.tax.rate if product.tax else Decimal("0")
         submitted_tax_rate = item.get("tax_rate")
         if submitted_tax_rate is not None and Decimal(str(submitted_tax_rate)) != product_tax_rate:
@@ -204,7 +204,7 @@ def _resolve_lines(*, line_items, supplier, tax_mode):
         customer=_BuyerTaxContext(seller),
         lines=[
             {
-                "quantity": str(line["quantity"]),
+                "quantity": str(line["base_quantity"]),
                 "rate_charged": str(line["rate"]),
                 "discount_amount": str(line["discount_amount"]),
                 "tax_rate": str(line["tax_rate"]),

@@ -227,7 +227,7 @@ class InvoicePdfView(generics.GenericAPIView):
     def get(self, request, *args, **kwargs):
         invoice = self.get_object()
         copy_type = request.query_params.get("copy", "original").strip().lower()
-        if copy_type not in ["original", "duplicate", "triplicate"]:
+        if copy_type not in ["original", "duplicate", "triplicate", "reprint"]:
             copy_type = "original"
         pdf_bytes = build_invoice_a5_pdf(invoice, copy_type=copy_type)
         filename = f"invoice-{slugify(invoice.invoice_number)}-{slugify(copy_type)}.pdf"

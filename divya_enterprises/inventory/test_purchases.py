@@ -516,7 +516,7 @@ class PurchaseUnitConversionTests(PurchaseAPITestBase):
                 "quantity": "5",
                 "purchase_unit_name": "master box",
                 "conversion_factor": "192",
-                "rate": "1248.00",
+                "rate": "6.50",
             }
         ]
         response = self.client_as(self.admin).post(
@@ -531,6 +531,46 @@ class PurchaseUnitConversionTests(PurchaseAPITestBase):
             product=self.product, warehouse=self.warehouse
         )
         self.assertEqual(balance.quantity_on_hand, Decimal("960.000"))
+
+    def test_wac_mixed_piece_and_master_box_purchases(self):
+        """WAC folds base quantities and per-piece rates across pieces and boxes."""
+        # Purchase 1: 100 pcs at 6.00/pc
+        p1 = self.purchase_payload()
+        p1["post"] = True
+        p1["line_items"] = [
+            {
+                "product": self.product.pk,
+                "quantity": "100",
+                "purchase_unit_name": "piece",
+                "rate": "6.00",
+            }
+        ]
+        res1 = self.client_as(self.admin).post("/api/purchase-invoices/", p1, format="json")
+        self.assertEqual(res1.status_code, 201)
+
+        # Purchase 2: 2 boxes (384 pcs) at 7.00/pc
+        p2 = self.purchase_payload()
+        p2["supplier_invoice_no"] = "SUPP-INV-MIXED-2"
+        p2["post"] = True
+        p2["line_items"] = [
+            {
+                "product": self.product.pk,
+                "quantity": "2",
+                "purchase_unit_name": "master box",
+                "conversion_factor": "192",
+                "rate": "7.00",
+            }
+        ]
+        res2 = self.client_as(self.admin).post("/api/purchase-invoices/", p2, format="json")
+        self.assertEqual(res2.status_code, 201)
+
+        balance = InventoryBalance.objects.get(
+            product=self.product, warehouse=self.warehouse
+        )
+        self.assertEqual(balance.quantity_on_hand, Decimal("484.000"))
+        # Expected WAC: (100 * 6.00 + 384 * 7.00) / 484 = 3288 / 484 = 6.793388...
+        expected_wac = (Decimal("100") * Decimal("6.00") + Decimal("384") * Decimal("7.00")) / Decimal("484")
+        self.assertAlmostEqual(float(balance.average_cost), float(expected_wac), places=2)
 
     def test_master_box_rejected_without_catalogue_attribute(self):
         payload = self.purchase_payload()

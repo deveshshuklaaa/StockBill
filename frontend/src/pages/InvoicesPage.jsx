@@ -106,6 +106,7 @@ export default function InvoicesPage() {
               {invoice.state === 'POSTED' && <>
                 <button className="text-button" onClick={() => handlePrint(invoice.id, 'original', invoice.invoice_number)} aria-label={`Print original invoice ${invoice.invoice_number}`}>Original</button>
                 <button className="text-button" onClick={() => handlePrint(invoice.id, 'duplicate', invoice.invoice_number)} aria-label={`Print duplicate invoice ${invoice.invoice_number}`}>Duplicate</button>
+                <button className="text-button" onClick={() => handlePrint(invoice.id, 'reprint', invoice.invoice_number)} aria-label={`Print reprint invoice ${invoice.invoice_number}`}>Reprint</button>
               </>}
             </div>
           </td>

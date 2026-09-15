@@ -123,7 +123,7 @@ class InvoicePdfGenerationTests(APITestCase):
             sales_unit_name="master box",
             conversion_factor=Decimal("192.000"),
             base_quantity=Decimal("384.000"),
-            rate_charged=Decimal("706.56"),
+            rate_charged=Decimal("3.68"),
             discount_amount=Decimal("0.00"),
             tax_rate=Decimal("5.00"),
             tax_amount=Decimal("70.66"),
@@ -180,16 +180,23 @@ class InvoicePdfGenerationTests(APITestCase):
         pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
         doc = pymupdf.open("pdf", pdf_bytes)
         page_text = doc[0].get_text()
-        self.assertIn("ORIGINAL FOR RECIPIENT", page_text)
-        self.assertNotIn("DUPLICATE FOR TRANSPORTER", page_text)
+        self.assertIn("ORIGINAL", page_text)
+        self.assertNotIn("DUPLICATE", page_text)
 
     # 3. Duplicate designation works
     def test_duplicate_designation_works(self):
         pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="duplicate")
         doc = pymupdf.open("pdf", pdf_bytes)
         page_text = doc[0].get_text()
-        self.assertIn("DUPLICATE FOR TRANSPORTER", page_text)
-        self.assertNotIn("ORIGINAL FOR RECIPIENT", page_text)
+        self.assertIn("DUPLICATE", page_text)
+        self.assertNotIn("REPRINT", page_text)
+
+    # 3b. Reprint designation works
+    def test_reprint_designation_works(self):
+        pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="reprint")
+        doc = pymupdf.open("pdf", pdf_bytes)
+        page_text = doc[0].get_text()
+        self.assertIn("REPRINT", page_text)
 
     # 4. Original and duplicate do not mutate invoice
     def test_original_and_duplicate_do_not_mutate_invoice(self):
@@ -347,7 +354,7 @@ class InvoicePdfGenerationTests(APITestCase):
         page1_text = doc[0].get_text()
         page2_text = doc[1].get_text()
 
-        self.assertIn("Continued... 2", page1_text)
+        self.assertIn("Continued... Page 2", page1_text)
         self.assertIn("TOTAL B/F", page2_text)
         self.assertIn("Page 1 of 2", page1_text)
         self.assertIn("Page 2 of 2", page2_text)
@@ -368,15 +375,40 @@ class InvoicePdfGenerationTests(APITestCase):
         self.assertIsNotNone(logo_path)
         self.assertTrue(Path(logo_path).exists())
 
-    # 16. A5 page size is correct (148 mm x 210 mm)
+    # 16. A5 page size is correct: Landscape 210 mm x 148 mm (595.28 pt x 419.53 pt)
     def test_a5_page_size_is_correct(self):
         pdf_bytes = build_invoice_a5_pdf(self.invoice)
         doc = pymupdf.open("pdf", pdf_bytes)
         rect = doc[0].rect
         width_mm = rect.width * 25.4 / 72
         height_mm = rect.height * 25.4 / 72
-        self.assertAlmostEqual(width_mm, 148.0, delta=0.5)
-        self.assertAlmostEqual(height_mm, 210.0, delta=0.5)
+        self.assertAlmostEqual(width_mm, 210.0, delta=0.5)
+        self.assertAlmostEqual(height_mm, 148.0, delta=0.5)
+        self.assertAlmostEqual(rect.width, 595.28, delta=0.5)
+        self.assertAlmostEqual(rect.height, 419.53, delta=0.5)
+
+    def test_rate_shown_as_rate_per_piece(self):
+        pdf_bytes = build_invoice_a5_pdf(self.invoice)
+        doc = pymupdf.open("pdf", pdf_bytes)
+        text = doc[0].get_text()
+        self.assertIn("Rate / Piece", text)
+        self.assertIn("2 Box", text)
+        self.assertIn("192", text)
+        self.assertIn("3.68", text)
+        self.assertIn("1483.78", text)
+
+    def test_exact_company_details(self):
+        pdf_bytes = build_invoice_a5_pdf(self.invoice)
+        doc = pymupdf.open("pdf", pdf_bytes)
+        text = doc[0].get_text()
+        self.assertIn("DIVYA ENTERPRISES", text)
+        self.assertIn("Shah Arcade", text)
+        self.assertIn("Malad East", text)
+        self.assertIn("9930008633", text)
+        self.assertIn("divyaenterprises2501@gmail.com", text)
+        self.assertIn("27ECNPS6389P1Z5", text)
+        self.assertIn("Maharashtra", text)
+        self.assertNotIn("Uttar Pradesh", text)
 
     # 17. Cancelled/draft behavior follows business rules
     def test_cancelled_and_draft_behavior(self):

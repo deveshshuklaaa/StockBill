@@ -493,7 +493,7 @@ class InvoiceUnitConversionTests(APITestCase):
                 "quantity": "2",
                 "sales_unit_name": "master box",
                 "conversion_factor": "192",
-                "rate_charged": "1248.00",
+                "rate_charged": "6.50",
                 "tax_rate": "18",
             }],
             "place_of_supply": "27",
@@ -523,7 +523,7 @@ class InvoiceUnitConversionTests(APITestCase):
         )
         self.assertEqual(cn_res.status_code, 201, cn_res.data)
         cn = cn_res.data
-        # 1 box at 1248.00 + 18% GST (rounded per tax engine) = 1473.00
+        # 1 box at 1248.00 (192 * 6.50) + 18% GST (rounded per tax engine) = 1473.00
         self.assertEqual(Decimal(cn["total_amount"]), Decimal("1473.00"))
 
         # Check stock restoration uses base quantity: 116 + 192 = 308
@@ -556,7 +556,7 @@ class InvoiceUnitConversionTests(APITestCase):
                 "quantity": "1",
                 "sales_unit_name": "master box",
                 "conversion_factor": "192",
-                "rate_charged": "1920.00",
+                "rate_charged": "10.00",
                 "tax_rate": "18",
             }],
             "place_of_supply": "27",

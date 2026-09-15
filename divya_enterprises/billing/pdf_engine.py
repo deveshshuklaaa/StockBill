@@ -1,8 +1,9 @@
 """A5 Physical Laser Printing Engine for StockBill Sales Invoices.
 
 Target specifications:
-- Paper: A5 Portrait (148 mm x 210 mm)
-- Margins: 5 mm (printable width 138 mm / 391.2 pt)
+- Paper: A5 Landscape (210 mm x 148 mm)
+- PDF dimensions: 595.28 pt x 419.53 pt (exact landscape(A5))
+- Margins: 5 mm (printable width 566.94 pt / 200 mm)
 - Resolution: Exact millimeter layout via ReportLab
 - Output: Compact, clean ERP-grade invoice matching the MARG reference structure
 - Authoritative Data: StockBill persisted snapshot fields only
@@ -15,9 +16,8 @@ from pathlib import Path
 
 from django.conf import settings
 from reportlab.lib.colors import HexColor, black, white, Color
-from reportlab.lib.pagesizes import A5
+from reportlab.lib.pagesizes import A5, landscape
 from reportlab.lib.units import mm
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 
 from .models import BusinessProfile, Invoice
@@ -31,10 +31,11 @@ COLOR_TEXT = HexColor("#000000")
 COLOR_DRAFT = HexColor("#888888")
 COLOR_CANCELLED = HexColor("#C0392B")
 
-# --- A5 DIMENSIONS ---
-PAGE_WIDTH, PAGE_HEIGHT = A5  # 148 mm, 210 mm
+# --- A5 LANDSCAPE DIMENSIONS ---
+PAGE_WIDTH, PAGE_HEIGHT = landscape(A5)  # 595.275 pt, 419.528 pt (210 mm x 148 mm)
 MARGIN = 5 * mm  # 14.17 pt
-PRINTABLE_WIDTH = PAGE_WIDTH - (2 * MARGIN)  # 138 mm (~391.18 pt)
+PRINTABLE_WIDTH = PAGE_WIDTH - (2 * MARGIN)  # ~566.94 pt
+PRINTABLE_HEIGHT = PAGE_HEIGHT - (2 * MARGIN)  # ~391.18 pt
 
 
 def amount_to_words(amount) -> str:
@@ -142,7 +143,6 @@ def format_qty_presentation(line) -> tuple[str, str]:
     if sales_unit == "master box":
         box_str = clean_num(raw_qty)
         pack_str = clean_num(conversion)
-        base_str = clean_num(base_qty)
         return f"{box_str} Box", pack_str
     else:
         qty_str = clean_num(raw_qty)
@@ -180,11 +180,11 @@ class NumberedCanvas(canvas.Canvas):
 
 
 def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=None) -> bytes:
-    """Build an A5 invoice PDF adhering to StockBill data and the visual reference.
+    """Build an A5 Landscape invoice PDF adhering to StockBill data and the visual reference.
 
     Args:
         invoice: Authoritative Invoice instance with prefetched line_items.
-        copy_type: 'original', 'duplicate', or 'triplicate'
+        copy_type: 'original', 'duplicate', 'reprint', or 'triplicate'
         lines: Optional explicit sequence of line items (defaults to invoice.line_items)
     """
     buffer = io.BytesIO()
@@ -194,51 +194,64 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
     profile = BusinessProfile.objects.first()
     is_posted = invoice.state == Invoice.STATE_POSTED
 
+    default_company = "DIVYA ENTERPRISES"
+    default_address = "GROUND FLOOR SHOP NO 30 SHAH ARCADE, 3 RANI SATI MARG MALAD EAST MUMBAI 400097"
+    default_phone = "9930008633"
+    default_email = "divyaenterprises2501@gmail.com"
+    default_gstin = "27ECNPS6389P1Z5"
+    default_state = "Maharashtra"
+    default_state_code = "27"
+    default_terms = (
+        "1. Goods once sold will not be taken back or exchanged.\n"
+        "2. Bills not paid on due date will attract 24% interest p.a.\n"
+        "3. Subject to Mumbai Jurisdiction."
+    )
+
     if is_posted:
-        # Posted invoices: snapshots are immutable and authoritative
-        co_name = invoice.seller_business_name_snapshot or (profile.business_name if profile else "DIVYA ENTERPRISES")
-        co_address = invoice.seller_address_snapshot or (profile.registered_address if profile else "")
-        co_phone = (profile.phone if profile else None) or (profile.contact_details if profile else None) or ""
-        co_email = (profile.email if profile else None) or ""
-        co_gstin = invoice.seller_gstin_snapshot or (profile.gstin if profile else "")
-        terms_text = (profile.terms_and_conditions if profile else None) or (
-            "Goods once sold will not be taken back or exchanged.\nBills not paid due date will attract 24% interest."
-        )
+        co_name = invoice.seller_business_name_snapshot or (profile.business_name if (profile and profile.business_name) else default_company)
+        co_address = invoice.seller_address_snapshot or (profile.registered_address if (profile and profile.registered_address) else default_address)
+        co_phone = (profile.phone if (profile and profile.phone) else None) or (profile.contact_details if (profile and profile.contact_details) else None) or default_phone
+        co_email = (profile.email if (profile and profile.email) else None) or default_email
+        co_gstin = invoice.seller_gstin_snapshot or (profile.gstin if (profile and profile.gstin) else default_gstin)
+        co_state = invoice.seller_state_snapshot or (profile.state if (profile and profile.state) else default_state)
+        co_state_code = invoice.seller_state_code_snapshot or (profile.state_code if (profile and profile.state_code) else default_state_code)
+        terms_text = (profile.terms_and_conditions if (profile and profile.terms_and_conditions) else None) or default_terms
     else:
-        # Draft invoices: use current BusinessProfile as working data
-        co_name = (profile.business_name if profile else None) or invoice.seller_business_name_snapshot or "DIVYA ENTERPRISES"
-        co_address = (profile.registered_address if profile else None) or invoice.seller_address_snapshot or ""
-        co_phone = (profile.phone if profile else None) or (profile.contact_details if profile else None) or ""
-        co_email = (profile.email if profile else None) or ""
-        co_gstin = (profile.gstin if profile else None) or invoice.seller_gstin_snapshot or ""
-        terms_text = (profile.terms_and_conditions if profile else None) or (
-            "Goods once sold will not be taken back or exchanged.\nBills not paid due date will attract 24% interest."
-        )
+        co_name = (profile.business_name if (profile and profile.business_name) else None) or invoice.seller_business_name_snapshot or default_company
+        co_address = (profile.registered_address if (profile and profile.registered_address) else None) or invoice.seller_address_snapshot or default_address
+        co_phone = (profile.phone if (profile and profile.phone) else None) or (profile.contact_details if (profile and profile.contact_details) else None) or default_phone
+        co_email = (profile.email if (profile and profile.email) else None) or default_email
+        co_gstin = (profile.gstin if (profile and profile.gstin) else None) or invoice.seller_gstin_snapshot or default_gstin
+        co_state = (profile.state if (profile and profile.state) else None) or invoice.seller_state_snapshot or default_state
+        co_state_code = (profile.state_code if (profile and profile.state_code) else None) or invoice.seller_state_code_snapshot or default_state_code
+        terms_text = (profile.terms_and_conditions if (profile and profile.terms_and_conditions) else None) or default_terms
 
     cust_name = invoice.customer_name_snapshot or (invoice.customer.name if invoice.customer else "Walk-in Customer")
     cust_address = invoice.billing_address_snapshot or (invoice.customer.billing_address if invoice.customer else "")
     cust_phone = (invoice.customer.contact_info if invoice.customer else "")
     cust_gstin = invoice.customer_gstin_snapshot or (invoice.customer.gstin if invoice.customer else "") or "Unregistered"
-    # place_of_supply is calculated at invoice creation and stored; use it directly
-    pos = invoice.place_of_supply or invoice.seller_state_code_snapshot or (profile.state_code if profile else "27")
+    cust_state = invoice.state_snapshot or (invoice.customer.state if invoice.customer else "") or "Maharashtra"
+    cust_state_code = invoice.customer_state_code_snapshot or (invoice.customer.state_code if invoice.customer else "") or "27"
+    pos = invoice.place_of_supply or cust_state_code or co_state_code
 
-    # Copy labels are presentation-only; do not alter invoice data.
-    # Configurable via BusinessProfile.copy_labels if needed in future.
+    # Presentation copy labels
     copy_labels = {
-        "original": "ORIGINAL FOR RECIPIENT",
-        "duplicate": "DUPLICATE FOR TRANSPORTER",
-        "triplicate": "TRIPLICATE FOR SUPPLIER",
+        "original": "ORIGINAL",
+        "duplicate": "DUPLICATE",
+        "reprint": "REPRINT",
+        "triplicate": "TRIPLICATE",
     }
-    copy_badge = copy_labels.get(str(copy_type).lower().strip(), "ORIGINAL FOR RECIPIENT")
+    copy_badge = copy_labels.get(str(copy_type).lower().strip(), "ORIGINAL")
 
     if lines is None:
         lines = list(invoice.line_items.select_related("product").all())
     else:
         lines = list(lines)
 
-    MAX_LINES_SINGLE_PAGE = 12
-    MAX_LINES_PAGE_ONE = 15
-    MAX_LINES_SUBSEQUENT = 16
+    # Multi-page budgets for A5 landscape
+    MAX_LINES_SINGLE_PAGE = 10
+    MAX_LINES_PAGE_ONE = 13
+    MAX_LINES_SUBSEQUENT = 14
 
     pages_chunks = []
     if len(lines) <= MAX_LINES_SINGLE_PAGE:
@@ -251,11 +264,23 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             remaining = remaining[MAX_LINES_SUBSEQUENT:]
 
     total_pages = len(pages_chunks)
-    c = NumberedCanvas(buffer, pagesize=A5)
+    c = NumberedCanvas(buffer, pagesize=landscape(A5))
     logo_path = _resolve_logo_path()
 
     cumulative_amount = Decimal("0.00")
     running_sr = 1
+
+    # Check whether supply has IGST
+    has_igst = any(getattr(l, "igst_amount", Decimal("0")) > Decimal("0") for l in lines)
+
+    # Product table columns budget (total width = 566.94 pt)
+    # [Sr, Qty, Pack, Product, HSN, MRP, Rate/Piece, Dis, SGST, CGST, Amount]
+    if has_igst:
+        col_widths = [18, 48, 35, 166, 48, 42, 56, 30, 72, 51.94]
+        col_headers = ["Sr.", "Qty.", "Pack", "Product Description", "HSN", "MRP", "Rate / Piece", "Dis", "IGST", "Amount"]
+    else:
+        col_widths = [18, 48, 35, 166, 48, 42, 56, 30, 36, 36, 51.94]
+        col_headers = ["Sr.", "Qty.", "Pack", "Product Description", "HSN", "MRP", "Rate / Piece", "Dis", "SGST", "CGST", "Amount"]
 
     for page_idx, page_lines in enumerate(pages_chunks):
         page_num = page_idx + 1
@@ -272,123 +297,96 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.setLineWidth(0.75)
         c.rect(left_x, bottom_y, usable_w, top_y - bottom_y)
 
-        # 1. HEADER SECTION
-        header_height = 54
+        # ------------------------------------------------------------------
+        # 1. HEADER SECTION (Company Details + Invoice Metadata)
+        # ------------------------------------------------------------------
+        header_height = 56
         header_bottom = top_y - header_height
 
-        seller_w = usable_w * 0.52
-        cust_w = usable_w * 0.48
-        cust_x = left_x + seller_w
+        seller_w = usable_w * 0.58
+        meta_w = usable_w - seller_w
+        meta_x = left_x + seller_w
 
-        c.line(cust_x, top_y, cust_x, header_bottom)
+        c.line(meta_x, top_y, meta_x, header_bottom)
         c.line(left_x, header_bottom, right_x, header_bottom)
 
-        text_start_x = left_x + 3
-        logo_w = 0
+        # Left side: Logo + Seller identity
+        text_start_x = left_x + 4
         if logo_path:
             try:
-                logo_size = 38
-                logo_y = top_y - logo_size - 6
-                c.drawImage(logo_path, left_x + 3, logo_y, width=logo_size, height=logo_size, preserveAspectRatio=True)
-                logo_w = logo_size + 4
-                text_start_x = left_x + 3 + logo_w
+                logo_size = 46
+                logo_y = top_y - logo_size - 5
+                c.drawImage(logo_path, left_x + 4, logo_y, width=logo_size, height=logo_size, preserveAspectRatio=True)
+                text_start_x = left_x + 4 + logo_size + 6
             except Exception:
-                logo_w = 0
-                text_start_x = left_x + 3
+                text_start_x = left_x + 4
 
-        cur_y = top_y - 9
-        c.setFont("Helvetica-Bold", 8)
-        c.setFillColor(COLOR_TEXT)
-        c.drawString(text_start_x, cur_y, co_name[:34])
-
-        c.setFont("Helvetica", 5.5)
-        cur_y -= 8
-        addr_line1 = co_address[:42]
-        addr_line2 = co_address[42:84]
-        if addr_line1:
-            c.drawString(text_start_x, cur_y, addr_line1)
-            cur_y -= 7
-        if addr_line2:
-            c.drawString(text_start_x, cur_y, addr_line2)
-            cur_y -= 7
-
-        contact_parts = []
-        if co_phone:
-            contact_parts.append(f"Phone: {co_phone}")
-        if co_email:
-            contact_parts.append(f"E-Mail: {co_email}")
-        if contact_parts:
-            c.drawString(text_start_x, cur_y, " | ".join(contact_parts)[:45])
-            cur_y -= 7
-
-        if co_gstin:
-            c.setFont("Helvetica-Bold", 6)
-            c.drawString(text_start_x, cur_y, f"GSTIN: {co_gstin}")
-
-        cur_y = top_y - 9
-        c.setFont("Helvetica-Bold", 8)
-        c.drawString(cust_x + 4, cur_y, f"M/s {cust_name}"[:32])
-
-        c.setFont("Helvetica", 5.5)
-        cur_y -= 8
-        if cust_address:
-            cust_addr1 = cust_address[:40]
-            cust_addr2 = cust_address[40:80]
-            c.drawString(cust_x + 4, cur_y, cust_addr1)
-            cur_y -= 7
-            if cust_addr2:
-                c.drawString(cust_x + 4, cur_y, cust_addr2)
-                cur_y -= 7
-
-        if cust_phone:
-            c.drawString(cust_x + 4, cur_y, f"Ph.No.: {cust_phone}")
-            cur_y -= 7
-
-        c.setFont("Helvetica-Bold", 6)
-        c.drawString(cust_x + 4, cur_y, f"GSTIN: {cust_gstin}")
-        cur_y -= 7
-        c.setFont("Helvetica", 5.5)
-        c.drawString(cust_x + 4, cur_y, f"Place of Supply: {pos}")
-
-        # 2. INVOICE META BANNER
-        meta_height = 24
-        meta_bottom = header_bottom - meta_height
-        c.line(left_x, meta_bottom, right_x, meta_bottom)
-
-        title_w = usable_w * 0.45
-        meta_x = left_x + title_w
-        c.line(meta_x, header_bottom, meta_x, meta_bottom)
-
-        c.setFillColor(COLOR_HEADER_BG)
-        c.rect(left_x, meta_bottom, title_w, meta_height, fill=1, stroke=0)
-
-        c.setFillColor(COLOR_TEXT)
+        cur_y = top_y - 11
         c.setFont("Helvetica-Bold", 10)
-        c.drawCentredString(left_x + (title_w / 2), meta_bottom + 12, "GST INVOICE")
-
-        c.setFont("Helvetica-Bold", 5.5)
-        c.drawCentredString(left_x + (title_w / 2), meta_bottom + 4, f"[{copy_badge}]")
-
-        meta_col1 = meta_x + 4
-        meta_col2 = meta_x + (usable_w - title_w) * 0.52
+        c.setFillColor(COLOR_TEXT)
+        c.drawString(text_start_x, cur_y, co_name.upper()[:40])
 
         c.setFont("Helvetica", 6)
-        c.drawString(meta_col1, meta_bottom + 14, "Invoice No.:")
+        cur_y -= 9
+        # Multi-line address
+        addr_parts = [p.strip() for p in co_address.split(",") if p.strip()]
+        if len(addr_parts) > 2:
+            line1 = ", ".join(addr_parts[:2])
+            line2 = ", ".join(addr_parts[2:])
+            c.drawString(text_start_x, cur_y, line1[:55])
+            cur_y -= 8
+            c.drawString(text_start_x, cur_y, line2[:55])
+            cur_y -= 8
+        else:
+            c.drawString(text_start_x, cur_y, co_address[:55])
+            cur_y -= 8
+
+        contact_line = ""
+        if co_phone:
+            contact_line += f"Phone: {co_phone}"
+        if co_email:
+            contact_line += f" | E-Mail: {co_email}"
+        if contact_line:
+            c.drawString(text_start_x, cur_y, contact_line[:60])
+            cur_y -= 8
+
         c.setFont("Helvetica-Bold", 6.5)
-        c.drawString(meta_col1 + 42, meta_bottom + 14, str(invoice.invoice_number))
+        c.drawString(text_start_x, cur_y, f"GSTIN: {co_gstin} | State: {co_state} ({co_state_code})")
 
-        c.setFont("Helvetica", 6)
-        c.drawString(meta_col2, meta_bottom + 14, "Date:")
-        c.setFont("Helvetica-Bold", 6)
-        c.drawString(meta_col2 + 22, meta_bottom + 14, invoice.invoice_date.strftime("%d-%m-%Y"))
+        # Right side: Invoice Title + Copy Badge + Meta
+        title_box_h = 16
+        c.setFillColor(COLOR_HEADER_BG)
+        c.rect(meta_x, top_y - title_box_h, meta_w, title_box_h, fill=1, stroke=1)
+        c.setFillColor(COLOR_TEXT)
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(meta_x + 6, top_y - 11, "TAX INVOICE")
+        c.drawRightString(right_x - 6, top_y - 11, f"[ {copy_badge} ]")
 
-        c.setFont("Helvetica", 6)
-        c.drawString(meta_col1, meta_bottom + 4, "Sales Man:")
-        c.drawString(meta_col1 + 42, meta_bottom + 4, "-")
+        meta_y = top_y - title_box_h - 10
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(meta_x + 6, meta_y, "Invoice No:")
+        c.drawString(meta_x + 60, meta_y, str(invoice.invoice_number))
 
-        c.drawString(meta_col2, meta_bottom + 4, "Due Date:")
-        c.drawString(meta_col2 + 35, meta_bottom + 4, invoice.invoice_date.strftime("%d-%m-%Y"))
+        c.setFont("Helvetica", 6.5)
+        c.drawString(meta_x + 140, meta_y, "Date:")
+        c.setFont("Helvetica-Bold", 6.5)
+        c.drawString(meta_x + 165, meta_y, invoice.invoice_date.strftime("%d-%m-%Y"))
 
+        meta_y -= 12
+        c.setFont("Helvetica", 6.5)
+        c.drawString(meta_x + 6, meta_y, "Payment:")
+        c.setFont("Helvetica-Bold", 6.5)
+        c.drawString(meta_x + 60, meta_y, f"{invoice.payment_type.title()} ({invoice.payment_status.title()})")
+
+        c.setFont("Helvetica", 6.5)
+        c.drawString(meta_x + 140, meta_y, "Due Date:")
+        c.drawString(meta_x + 180, meta_y, invoice.invoice_date.strftime("%d-%m-%Y"))
+
+        meta_y -= 12
+        c.setFont("Helvetica-Bold", 6.5)
+        c.drawString(meta_x + 6, meta_y, f"Place of Supply: {pos} - {cust_state}")
+
+        # Draft / Cancelled Watermark banner if applicable
         if invoice.state == Invoice.STATE_CANCELLED:
             c.saveState()
             c.setFillColor(COLOR_CANCELLED)
@@ -403,33 +401,77 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             c.drawCentredString(left_x + (usable_w / 2), top_y - 8, "DRAFT - NOT FOR TAX PURPOSES")
             c.restoreState()
 
-        # 3. PRODUCT TABLE COLUMNS
-        col_widths = [14, 42, 25, 103, 36, 25, 31, 20, 23, 23, 49]
-        col_headers = ["Sn.", "Qty.", "Pack", "Product", "HSN", "MRP", "Rate", "Dis", "SGST", "CGST", "Amount"]
+        # ------------------------------------------------------------------
+        # 2. CUSTOMER BLOCK (Bill To)
+        # ------------------------------------------------------------------
+        cust_box_h = 30
+        cust_bottom = header_bottom - cust_box_h
+        c.line(left_x, cust_bottom, right_x, cust_bottom)
 
-        tbl_top = meta_bottom
-        th_height = 13
+        cust_col1_w = usable_w * 0.60
+        cust_col2_w = usable_w - cust_col1_w
+        cust_col2_x = left_x + cust_col1_w
+        c.line(cust_col2_x, header_bottom, cust_col2_x, cust_bottom)
+
+        # Left: Customer Details
+        cy = header_bottom - 9
+        c.setFont("Helvetica-Bold", 6.5)
+        c.drawString(left_x + 6, cy, "Bill To / Recipient:")
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(left_x + 75, cy, cust_name[:45])
+
+        cy -= 9
+        c.setFont("Helvetica", 6)
+        addr_line = cust_address[:75]
+        c.drawString(left_x + 6, cy, f"Address: {addr_line}" if addr_line else "Address: -")
+
+        cy -= 8
+        c.drawString(left_x + 6, cy, f"GSTIN: {cust_gstin} | State: {cust_state} ({cust_state_code})" + (f" | Phone: {cust_phone}" if cust_phone else ""))
+
+        # Right: Transport / Notes
+        cy_r = header_bottom - 9
+        c.setFont("Helvetica", 6)
+        c.drawString(cust_col2_x + 6, cy_r, "Reverse Charge:")
+        c.setFont("Helvetica-Bold", 6)
+        c.drawString(cust_col2_x + 70, cy_r, "No")
+
+        cy_r -= 9
+        c.setFont("Helvetica", 6)
+        c.drawString(cust_col2_x + 6, cy_r, "Transport / Vehicle:")
+        c.drawString(cust_col2_x + 75, cy_r, "-")
+
+        cy_r -= 8
+        if invoice.notes:
+            c.drawString(cust_col2_x + 6, cy_r, f"Notes: {invoice.notes[:35]}")
+
+        # ------------------------------------------------------------------
+        # 3. PRODUCT TABLE HEADERS
+        # ------------------------------------------------------------------
+        tbl_top = cust_bottom
+        th_height = 14
         th_bottom = tbl_top - th_height
 
         c.setFillColor(COLOR_HEADER_BG)
         c.rect(left_x, th_bottom, usable_w, th_height, fill=1, stroke=1)
 
         c.setFillColor(COLOR_TEXT)
-        c.setFont("Helvetica-Bold", 6)
+        c.setFont("Helvetica-Bold", 6.5)
         x_curr = left_x
         for i, (h_title, w) in enumerate(zip(col_headers, col_widths)):
-            if i == 3:
-                c.drawString(x_curr + 3, th_bottom + 4, h_title)
-            elif i in [0, 2, 4, 8, 9]:
+            if i == 3:  # Product Description
+                c.drawString(x_curr + 4, th_bottom + 4, h_title)
+            elif i in [0, 2, 4]:  # Sr, Pack, HSN
                 c.drawCentredString(x_curr + (w / 2), th_bottom + 4, h_title)
             else:
-                c.drawRightString(x_curr + w - 3, th_bottom + 4, h_title)
+                c.drawRightString(x_curr + w - 4, th_bottom + 4, h_title)
 
             x_curr += w
             if i < len(col_widths) - 1:
                 c.line(x_curr, tbl_top, x_curr, th_bottom)
 
+        # ------------------------------------------------------------------
         # 4. PRODUCT TABLE ROWS
+        # ------------------------------------------------------------------
         row_height = 12.5
         curr_row_top = th_bottom
 
@@ -437,7 +479,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             bf_bottom = curr_row_top - row_height
             c.setFont("Helvetica-Bold", 6.5)
             c.drawString(left_x + col_widths[0] + col_widths[1] + col_widths[2] + 4, bf_bottom + 3.5, "TOTAL B/F")
-            c.drawRightString(right_x - 3, bf_bottom + 3.5, f"{cumulative_amount:.2f}")
+            c.drawRightString(right_x - 4, bf_bottom + 3.5, f"{cumulative_amount:.2f}")
             c.line(left_x, bf_bottom, right_x, bf_bottom)
             curr_row_top = bf_bottom
 
@@ -449,68 +491,89 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             qty_disp, pack_disp = format_qty_presentation(line)
             hsn_disp = line.hsn_sac_snapshot or "-"
             mrp_val = getattr(line, "mrp_snapshot", None) or getattr(line.product, "mrp", Decimal("0.00")) or Decimal("0.00")
-            rate_val = line.rate_charged
+            rate_val = line.rate_charged  # per piece rate
             dis_val = line.discount_amount
-            sgst_rate_str = f"{line.sgst_rate:.2f}" if line.sgst_rate else "0.00"
-            cgst_rate_str = f"{line.cgst_rate:.2f}" if line.cgst_rate else "0.00"
+            sgst_rate_str = f"{line.sgst_rate:.2f}%" if line.sgst_rate else "0.00%"
+            cgst_rate_str = f"{line.cgst_rate:.2f}%" if line.cgst_rate else "0.00%"
+            igst_rate_str = f"{line.igst_rate:.2f}%" if line.igst_rate else "0.00%"
             line_total_val = line.line_total
 
             page_subtotal += line_total_val
             cumulative_amount += line_total_val
 
-            c.setFont("Helvetica", 6)
+            c.setFont("Helvetica", 6.5)
             x_curr = left_x
 
+            # Sr.
             c.drawCentredString(x_curr + (col_widths[0] / 2), row_bottom + 3.5, str(running_sr))
             x_curr += col_widths[0]
 
-            c.drawRightString(x_curr + col_widths[1] - 3, row_bottom + 3.5, qty_disp)
+            # Qty.
+            c.drawRightString(x_curr + col_widths[1] - 4, row_bottom + 3.5, qty_disp)
             x_curr += col_widths[1]
 
+            # Pack
             c.drawCentredString(x_curr + (col_widths[2] / 2), row_bottom + 3.5, pack_disp)
             x_curr += col_widths[2]
 
-            c.drawString(x_curr + 3, row_bottom + 3.5, p_name[:26])
+            # Product Description
+            c.drawString(x_curr + 4, row_bottom + 3.5, p_name[:36])
             x_curr += col_widths[3]
 
+            # HSN
             c.drawCentredString(x_curr + (col_widths[4] / 2), row_bottom + 3.5, hsn_disp[:10])
             x_curr += col_widths[4]
 
-            c.drawRightString(x_curr + col_widths[5] - 3, row_bottom + 3.5, f"{mrp_val:.2f}")
+            # MRP
+            c.drawRightString(x_curr + col_widths[5] - 4, row_bottom + 3.5, f"{mrp_val:.2f}")
             x_curr += col_widths[5]
 
-            c.drawRightString(x_curr + col_widths[6] - 3, row_bottom + 3.5, f"{rate_val:.2f}")
+            # Rate / Piece
+            c.drawRightString(x_curr + col_widths[6] - 4, row_bottom + 3.5, f"{rate_val:.2f}")
             x_curr += col_widths[6]
 
-            c.drawRightString(x_curr + col_widths[7] - 3, row_bottom + 3.5, f"{dis_val:.2f}")
+            # Dis
+            c.drawRightString(x_curr + col_widths[7] - 4, row_bottom + 3.5, f"{dis_val:.2f}")
             x_curr += col_widths[7]
 
-            c.drawCentredString(x_curr + (col_widths[8] / 2), row_bottom + 3.5, sgst_rate_str)
-            x_curr += col_widths[8]
+            if has_igst:
+                # IGST
+                c.drawRightString(x_curr + col_widths[8] - 4, row_bottom + 3.5, igst_rate_str)
+                x_curr += col_widths[8]
+            else:
+                # SGST
+                c.drawRightString(x_curr + col_widths[8] - 4, row_bottom + 3.5, sgst_rate_str)
+                x_curr += col_widths[8]
 
-            c.drawCentredString(x_curr + (col_widths[9] / 2), row_bottom + 3.5, cgst_rate_str)
-            x_curr += col_widths[9]
+                # CGST
+                c.drawRightString(x_curr + col_widths[9] - 4, row_bottom + 3.5, cgst_rate_str)
+                x_curr += col_widths[9]
 
-            c.drawRightString(x_curr + col_widths[10] - 3, row_bottom + 3.5, f"{line_total_val:.2f}")
+            # Amount
+            c.drawRightString(x_curr + col_widths[-1] - 4, row_bottom + 3.5, f"{line_total_val:.2f}")
 
+            # Horizontal row divider
             x_grid = left_x
             for w in col_widths[:-1]:
                 x_grid += w
-                c.setStrokeColor(HexColor("#E0E0E0"))
+                c.setStrokeColor(HexColor("#E5E5E5"))
                 c.setLineWidth(0.5)
                 c.line(x_grid, curr_row_top, x_grid, row_bottom)
 
             curr_row_top = row_bottom
             running_sr += 1
 
+        # ------------------------------------------------------------------
         # 5. FOOTER & SUMMARY SECTION
-        footer_height = 125 if is_last_page else 105
+        # ------------------------------------------------------------------
+        footer_height = 115 if is_last_page else 85
         footer_top = bottom_y + footer_height
 
+        # Fill table vertical grid down to footer
         x_grid = left_x
         for w in col_widths[:-1]:
             x_grid += w
-            c.setStrokeColor(HexColor("#E0E0E0"))
+            c.setStrokeColor(HexColor("#E5E5E5"))
             c.setLineWidth(0.5)
             c.line(x_grid, curr_row_top, x_grid, footer_top)
 
@@ -518,9 +581,8 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.setLineWidth(0.75)
         c.line(left_x, footer_top, right_x, footer_top)
 
-        # --- FOOTER SUMMARY SECTION ---
-        gst_w = usable_w * 0.60
-        totals_w = usable_w * 0.40
+        gst_w = usable_w * 0.58
+        totals_w = usable_w - gst_w
         totals_x = left_x + gst_w
 
         words_h = 13
@@ -529,117 +591,20 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
         c.line(totals_x, footer_top, totals_x, words_top)
 
-        # Lines to consider for GST classification:
-        # On continuation page, cumulative lines up to this page
-        current_cumulative_lines = []
-        for p in pages_chunks[:page_num]:
-            current_cumulative_lines.extend(p)
-
-        gst_classes = {}
-        for l in current_cumulative_lines:
-            rate_key = l.tax_rate
-            if rate_key not in gst_classes:
-                gst_classes[rate_key] = {
-                    "taxable": Decimal("0.00"),
-                    "sch": Decimal("0.00"),
-                    "disc": Decimal("0.00"),
-                    "sgst": Decimal("0.00"),
-                    "cgst": Decimal("0.00"),
-                    "total_gst": Decimal("0.00"),
-                }
-            tx_val = getattr(l, "taxable_value_snapshot", None) or (l.line_total - l.tax_amount)
-            gst_classes[rate_key]["taxable"] += tx_val
-            gst_classes[rate_key]["disc"] += l.discount_amount
-            gst_classes[rate_key]["sgst"] += l.sgst_amount
-            gst_classes[rate_key]["cgst"] += l.cgst_amount
-            gst_classes[rate_key]["total_gst"] += l.tax_amount
-
-        gst_cols = [32, 40, 23, 23, 35, 35, 46]
-        gst_hdrs = ["CLASS", "TOTAL", "SCH.", "DISC.", "SGST", "CGST", "TOTAL GST"]
-
-        gh_h = 10
-        gh_bot = footer_top - gh_h
-        c.setFillColor(COLOR_HEADER_BG)
-        c.rect(left_x, gh_bot, gst_w, gh_h, fill=1, stroke=1)
-        c.setFillColor(COLOR_TEXT)
-        c.setFont("Helvetica-Bold", 5)
-
-        gx = left_x
-        for i, (gh, gw) in enumerate(zip(gst_hdrs, gst_cols)):
-            if i == 0:
-                c.drawString(gx + 2, gh_bot + 3, gh)
-            else:
-                c.drawRightString(gx + gw - 2, gh_bot + 3, gh)
-            gx += gw
-
-        gy = gh_bot
-        gr_h = 8.5
-        sum_taxable = Decimal("0.00")
-        sum_disc = Decimal("0.00")
-        sum_sgst = Decimal("0.00")
-        sum_cgst = Decimal("0.00")
-        sum_tot_gst = Decimal("0.00")
-
-        sorted_rates = sorted(gst_classes.keys())
-        for r in sorted_rates:
-            data = gst_classes[r]
-            sum_taxable += data["taxable"]
-            sum_disc += data["disc"]
-            sum_sgst += data["sgst"]
-            sum_cgst += data["cgst"]
-            sum_tot_gst += data["total_gst"]
-
-            gy -= gr_h
-            c.setFont("Helvetica", 5)
-            gx = left_x
-
-            c.drawString(gx + 2, gy + 2.5, f"GST {r:.2f}%")
-            gx += gst_cols[0]
-            c.drawRightString(gx + gst_cols[1] - 2, gy + 2.5, f"{data['taxable']:.2f}")
-            gx += gst_cols[1]
-            c.drawRightString(gx + gst_cols[2] - 2, gy + 2.5, "0.00")
-            gx += gst_cols[2]
-            c.drawRightString(gx + gst_cols[3] - 2, gy + 2.5, f"{data['disc']:.2f}")
-            gx += gst_cols[3]
-            c.drawRightString(gx + gst_cols[4] - 2, gy + 2.5, f"{data['sgst']:.2f}")
-            gx += gst_cols[4]
-            c.drawRightString(gx + gst_cols[5] - 2, gy + 2.5, f"{data['cgst']:.2f}")
-            gx += gst_cols[5]
-            c.drawRightString(gx + gst_cols[6] - 2, gy + 2.5, f"{data['total_gst']:.2f}")
-
-        gy -= gr_h
-        c.line(left_x, gy + gr_h, totals_x, gy + gr_h)
-        c.setFont("Helvetica-Bold", 5.5)
-        gx = left_x
-        c.drawString(gx + 2, gy + 2.5, "TOTAL")
-        gx += gst_cols[0]
-        c.drawRightString(gx + gst_cols[1] - 2, gy + 2.5, f"{sum_taxable:.2f}")
-        gx += gst_cols[1]
-        c.drawRightString(gx + gst_cols[2] - 2, gy + 2.5, "0.00")
-        gx += gst_cols[2]
-        c.drawRightString(gx + gst_cols[3] - 2, gy + 2.5, f"{sum_disc:.2f}")
-        gx += gst_cols[3]
-        c.drawRightString(gx + gst_cols[4] - 2, gy + 2.5, f"{sum_sgst:.2f}")
-        gx += gst_cols[4]
-        c.drawRightString(gx + gst_cols[5] - 2, gy + 2.5, f"{sum_cgst:.2f}")
-        gx += gst_cols[5]
-        c.drawRightString(gx + gst_cols[6] - 2, gy + 2.5, f"{sum_tot_gst:.2f}")
-
+        # Continuation Page Footer
         if not is_last_page:
-            # Right side: Continued indicator
-            c.setFont("Helvetica-Bold", 9)
-            c.drawString(totals_x + 12, footer_top - 35, f"Continued... {page_num + 1}")
+            c.setFont("Helvetica-Bold", 8)
+            c.drawString(totals_x + 12, footer_top - 25, f"Continued... Page {page_num + 1}")
             c.setFont("Helvetica", 6.5)
-            c.drawString(totals_x + 12, footer_top - 50, f"Page Total: {page_subtotal:.2f}")
+            c.drawString(totals_x + 12, footer_top - 40, f"Page Total: Rs. {page_subtotal:.2f}")
 
-            # Words bar on continuation page
             c.line(left_x, words_top, right_x, words_top)
             c.line(left_x, words_bot, right_x, words_bot)
             c.setFont("Helvetica-Oblique", 6.5)
-            c.drawString(left_x + 4, words_bot + 4, f"(Continued on Page {page_num + 1})")
+            c.drawString(left_x + 6, words_bot + 4, f"(Continued on Page {page_num + 1})")
 
             # Bottom 3 boxes
-            b_w1 = usable_w * 0.42
+            b_w1 = usable_w * 0.45
             b_w2 = usable_w * 0.25
             b_w3 = usable_w - b_w1 - b_w2
 
@@ -647,68 +612,80 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             c.line(left_x + b_w1 + b_w2, words_bot, left_x + b_w1 + b_w2, bottom_y)
 
             c.setFont("Helvetica-Bold", 6)
-            c.drawString(left_x + 3, words_bot - 8, "Terms & Conditions")
+            c.drawString(left_x + 4, words_bot - 8, "Terms & Conditions")
             c.setFont("Helvetica", 5)
             t_lines = terms_text.splitlines()
             ty = words_bot - 16
             for tl in t_lines[:3]:
-                c.drawString(left_x + 3, ty, tl[:46])
+                c.drawString(left_x + 4, ty, tl[:50])
                 ty -= 6
 
             c.setFont("Helvetica-Bold", 6)
             c.drawCentredString(left_x + b_w1 + (b_w2 / 2), bottom_y + 6, "Receiver's Signature")
 
             c.setFont("Helvetica", 6)
-            c.drawString(left_x + b_w1 + b_w2 + 4, words_bot - 8, f"For {co_name[:24]}")
+            c.drawString(left_x + b_w1 + b_w2 + 6, words_bot - 8, f"For {co_name[:28]}")
             c.setFont("Helvetica-Bold", 6)
             c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
 
             c.showPage()
             continue
 
+        # ------------------------------------------------------------------
+        # FINAL PAGE FOOTER: GST Summary + Totals + Words + Signatures
+        # ------------------------------------------------------------------
         gst_classes = {}
         for l in lines:
             rate_key = l.tax_rate
             if rate_key not in gst_classes:
                 gst_classes[rate_key] = {
                     "taxable": Decimal("0.00"),
-                    "sch": Decimal("0.00"),
                     "disc": Decimal("0.00"),
                     "sgst": Decimal("0.00"),
                     "cgst": Decimal("0.00"),
+                    "igst": Decimal("0.00"),
                     "total_gst": Decimal("0.00"),
                 }
-            tx_val = getattr(l, "taxable_value_snapshot", None) or (l.line_total - l.tax_amount)
+            tx_val = getattr(l, "taxable_value_snapshot", None)
+            if tx_val is None:
+                tx_val = l.line_total - l.tax_amount
             gst_classes[rate_key]["taxable"] += tx_val
             gst_classes[rate_key]["disc"] += l.discount_amount
-            gst_classes[rate_key]["sgst"] += l.sgst_amount
-            gst_classes[rate_key]["cgst"] += l.cgst_amount
+            gst_classes[rate_key]["sgst"] += getattr(l, "sgst_amount", Decimal("0"))
+            gst_classes[rate_key]["cgst"] += getattr(l, "cgst_amount", Decimal("0"))
+            gst_classes[rate_key]["igst"] += getattr(l, "igst_amount", Decimal("0"))
             gst_classes[rate_key]["total_gst"] += l.tax_amount
 
-        gst_cols = [32, 40, 23, 23, 35, 35, 46]
-        gst_hdrs = ["CLASS", "TOTAL", "SCH.", "DISC.", "SGST", "CGST", "TOTAL GST"]
+        # GST table headers & columns
+        if has_igst:
+            gst_cols = [50, 65, 45, 80, 88.82]
+            gst_hdrs = ["CLASS", "TAXABLE", "DISC.", "IGST", "TOTAL GST"]
+        else:
+            gst_cols = [50, 65, 45, 42, 42, 84.82]
+            gst_hdrs = ["CLASS", "TAXABLE", "DISC.", "SGST", "CGST", "TOTAL GST"]
 
-        gh_h = 10
+        gh_h = 11
         gh_bot = footer_top - gh_h
         c.setFillColor(COLOR_HEADER_BG)
         c.rect(left_x, gh_bot, gst_w, gh_h, fill=1, stroke=1)
         c.setFillColor(COLOR_TEXT)
-        c.setFont("Helvetica-Bold", 5)
+        c.setFont("Helvetica-Bold", 5.5)
 
         gx = left_x
         for i, (gh, gw) in enumerate(zip(gst_hdrs, gst_cols)):
             if i == 0:
-                c.drawString(gx + 2, gh_bot + 3, gh)
+                c.drawString(gx + 3, gh_bot + 3.5, gh)
             else:
-                c.drawRightString(gx + gw - 2, gh_bot + 3, gh)
+                c.drawRightString(gx + gw - 3, gh_bot + 3.5, gh)
             gx += gw
 
         gy = gh_bot
-        gr_h = 8.5
+        gr_h = 9
         sum_taxable = Decimal("0.00")
         sum_disc = Decimal("0.00")
         sum_sgst = Decimal("0.00")
         sum_cgst = Decimal("0.00")
+        sum_igst = Decimal("0.00")
         sum_tot_gst = Decimal("0.00")
 
         sorted_rates = sorted(gst_classes.keys())
@@ -718,78 +695,93 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             sum_disc += data["disc"]
             sum_sgst += data["sgst"]
             sum_cgst += data["cgst"]
+            sum_igst += data["igst"]
             sum_tot_gst += data["total_gst"]
 
             gy -= gr_h
-            c.setFont("Helvetica", 5)
+            c.setFont("Helvetica", 5.5)
             gx = left_x
 
-            c.drawString(gx + 2, gy + 2.5, f"GST {r:.2f}%")
+            c.drawString(gx + 3, gy + 2.5, f"GST {r:.2f}%")
             gx += gst_cols[0]
-            c.drawRightString(gx + gst_cols[1] - 2, gy + 2.5, f"{data['taxable']:.2f}")
+            c.drawRightString(gx + gst_cols[1] - 3, gy + 2.5, f"{data['taxable']:.2f}")
             gx += gst_cols[1]
-            c.drawRightString(gx + gst_cols[2] - 2, gy + 2.5, "0.00")
+            c.drawRightString(gx + gst_cols[2] - 3, gy + 2.5, f"{data['disc']:.2f}")
             gx += gst_cols[2]
-            c.drawRightString(gx + gst_cols[3] - 2, gy + 2.5, f"{data['disc']:.2f}")
-            gx += gst_cols[3]
-            c.drawRightString(gx + gst_cols[4] - 2, gy + 2.5, f"{data['sgst']:.2f}")
-            gx += gst_cols[4]
-            c.drawRightString(gx + gst_cols[5] - 2, gy + 2.5, f"{data['cgst']:.2f}")
-            gx += gst_cols[5]
-            c.drawRightString(gx + gst_cols[6] - 2, gy + 2.5, f"{data['total_gst']:.2f}")
+            if has_igst:
+                c.drawRightString(gx + gst_cols[3] - 3, gy + 2.5, f"{data['igst']:.2f}")
+                gx += gst_cols[3]
+            else:
+                c.drawRightString(gx + gst_cols[3] - 3, gy + 2.5, f"{data['sgst']:.2f}")
+                gx += gst_cols[3]
+                c.drawRightString(gx + gst_cols[4] - 3, gy + 2.5, f"{data['cgst']:.2f}")
+                gx += gst_cols[4]
+            c.drawRightString(gx + gst_cols[-1] - 3, gy + 2.5, f"{data['total_gst']:.2f}")
 
         gy -= gr_h
         c.line(left_x, gy + gr_h, totals_x, gy + gr_h)
         c.setFont("Helvetica-Bold", 5.5)
         gx = left_x
-        c.drawString(gx + 2, gy + 2.5, "TOTAL")
+        c.drawString(gx + 3, gy + 2.5, "TOTAL")
         gx += gst_cols[0]
-        c.drawRightString(gx + gst_cols[1] - 2, gy + 2.5, f"{sum_taxable:.2f}")
+        c.drawRightString(gx + gst_cols[1] - 3, gy + 2.5, f"{sum_taxable:.2f}")
         gx += gst_cols[1]
-        c.drawRightString(gx + gst_cols[2] - 2, gy + 2.5, "0.00")
+        c.drawRightString(gx + gst_cols[2] - 3, gy + 2.5, f"{sum_disc:.2f}")
         gx += gst_cols[2]
-        c.drawRightString(gx + gst_cols[3] - 2, gy + 2.5, f"{sum_disc:.2f}")
-        gx += gst_cols[3]
-        c.drawRightString(gx + gst_cols[4] - 2, gy + 2.5, f"{sum_sgst:.2f}")
-        gx += gst_cols[4]
-        c.drawRightString(gx + gst_cols[5] - 2, gy + 2.5, f"{sum_cgst:.2f}")
-        gx += gst_cols[5]
-        c.drawRightString(gx + gst_cols[6] - 2, gy + 2.5, f"{sum_tot_gst:.2f}")
+        if has_igst:
+            c.drawRightString(gx + gst_cols[3] - 3, gy + 2.5, f"{sum_igst:.2f}")
+            gx += gst_cols[3]
+        else:
+            c.drawRightString(gx + gst_cols[3] - 3, gy + 2.5, f"{sum_sgst:.2f}")
+            gx += gst_cols[3]
+            c.drawRightString(gx + gst_cols[4] - 3, gy + 2.5, f"{sum_cgst:.2f}")
+            gx += gst_cols[4]
+        c.drawRightString(gx + gst_cols[-1] - 3, gy + 2.5, f"{sum_tot_gst:.2f}")
 
+        # Right side: Invoice Totals
         ty = footer_top - 10
         tr_h = 9
         labels = [
-            ("SUB TOTAL", f"{sum_taxable:.2f}"),
-            ("SGST PAYABLE", f"{sum_sgst:.2f}"),
-            ("CGST PAYABLE", f"{sum_cgst:.2f}"),
-            ("ADD/LESS", "0.00"),
-            ("CR/DR NOTE", "0.00"),
+            ("SUB TOTAL (TAXABLE)", f"{sum_taxable:.2f}"),
         ]
-        sum_igst = sum(l.igst_amount for l in lines)
-        if sum_igst > Decimal("0.00"):
-            labels.insert(3, ("IGST PAYABLE", f"{sum_igst:.2f}"))
+        if sum_disc > Decimal("0.00"):
+            labels.append(("TOTAL DISCOUNT", f"{sum_disc:.2f}"))
+        if has_igst:
+            labels.append(("IGST PAYABLE", f"{sum_igst:.2f}"))
+        else:
+            labels.append(("SGST PAYABLE", f"{sum_sgst:.2f}"))
+            labels.append(("CGST PAYABLE", f"{sum_cgst:.2f}"))
+
+        # Check round-off
+        computed_grand = sum_taxable + sum_tot_gst
+        round_off = invoice.total_amount - computed_grand
+        if abs(round_off) >= Decimal("0.01"):
+            labels.append(("ROUND OFF", f"{round_off:+.2f}"))
 
         for lbl, val in labels:
             c.setFont("Helvetica", 6)
-            c.drawString(totals_x + 4, ty + 2, lbl)
-            c.drawRightString(right_x - 4, ty + 2, val)
+            c.drawString(totals_x + 6, ty + 2, lbl)
+            c.drawRightString(right_x - 6, ty + 2, val)
             ty -= tr_h
 
+        # Grand Total Box
         c.setFillColor(COLOR_HEADER_BG)
-        c.rect(totals_x, ty - 2, totals_w, 13, fill=1, stroke=1)
+        c.rect(totals_x, words_top, totals_w, (ty + 8) - words_top, fill=1, stroke=1)
         c.setFillColor(COLOR_TEXT)
-        c.setFont("Helvetica-Bold", 7.5)
-        c.drawString(totals_x + 4, ty + 2, "GRAND TOTAL")
-        c.drawRightString(right_x - 4, ty + 2, f"{invoice.total_amount:.2f}")
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(totals_x + 6, words_top + 4, "GRAND TOTAL")
+        c.drawRightString(right_x - 6, words_top + 4, f"Rs. {invoice.total_amount:.2f}")
 
+        # Words bar
         c.line(left_x, words_top, right_x, words_top)
         c.line(left_x, words_bot, right_x, words_bot)
 
         c.setFont("Helvetica-Bold", 6.5)
         words_str = amount_to_words(invoice.total_amount)
-        c.drawString(left_x + 4, words_bot + 4, words_str)
+        c.drawString(left_x + 6, words_bot + 4, f"Amount in Words: {words_str}")
 
-        b_w1 = usable_w * 0.42
+        # Bottom 3 boxes
+        b_w1 = usable_w * 0.45
         b_w2 = usable_w * 0.25
         b_w3 = usable_w - b_w1 - b_w2
 
@@ -797,19 +789,19 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.line(left_x + b_w1 + b_w2, words_bot, left_x + b_w1 + b_w2, bottom_y)
 
         c.setFont("Helvetica-Bold", 6)
-        c.drawString(left_x + 3, words_bot - 8, "Terms & Conditions")
+        c.drawString(left_x + 4, words_bot - 8, "Terms & Conditions")
         c.setFont("Helvetica", 5)
         t_lines = terms_text.splitlines()
         ty = words_bot - 16
         for tl in t_lines[:3]:
-            c.drawString(left_x + 3, ty, tl[:46])
+            c.drawString(left_x + 4, ty, tl[:50])
             ty -= 6
 
         c.setFont("Helvetica-Bold", 6)
         c.drawCentredString(left_x + b_w1 + (b_w2 / 2), bottom_y + 6, "Receiver's Signature")
 
         c.setFont("Helvetica", 6)
-        c.drawString(left_x + b_w1 + b_w2 + 4, words_bot - 8, f"For {co_name[:24]}")
+        c.drawString(left_x + b_w1 + b_w2 + 6, words_bot - 8, f"For {co_name[:28]}")
         c.setFont("Helvetica-Bold", 6)
         c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
 

@@ -86,6 +86,9 @@ export default function InvoiceDetailPage() {
         <button className="quiet-button" onClick={() => handlePrint('duplicate')} disabled={Boolean(downloading)}>
           {downloading === 'duplicate' ? 'Preparing...' : 'Print Duplicate'}
         </button>
+        <button className="quiet-button" onClick={() => handlePrint('reprint')} disabled={Boolean(downloading)}>
+          {downloading === 'reprint' ? 'Preparing...' : 'Reprint'}
+        </button>
         {isAdmin && isPosted && <button className="quiet-button" style={{ color: 'var(--red)' }} onClick={() => setShowCancel(true)} disabled={busy}>Cancel invoice</button>}
       </div>
     </header>

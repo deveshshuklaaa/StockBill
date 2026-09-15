@@ -31,11 +31,13 @@ function variantSummary(product) {
 
 function calculateLine(line, taxMode) {
   const quantity = Number(line.quantity) || 0
+  const factor = Number(line.conversionFactor) || 1
+  const baseQty = quantity * factor
   const rate = Number(line.rate_charged) || 0
   const discount = Number(line.discount_amount) || 0
   const taxRate = Number(line.tax_rate) || 0
 
-  const gross = quantity * rate
+  const gross = baseQty * rate
   const net = gross - discount
   let taxable = net
   let tax = net * taxRate / 100
@@ -43,7 +45,7 @@ function calculateLine(line, taxMode) {
     taxable = net / (1 + taxRate / 100)
     tax = net - taxable
   }
-  return { subtotal: gross, discount, taxable, tax, total: taxable + tax }
+  return { subtotal: gross, discount, taxable, tax, total: taxable + tax, baseQty }
 }
 
 export default function NewInvoicePage() {
@@ -321,9 +323,15 @@ export default function NewInvoicePage() {
                       <div className="line-product">
                         <strong>{line.productData.name}</strong>
                         <span>{formatStockWithBoxes(line.productData.current_stock, line.productData)} available</span>
-                        {line.salesUnit === 'master box' && box && (
+                        {line.salesUnit === 'master box' && box ? (
                           <span className="variant-line">
-                            {line.quantity || 0} × {box} = {formatQuantityWithUnit(baseQty, line.productData.base_unit || 'piece')}
+                            {line.quantity || 0} Box × {box} = {formatQuantityWithUnit(baseQty, line.productData.base_unit || 'piece')}
+                            {' · '}rate ₹{Number(line.rate_charged || 0).toFixed(2)}/pc
+                          </span>
+                        ) : (
+                          <span className="variant-line">
+                            {baseQty} {line.productData.base_unit || 'pieces'}
+                            {' · '}rate ₹{Number(line.rate_charged || 0).toFixed(2)}/pc
                           </span>
                         )}
                       </div>
@@ -338,7 +346,7 @@ export default function NewInvoicePage() {
                         </select>
                       </label>
                       <label>Qty<input type="number" min="0.001" step={fixedUnit ? '1' : '0.001'} value={line.quantity} onChange={(event) => updateLine(line.key, 'quantity', event.target.value)} className={overStock ? 'input-warning' : ''} /></label>
-                      <label>Rate<input type="number" min="0" step="0.01" value={line.rate_charged} onChange={(event) => updateLine(line.key, 'rate_charged', event.target.value)} placeholder={line.salesUnit === 'master box' && box ? 'Per box' : 'Per piece'} aria-label={`Selling rate for ${line.productData.name}`} /></label>
+                      <label>Rate / Piece<input type="number" min="0" step="0.01" value={line.rate_charged} onChange={(event) => updateLine(line.key, 'rate_charged', event.target.value)} placeholder="₹ / piece" aria-label={`Selling rate per piece for ${line.productData.name}`} /></label>
                       <label>Disc<input type="number" min="0" step="0.01" value={line.discount_amount} onChange={(event) => updateLine(line.key, 'discount_amount', event.target.value)} /></label>
                       <div className="line-tax">{line.tax_rate}%</div>
                       <div className="line-total">{money(calculated.total)}</div>
