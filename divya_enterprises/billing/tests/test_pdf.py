@@ -415,3 +415,55 @@ class InvoicePdfGenerationTests(APITestCase):
         staff_client = self.client_as(self.staff)
         res_staff = staff_client.get(f"/api/invoices/{self.invoice.pk}/pdf/")
         self.assertEqual(res_staff.status_code, 200)
+
+    # 19. Regression test: invoice snapshots take precedence over BusinessProfile
+    # Ensures wrong-state (Uttar Pradesh/09) cannot leak into PDF when profile has bad data
+    def test_pdf_uses_invoice_snapshots_not_business_profile(self):
+        """Invoice snapshots are authoritative for posted invoices; BusinessProfile must not override."""
+        # Create a second BusinessProfile with WRONG state data (simulates bad config)
+        bad_profile = BusinessProfile.objects.create(
+            business_name="Wrong Company",
+            trade_name="Wrong Trade",
+            gstin="09AAAAA0000A1Z5",  # Uttar Pradesh GSTIN
+            registered_address="Wrong Address, Lucknow, Uttar Pradesh",
+            state="Uttar Pradesh",
+            state_code="09",
+            phone="9999999999",
+            email="wrong@example.com",
+        )
+
+        # Generate PDF for the posted invoice (which has Maharashtra snapshots)
+        pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
+        doc = pymupdf.open("pdf", pdf_bytes)
+        text = doc[0].get_text()
+
+        # Must use invoice snapshots (Maharashtra/27), NOT the bad profile (Uttar Pradesh/09)
+        # Address may be split across lines in PDF, so check for key parts
+        self.assertIn("Divya Enterprises", text)
+        self.assertIn("Malad", text)
+        self.assertIn("Mumbai", text)
+        self.assertIn("400097", text)
+        self.assertIn("27ECNPS6389P1Z5", text)
+        self.assertIn("Place of Supply: 27", text)
+
+        # Must NOT contain Uttar Pradesh / 09 data from the bad profile
+        self.assertNotIn("Uttar Pradesh", text)
+        self.assertNotIn("09AAAAA0000A1Z5", text)
+        self.assertNotIn("Wrong Company", text)
+        self.assertNotIn("Lucknow", text)
+        self.assertNotIn("Place of Supply: 09", text)
+
+    # 20. Bank details: no placeholder/fabricated values printed
+    def test_pdf_no_fabricated_bank_details(self):
+        """Bank details must not appear unless explicitly configured in BusinessProfile."""
+        pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
+        doc = pymupdf.open("pdf", pdf_bytes)
+        text = doc[0].get_text()
+
+        # Common placeholder patterns that must NOT appear
+        forbidden_patterns = [
+            "Bank Name", "Account No", "Account Number", "IFSC", "Branch",
+            "0000000000", "XXXXXXXX", "PLACEHOLDER", "NOT CONFIGURED",
+        ]
+        for pattern in forbidden_patterns:
+            self.assertNotIn(pattern, text, f"Forbidden placeholder '{pattern}' found in PDF")

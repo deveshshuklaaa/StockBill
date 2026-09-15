@@ -189,23 +189,41 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
     """
     buffer = io.BytesIO()
 
+    # Use invoice snapshots as authoritative source for posted invoices.
+    # BusinessProfile is only a fallback for drafts or missing snapshots.
     profile = BusinessProfile.objects.first()
+    is_posted = invoice.state == Invoice.STATE_POSTED
 
-    co_name = (profile.business_name if profile else None) or invoice.seller_business_name_snapshot or "DIVYA ENTERPRISES"
-    co_address = (profile.registered_address if profile else None) or invoice.seller_address_snapshot or ""
-    co_phone = (profile.phone if profile else None) or (profile.contact_details if profile else None) or ""
-    co_email = (profile.email if profile else None) or ""
-    co_gstin = (profile.gstin if profile else None) or invoice.seller_gstin_snapshot or ""
-    terms_text = (profile.terms_and_conditions if profile else None) or (
-        "Goods once sold will not be taken back or exchanged.\nBills not paid due date will attract 24% interest."
-    )
+    if is_posted:
+        # Posted invoices: snapshots are immutable and authoritative
+        co_name = invoice.seller_business_name_snapshot or (profile.business_name if profile else "DIVYA ENTERPRISES")
+        co_address = invoice.seller_address_snapshot or (profile.registered_address if profile else "")
+        co_phone = (profile.phone if profile else None) or (profile.contact_details if profile else None) or ""
+        co_email = (profile.email if profile else None) or ""
+        co_gstin = invoice.seller_gstin_snapshot or (profile.gstin if profile else "")
+        terms_text = (profile.terms_and_conditions if profile else None) or (
+            "Goods once sold will not be taken back or exchanged.\nBills not paid due date will attract 24% interest."
+        )
+    else:
+        # Draft invoices: use current BusinessProfile as working data
+        co_name = (profile.business_name if profile else None) or invoice.seller_business_name_snapshot or "DIVYA ENTERPRISES"
+        co_address = (profile.registered_address if profile else None) or invoice.seller_address_snapshot or ""
+        co_phone = (profile.phone if profile else None) or (profile.contact_details if profile else None) or ""
+        co_email = (profile.email if profile else None) or ""
+        co_gstin = (profile.gstin if profile else None) or invoice.seller_gstin_snapshot or ""
+        terms_text = (profile.terms_and_conditions if profile else None) or (
+            "Goods once sold will not be taken back or exchanged.\nBills not paid due date will attract 24% interest."
+        )
 
     cust_name = invoice.customer_name_snapshot or (invoice.customer.name if invoice.customer else "Walk-in Customer")
     cust_address = invoice.billing_address_snapshot or (invoice.customer.billing_address if invoice.customer else "")
     cust_phone = (invoice.customer.contact_info if invoice.customer else "")
     cust_gstin = invoice.customer_gstin_snapshot or (invoice.customer.gstin if invoice.customer else "") or "Unregistered"
-    pos = invoice.place_of_supply or invoice.seller_state_code_snapshot or "27"
+    # place_of_supply is calculated at invoice creation and stored; use it directly
+    pos = invoice.place_of_supply or invoice.seller_state_code_snapshot or (profile.state_code if profile else "27")
 
+    # Copy labels are presentation-only; do not alter invoice data.
+    # Configurable via BusinessProfile.copy_labels if needed in future.
     copy_labels = {
         "original": "ORIGINAL FOR RECIPIENT",
         "duplicate": "DUPLICATE FOR TRANSPORTER",
