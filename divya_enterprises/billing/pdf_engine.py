@@ -195,7 +195,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
     is_posted = invoice.state == Invoice.STATE_POSTED
 
     default_company = "DIVYA ENTERPRISES"
-    default_address = "GROUND FLOOR SHOP NO 30 SHAH ARCADE, 3 RANI SATI MARG MALAD EAST MUMBAI 400097"
+    default_address = "GROUND FLOOR SHOP NO 30 SHAH ARCADE\n3 RANI SATI MARG MALAD EAST MUMBAI 400097"
     default_phone = "9930008633"
     default_email = "divyaenterprises2501@gmail.com"
     default_gstin = "27ECNPS6389P1Z5"
@@ -328,17 +328,17 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
         c.setFont("Helvetica", 6)
         cur_y -= 9
-        # Multi-line address
-        addr_parts = [p.strip() for p in co_address.split(",") if p.strip()]
-        if len(addr_parts) > 2:
-            line1 = ", ".join(addr_parts[:2])
-            line2 = ", ".join(addr_parts[2:])
-            c.drawString(text_start_x, cur_y, line1[:55])
-            cur_y -= 8
-            c.drawString(text_start_x, cur_y, line2[:55])
-            cur_y -= 8
+        # Multi-line address — prefer newline splits (database format), fall back to comma grouping
+        if "\n" in co_address:
+            addr_lines = [l.strip() for l in co_address.split("\n") if l.strip()]
         else:
-            c.drawString(text_start_x, cur_y, co_address[:55])
+            addr_parts = [p.strip() for p in co_address.split(",") if p.strip()]
+            if len(addr_parts) > 2:
+                addr_lines = [", ".join(addr_parts[:2]), ", ".join(addr_parts[2:])]
+            else:
+                addr_lines = [", ".join(addr_parts)]
+        for addr_line in addr_lines[:2]:  # max 2 lines in header
+            c.drawString(text_start_x, cur_y, addr_line[:60])
             cur_y -= 8
 
         contact_line = ""
