@@ -3,9 +3,9 @@ import { apiErrorMessage } from '../../api/client'
 import { fetchInventoryReport } from '../../api/reports'
 import { fetchWarehouses } from '../../api/warehouses'
 import StatusMessage from '../../components/StatusMessage'
+import { formatQuantity } from '../../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
 
 // Value = InventoryBalance.quantity_on_hand Ã— average_cost (authoritative WAC).
 export default function InventoryReportPage() {
@@ -54,7 +54,7 @@ export default function InventoryReportPage() {
       </div>
 
       {report && <div className="metric-grid">
-        <div className="metric-card"><div className="metric-label">Quantity on hand</div><div className="metric-value">{qty(report.quantity_on_hand)}</div></div>
+        <div className="metric-card"><div className="metric-label">Quantity on hand</div><div className="metric-value">{formatQuantity(report.quantity_on_hand, 'piece')}</div></div>
         <div className="metric-card"><div className="metric-label">Total inventory value</div><div className="metric-value">{money(report.total_value)}</div><div className="metric-hint">At weighted-average cost</div></div>
       </div>}
 
@@ -63,7 +63,7 @@ export default function InventoryReportPage() {
         <tbody>{report.by_warehouse.map((row) => <tr key={row.warehouse_id}>
           <td><strong>{row.warehouse_name}</strong><small>{row.warehouse_code}</small></td>
           <td style={{ textAlign: 'right' }}>{row.product_count}</td>
-          <td style={{ textAlign: 'right' }}>{qty(row.quantity)}</td>
+          <td style={{ textAlign: 'right' }}>{formatQuantity(row.quantity, 'piece')}</td>
           <td style={{ textAlign: 'right' }}><strong>{money(row.value)}</strong></td>
         </tr>)}</tbody>
       </table></div>}

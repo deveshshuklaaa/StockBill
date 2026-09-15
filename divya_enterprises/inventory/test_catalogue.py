@@ -524,8 +524,8 @@ class ProductAttributeValidationTests(CatalogueTestBase):
         detail = self.client_as(self.admin).get(f"/api/products/{product.pk}/")
         self.assertEqual(detail.data["mrp"], "10.00")
         self.assertEqual(detail.data["sku"], "DE-FOOD-001")
-        self.assertEqual(detail.data["default_price"], "100.00")
-        self.assertEqual(detail.data["cost_price"], "60.00")
+        self.assertNotIn("default_price", detail.data)
+        self.assertNotIn("cost_price", detail.data)
 
     def test_product_tax_is_writable_via_api(self):
         response = self.create_product(
@@ -932,7 +932,6 @@ class ImportReadinessTests(CatalogueTestBase):
                 "base_unit": "piece",
                 "catalogue_category": self.batteries.pk,
                 "mrp": "120.00",
-                "default_price": "100.00",
                 "attributes": {
                     "battery_size": "AA",
                     "chemistry": "Alkaline",
@@ -945,7 +944,7 @@ class ImportReadinessTests(CatalogueTestBase):
         self.assertEqual(response.data["attributes"]["battery_size"], "AA")
         self.assertEqual(response.data["attributes"]["pack_quantity"], 4)
         self.assertEqual(response.data["mrp"], "120.00")
-        self.assertEqual(response.data["default_price"], "100.00")
+        self.assertNotIn("default_price", response.data)
 
 
 class ProductWritePermissionTests(CatalogueTestBase):

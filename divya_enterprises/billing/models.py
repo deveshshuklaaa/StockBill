@@ -135,6 +135,9 @@ class InvoiceLineItem(models.Model):
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="line_items")
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="invoice_line_items")
     quantity = models.DecimalField(max_digits=12, decimal_places=3, default=1)
+    sales_unit_name = models.CharField(max_length=50, default="piece")
+    conversion_factor = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("1.000"))
+    base_quantity = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0.000"))
     rate_charged = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
@@ -162,7 +165,8 @@ class InvoiceLineItem(models.Model):
             stored = type(self).objects.get(pk=self.pk)
             if stored.invoice.state != Invoice.STATE_DRAFT:
                 immutable_fields = [
-                    "invoice_id", "product_id", "quantity", "rate_charged", "discount_amount", "tax_rate",
+                    "invoice_id", "product_id", "quantity", "sales_unit_name", "conversion_factor",
+                    "base_quantity", "rate_charged", "discount_amount", "tax_rate",
                     "tax_amount", "cgst_rate", "cgst_amount", "sgst_rate", "sgst_amount", "igst_rate", "igst_amount",
                     "line_total", "cost_price_snapshot", "cogs_amount",
                     "product_name_snapshot", "base_unit_snapshot", "hsn_sac_snapshot", "taxable_value_snapshot",

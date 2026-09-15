@@ -39,7 +39,7 @@ export default function EditProductPage() {
         ])
         if (cancelled) return
         setProduct(fetched)
-        setForm(productFormFromProduct(fetched, isAdmin))
+        setForm(productFormFromProduct(fetched))
         setAttributeValues({ ...(fetched.attributes || {}) })
         setCategories(options.categories)
         setTaxRates(options.taxRates)
@@ -64,7 +64,7 @@ export default function EditProductPage() {
     })
     if (Object.keys(localErrors).length) { setFieldErrors(localErrors); setSaving(false); return }
 
-    const payload = buildProductPayload({ form, attributeValues, isAdmin, isEdit: true })
+    const payload = buildProductPayload({ form, attributeValues })
     try {
       await api.patch(`/products/${id}/`, payload)
       navigate('/products')

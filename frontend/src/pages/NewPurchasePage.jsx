@@ -4,31 +4,16 @@ import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { fetchNextPurchaseNumber, fetchWarehouses, searchPurchaseProducts } from '../api/purchases'
 import { fetchActiveSuppliers } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
+import { formatNetWeight, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 
 function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
 function today() { return new Date().toISOString().slice(0, 10) }
 
-function masterBoxSize(product) {
-  const box = Number(product?.attributes?.units_per_master_box)
-  return Number.isInteger(box) && box > 0 ? box : null
-}
-
-// Net weight is stored in kg; show grams for small retail packs (0.025 kg → 25 g).
-function formatNetWeight(product) {
-  const kg = Number(product?.attributes?.net_weight)
-  if (!Number.isFinite(kg) || kg <= 0) return ''
-  if (kg < 1) {
-    const grams = kg * 1000
-    return `${Number.isInteger(grams) ? grams : grams.toFixed(1)} g`
-  }
-  return `${kg} kg`
-}
-
 // Variant identity line: weight + MRP distinguish same-name products.
 function variantSummary(product) {
   const parts = []
-  const weight = formatNetWeight(product)
+  const weight = formatNetWeight(product?.attributes?.net_weight)
   if (weight) parts.push(weight)
   if (product.mrp != null) parts.push(`MRP: ₹${Number(product.mrp).toFixed(2)}`)
   if (product.sku) parts.push(`SKU: ${product.sku}`)
@@ -295,7 +280,7 @@ export default function NewPurchasePage() {
                 return <button type="button" key={product.id} onClick={() => addProduct(product)}>
                   <strong>{product.name}</strong>
                   {summary && <span className="variant-line">{summary}</span>}
-                  <span>{box ? `M.Box ${box} · ` : ''}{product.current_stock} in stock</span>
+                  <span>{box ? `M.Box ${box} · ` : ''}{formatStockWithBoxes(product.current_stock, product)}</span>
                 </button>
               })}
               {!productBusy && !productResults.length && <div className="suggestion-empty">No matching product</div>}
@@ -313,7 +298,7 @@ export default function NewPurchasePage() {
                   <span>
                     {line.purchaseUnit === 'master box' && box
                       ? `${line.quantity || 0} × ${box} = ${calculated.baseQty} pieces`
-                      : `${calculated.baseQty} pieces`}
+                      : `${calculated.baseQty} ${line.productData.base_unit || 'pieces'}`}
                     {' · '}cost {money(calculated.unitCost)}/pc
                   </span>
                 </div>

@@ -3,9 +3,9 @@ import { apiErrorMessage } from '../api/client'
 import { fetchStockLedger } from '../api/inventory'
 import { fetchWarehouses } from '../api/warehouses'
 import StatusMessage from '../components/StatusMessage'
+import { formatQuantity } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
 
 const MOVEMENT_LABELS = {
   OPENING_STOCK: 'Opening Stock',
@@ -151,7 +151,7 @@ export default function StockLedgerPage() {
                     <td><code>{movement.reference || '-'}</code></td>
                     <td>{movement.warehouse_name}</td>
                     <td style={{ textAlign: 'right', color: Number(movement.quantity_change) >= 0 ? '#16a34a' : '#dc2626' }}>
-                      <strong>{Number(movement.quantity_change) >= 0 ? '+' : ''}{qty(movement.quantity_change)}</strong>
+                      <strong>{Number(movement.quantity_change) >= 0 ? '+' : ''}{formatQuantity(movement.quantity_change, 'piece')}</strong>
                     </td>
                     <td style={{ textAlign: 'right' }}>{movement.unit_cost ? money(movement.unit_cost) : '-'}</td>
                     <td>{movement.created_by_username || '-'}</td>

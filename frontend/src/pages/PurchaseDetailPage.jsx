@@ -4,6 +4,7 @@ import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { fetchPurchase } from '../api/purchases'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
+import { formatQuantity } from '../utils/format'
 
 function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
@@ -106,8 +107,8 @@ export default function PurchaseDetailPage() {
         <thead><tr><th>Item</th><th>Qty</th><th>Base qty</th><th>Rate</th><th>Disc</th><th>Taxable</th><th>GST</th><th>Total</th><th>Cost/pc</th></tr></thead>
         <tbody>{(purchase.line_items || []).map((line) => <tr key={line.id}>
           <td><strong>{line.product_name_snapshot}</strong><small>HSN: {line.hsn_sac_snapshot || '-'}{line.sku_snapshot ? ` · ${line.sku_snapshot}` : ''}</small></td>
-          <td>{line.quantity} {line.purchase_unit_name === 'master box' ? `M.Box (×${Number(line.conversion_factor)})` : line.base_unit_snapshot}</td>
-          <td>{line.base_quantity}</td>
+          <td>{formatQuantity(line.quantity, line.purchase_unit_name === 'master box' ? 'piece' : line.base_unit_snapshot)} {line.purchase_unit_name === 'master box' ? `M.Box (×${Number(line.conversion_factor)})` : line.base_unit_snapshot}</td>
+          <td>{formatQuantity(line.base_quantity, line.base_unit_snapshot)}</td>
           <td>{money(line.rate)}</td>
           <td>{money(line.discount_amount)}</td>
           <td>{money(line.taxable_value)}</td>

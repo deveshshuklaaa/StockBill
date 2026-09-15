@@ -184,7 +184,7 @@ class ProductEditPermissionBoundaryTests(APITestCase):
         cls.product = Product.objects.create(
             name="Boundary Product",
             base_unit=Product.UNIT_PIECE,
-            default_price=Decimal("10.00"),
+            mrp=Decimal("10.00"),
             current_stock=0,
         )
 
@@ -196,27 +196,27 @@ class ProductEditPermissionBoundaryTests(APITestCase):
     def test_staff_cannot_patch_product(self):
         response = self.client_as(self.staff).patch(
             f"/api/products/{self.product.pk}/",
-            {"default_price": "99.00"},
+            {"mrp": "99.00"},
             format="json",
         )
         self.assertEqual(response.status_code, 403)
         self.product.refresh_from_db()
-        self.assertEqual(self.product.default_price, Decimal("10.00"))
+        self.assertEqual(self.product.mrp, Decimal("10.00"))
 
     def test_admin_can_patch_product(self):
         response = self.client_as(self.admin).patch(
             f"/api/products/{self.product.pk}/",
-            {"default_price": "12.00"},
+            {"mrp": "12.00"},
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
         self.product.refresh_from_db()
-        self.assertEqual(self.product.default_price, Decimal("12.00"))
+        self.assertEqual(self.product.mrp, Decimal("12.00"))
 
     def test_unauthenticated_cannot_patch_product(self):
         response = APIClient().patch(
             f"/api/products/{self.product.pk}/",
-            {"default_price": "99.00"},
+            {"mrp": "99.00"},
             format="json",
         )
         self.assertIn(response.status_code, {401, 403})

@@ -602,7 +602,7 @@ class ProductSalesReportView(APIView):
                 "base_unit_snapshot",
             )
             .annotate(
-                quantity_sold=Coalesce(Sum("quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
+                quantity_sold=Coalesce(Sum("base_quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
                 gross_sales=Coalesce(
                     Sum(ExpressionWrapper(F("quantity") * F("rate_charged"), output_field=MONEY_FIELD)),
                     Value(ZERO_MONEY), output_field=MONEY_FIELD,
@@ -893,7 +893,7 @@ class TopProductsReportView(APIView):
             "profit": "-total_profit",
         }[sort_by]
         annotate = {
-            "total_quantity": Coalesce(Sum("quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
+            "total_quantity": Coalesce(Sum("base_quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
             "total_revenue": Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
             "total_cogs": Coalesce(Sum("cogs_amount"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         }
@@ -1008,7 +1008,7 @@ class DashboardReportView(APIView):
             _posted_invoice_lines(from_date, to_date)
             .values("product_id", "product__name")
             .annotate(
-                total_quantity=Coalesce(Sum("quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
+                total_quantity=Coalesce(Sum("base_quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
                 total_revenue=Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
             )
             .filter(total_quantity__gt=0)

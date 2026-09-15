@@ -42,12 +42,13 @@ from inventory.models import (
     Warehouse,
 )
 from inventory.purchase_services import create_purchase
+from django.utils import timezone
 from inventory.services import get_default_warehouse
 
 User = get_user_model()
 
-TODAY = datetime.date(2026, 9, 13)
-EARLIER = datetime.date(2026, 9, 10)
+TODAY = timezone.localdate()
+EARLIER = TODAY - datetime.timedelta(days=3)
 
 
 def make_product(cls, name, price):

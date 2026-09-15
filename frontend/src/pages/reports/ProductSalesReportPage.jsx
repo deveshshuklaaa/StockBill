@@ -4,9 +4,9 @@ import { fetchProductSalesReport } from '../../api/reports'
 import StatusMessage from '../../components/StatusMessage'
 import ReportsShared from '../../components/ReportsShared'
 import { useReportRange, daysAgo, today } from '../../components/ReportsShared'
+import { formatQuantityWithUnit } from '../../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
 
 // POSTED lines only; COGS is the historical snapshot — current cost/WAC
 // never restates old sales.
@@ -50,7 +50,7 @@ export default function ProductSalesReportPage() {
           <thead><tr><th>Product</th><th style={{ textAlign: 'right' }}>Qty sold</th><th style={{ textAlign: 'right' }}>Discounts</th><th style={{ textAlign: 'right' }}>Taxable</th><th style={{ textAlign: 'right' }}>GST</th><th style={{ textAlign: 'right' }}>Sales value</th><th style={{ textAlign: 'right' }}>COGS</th><th style={{ textAlign: 'right' }}>Gross profit</th><th style={{ textAlign: 'right' }}>Margin</th></tr></thead>
           <tbody>{report.products.map((row) => <tr key={row.product_id}>
             <td><strong>{row.product_name}</strong><small>{row.variant_snapshot}</small></td>
-            <td style={{ textAlign: 'right' }}>{qty(row.quantity_sold)}</td>
+            <td style={{ textAlign: 'right' }}>{formatQuantityWithUnit(row.quantity_sold, row.base_unit)}</td>
             <td style={{ textAlign: 'right' }}>{money(row.discounts)}</td>
             <td style={{ textAlign: 'right' }}>{money(row.taxable_sales)}</td>
             <td style={{ textAlign: 'right' }}>{money(row.gst)}</td>

@@ -4,14 +4,15 @@ import { apiErrorMessage } from '../api/client'
 import { fetchInventoryBalances } from '../api/inventory'
 import { fetchWarehouses } from '../api/warehouses'
 import StatusMessage from '../components/StatusMessage'
+import { formatNetWeight, formatStockWithBoxes } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
 
 function formatAttributes(attributes) {
   if (!attributes || Object.keys(attributes).length === 0) return null
   const parts = []
-  if (attributes.net_weight) parts.push(`${attributes.net_weight}${attributes.net_weight_unit || ''}`)
+  const weight = formatNetWeight(attributes.net_weight)
+  if (weight) parts.push(weight)
   if (attributes.units_per_master_box) parts.push(`${attributes.units_per_master_box} per M.Box`)
   return parts.join(' · ')
 }
@@ -133,7 +134,7 @@ export default function InventoryPage() {
                     <td>{item.product_category_name || '-'}</td>
                     <td>{item.product_mrp ? money(item.product_mrp) : '-'}</td>
                     <td>{item.warehouse_name}</td>
-                    <td style={{ textAlign: 'right' }}><strong>{qty(item.quantity_on_hand)}</strong></td>
+                    <td style={{ textAlign: 'right' }}><strong>{formatStockWithBoxes(item.quantity_on_hand, { base_unit: item.product_base_unit, attributes: item.product_attributes })}</strong></td>
                     <td>{item.product_base_unit}</td>
                     <td style={{ textAlign: 'right' }}>{money(item.average_cost)}</td>
                     <td style={{ textAlign: 'right' }}><strong>{money(stockValue)}</strong></td>

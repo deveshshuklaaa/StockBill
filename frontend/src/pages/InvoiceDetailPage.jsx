@@ -4,6 +4,7 @@ import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { cancelInvoice, fetchInvoice } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
+import { formatQuantity, formatQuantityWithUnit } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
@@ -69,8 +70,6 @@ export default function InvoiceDetailPage() {
 
   const isCancelled = invoice.state === 'CANCELLED'
   const isPosted = invoice.state === 'POSTED'
-  const totalTax = (invoice.line_items || []).reduce((sum, line) =>
-    sum + Number(line.cgst_amount || 0) + Number(line.sgst_amount || 0) + Number(line.igst_amount || 0), 0)
   const totalDiscount = (invoice.line_items || []).reduce((sum, line) => sum + Number(line.discount_amount || 0), 0)
   const totalTaxable = (invoice.line_items || []).reduce((sum, line) => sum + Number(line.taxable_value_snapshot || 0), 0)
   const totalCgst = (invoice.line_items || []).reduce((sum, line) => sum + Number(line.cgst_amount || 0), 0)
@@ -136,7 +135,12 @@ export default function InvoiceDetailPage() {
         <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Discount</th><th>Taxable</th><th>GST</th><th>Total</th></tr></thead>
         <tbody>{(invoice.line_items || []).map((line) => <tr key={line.id}>
           <td>{line.product_name}<br /><small>HSN: {line.hsn_sac_snapshot || '-'}</small></td>
-          <td>{line.quantity}</td>
+          <td>
+          {formatQuantity(line.quantity, line.sales_unit_name === 'master box' ? 'piece' : (line.base_unit_snapshot || 'piece'))} {line.sales_unit_name === 'master box' ? `M.Box (×${Number(line.conversion_factor)})` : (line.base_unit_snapshot || 'pcs')}
+          {line.base_quantity != null && Number(line.conversion_factor || 1) > 1 && (
+            <> <br /><small>= {formatQuantityWithUnit(line.base_quantity, line.base_unit_snapshot || 'piece')}</small> </>
+          )}
+        </td>
           <td>{money(line.rate_charged)}</td>
           <td>{money(line.discount_amount)}</td>
           <td>{money(line.taxable_value_snapshot)}</td>

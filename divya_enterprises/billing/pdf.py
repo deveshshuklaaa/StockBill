@@ -46,7 +46,7 @@ INVOICE_TEMPLATE = """
         <tr>
           <td>{{ item.product_name_snapshot|default:item.product.name }}</td>
           <td>{{ item.hsn_sac_snapshot|default:'-' }}</td>
-          <td>{{ item.quantity }}</td>
+          <td>{% if item.sales_unit_name == 'master box' %}{{ item.quantity|floatformat:"-3" }} box (×{{ item.conversion_factor|floatformat:"-3" }}) = {{ item.base_quantity|floatformat:"-3" }} pcs{% else %}{{ item.quantity|floatformat:"-3" }}{% endif %}</td>
           <td>{{ item.rate_charged }}</td>
           <td>{{ item.discount_amount }}</td>
           <td>{{ item.taxable_value_snapshot }}</td>

@@ -4,9 +4,9 @@ import { fetchTopProductsReport } from '../../api/reports'
 import StatusMessage from '../../components/StatusMessage'
 import ReportsShared from '../../components/ReportsShared'
 import { useReportRange, daysAgo, today } from '../../components/ReportsShared'
+import { formatQuantity } from '../../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
 
 // POSTED-lines ranking; current inventory is never a sales proxy.
 export default function TopProductsReportPage() {
@@ -53,7 +53,7 @@ export default function TopProductsReportPage() {
           <tbody>{report.products.map((row) => <tr key={row.product_id}>
             <td><strong>#{row.rank}</strong></td>
             <td><strong>{row.product_name}</strong><small>{row.variant_snapshot}</small></td>
-            <td style={{ textAlign: 'right' }}>{qty(row.total_quantity)}</td>
+            <td style={{ textAlign: 'right' }}>{formatQuantity(row.total_quantity, 'piece')}</td>
             <td style={{ textAlign: 'right' }}>{money(row.total_revenue)}</td>
             <td style={{ textAlign: 'right' }}>{money(row.total_cogs)}</td>
             <td style={{ textAlign: 'right' }}><strong>{money(row.total_profit)}</strong></td>

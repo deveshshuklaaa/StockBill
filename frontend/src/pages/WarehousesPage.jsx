@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { apiErrorMessage } from '../api/client'
 import { fetchWarehouseSummary } from '../api/warehouses'
 import StatusMessage from '../components/StatusMessage'
+import { formatQuantity } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
 
 export default function WarehousesPage() {
   const [warehouses, setWarehouses] = useState([])
@@ -73,7 +73,7 @@ export default function WarehousesPage() {
                   <td><strong>{warehouse.name}</strong></td>
                   <td><code>{warehouse.code}</code></td>
                   <td style={{ textAlign: 'right' }}>{warehouse.product_count}</td>
-                  <td style={{ textAlign: 'right' }}>{qty(warehouse.total_quantity)}</td>
+                  <td style={{ textAlign: 'right' }}>{formatQuantity(warehouse.total_quantity, 'piece')}</td>
                   <td style={{ textAlign: 'right' }}><strong>{money(warehouse.total_value)}</strong></td>
                 </tr>
               ))}

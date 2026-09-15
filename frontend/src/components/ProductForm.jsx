@@ -8,17 +8,16 @@ import api from '../api/client'
 
 export const emptyProductForm = {
   name: '', sku: '', brand: '', catalogue_category: '',
-  mrp: '', cost_price: '', default_price: '',
+  mrp: '',
   base_unit: 'piece', tax: '', hsn_sac: '', is_tax_applicable: true,
   low_stock_threshold: '0',
 }
 
-export function productFormFromProduct(product, isAdmin) {
+export function productFormFromProduct(product) {
   return {
     name: product.name || '', sku: product.sku || '', brand: product.brand || '',
     catalogue_category: product.catalogue_category || '',
-    mrp: product.mrp ?? '', cost_price: isAdmin ? (product.cost_price ?? '') : '',
-    default_price: product.default_price ?? '',
+    mrp: product.mrp ?? '',
     base_unit: product.base_unit || 'piece', tax: product.tax ?? '',
     hsn_sac: product.hsn_sac || '', is_tax_applicable: product.is_tax_applicable !== false,
     low_stock_threshold: product.low_stock_threshold ?? '0',
@@ -101,14 +100,13 @@ async function loadTaxRates() {
   }
 }
 
-export function buildProductPayload({ form, attributeValues, isAdmin, isEdit }) {
-  const payload = {
+export function buildProductPayload({ form, attributeValues }) {
+  return {
     name: form.name,
     sku: form.sku || null,
     brand: form.brand,
     catalogue_category: form.catalogue_category || null,
     mrp: form.mrp === '' ? null : Number(form.mrp),
-    default_price: form.default_price === '' ? '0' : Number(form.default_price),
     base_unit: form.base_unit,
     hsn_sac: form.hsn_sac,
     is_tax_applicable: form.is_tax_applicable,
@@ -116,11 +114,6 @@ export function buildProductPayload({ form, attributeValues, isAdmin, isEdit }) 
     tax: form.tax === '' ? null : Number(form.tax),
     attributes: attributeValues,
   }
-  // Cost price is admin-only data; never submit it for staff or when the
-  // admin has no opinion on a create (backend keeps existing value on edit).
-  if (isAdmin && form.cost_price !== '') payload.cost_price = Number(form.cost_price)
-  if (isAdmin && isEdit && form.cost_price === '') payload.cost_price = 0
-  return payload
 }
 
 export default function ProductForm({
@@ -230,9 +223,7 @@ export default function ProductForm({
 
     <p className="eyebrow">Commercial</p>
     <div className="form-grid">
-      <label>MRP (printed)<input name="mrp" type="number" min="0" step="0.01" value={form.mrp} onChange={change} aria-describedby="mrp-help" /><small id="mrp-help" className="field-help">Manufacturer's printed maximum retail price.</small></label>
-      <label>Cost price<input name="cost_price" type="number" min="0" step="0.01" value={form.cost_price} onChange={change} aria-describedby="cost-help" /><small id="cost-help" className="field-help">Purchase cost used for margin reporting; enter actual cost, not MRP.</small></label>
-      <label>Default selling price<input name="default_price" type="number" min="0" step="0.01" value={form.default_price} onChange={change} required aria-describedby="price-help" /><small id="price-help" className="field-help">Pre-fill rate for invoices.</small></label>
+      <label>MRP (printed)<input name="mrp" type="number" min="0" step="0.01" value={form.mrp} onChange={change} aria-describedby="mrp-help" /><small id="mrp-help" className="field-help">Manufacturer's printed maximum retail price. Purchase cost comes from posted purchases; selling rates come from the actual invoice.</small></label>
     </div>
 
     <p className="eyebrow">Unit and tax</p>

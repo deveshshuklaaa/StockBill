@@ -198,7 +198,7 @@ class ProfitLossReportView(APIView):
             reversed_quantity=Coalesce(_credit_note_total_subquery("quantity"), Value(Decimal("0.00")), output_field=QUANTITY_FIELD),
             reversed_revenue=Coalesce(_credit_note_total_subquery("line_total"), Value(Decimal("0.00")), output_field=MONEY_FIELD),
         ).annotate(
-            effective_quantity=ExpressionWrapper(F("quantity") - F("reversed_quantity"), output_field=QUANTITY_FIELD),
+            effective_quantity=ExpressionWrapper(F("base_quantity") - F("reversed_quantity"), output_field=QUANTITY_FIELD),
             effective_revenue=ExpressionWrapper(F("line_total") - F("reversed_revenue"), output_field=MONEY_FIELD),
             current_cogs=ExpressionWrapper(
                 F("cogs_amount") - F("reversed_quantity") * F("cost_price_snapshot"),
@@ -251,7 +251,7 @@ class TopProductsReportView(APIView):
             reversed_quantity=Coalesce(_credit_note_total_subquery("quantity"), Value(Decimal("0.00")), output_field=QUANTITY_FIELD),
             reversed_revenue=Coalesce(_credit_note_total_subquery("line_total"), Value(Decimal("0.00")), output_field=MONEY_FIELD),
         ).annotate(
-            effective_quantity=ExpressionWrapper(F("quantity") - F("reversed_quantity"), output_field=QUANTITY_FIELD),
+            effective_quantity=ExpressionWrapper(F("base_quantity") - F("reversed_quantity"), output_field=QUANTITY_FIELD),
             effective_revenue=ExpressionWrapper(F("line_total") - F("reversed_revenue"), output_field=MONEY_FIELD),
         )
         if sort_by == "profit":

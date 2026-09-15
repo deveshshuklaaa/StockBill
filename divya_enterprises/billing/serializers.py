@@ -42,21 +42,28 @@ class AuditLogSerializer(serializers.ModelSerializer):
 class InvoiceLineItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     tax_rate = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    sales_unit_name = serializers.ChoiceField(choices=["piece", "master box"], default="piece")
+    conversion_factor = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=0.001, default=Decimal("1.000")
+    )
 
     class Meta:
         model = InvoiceLineItem
         fields = [
             "id", "invoice", "product", "product_name", "quantity",
+            "sales_unit_name", "conversion_factor", "base_quantity",
             "rate_charged", "discount_amount", "tax_rate", "tax_amount",
             "cgst_rate", "cgst_amount", "sgst_rate", "sgst_amount",
             "igst_rate", "igst_amount", "line_total", "cost_price_snapshot",
-            "cogs_amount", "created_at", "hsn_sac_snapshot", "taxable_value_snapshot"
+            "cogs_amount", "created_at", "hsn_sac_snapshot", "taxable_value_snapshot",
+            "base_unit_snapshot", "product_name_snapshot"
         ]
         read_only_fields = [
             "id", "invoice", "created_at", "product_name", "tax_amount",
             "cgst_rate", "cgst_amount", "sgst_rate", "sgst_amount",
             "igst_rate", "igst_amount", "line_total", "cost_price_snapshot",
-            "cogs_amount", "hsn_sac_snapshot", "taxable_value_snapshot"
+            "cogs_amount", "hsn_sac_snapshot", "taxable_value_snapshot",
+            "base_unit_snapshot", "product_name_snapshot", "base_quantity"
         ]
 
     def get_product_name(self, obj):
@@ -120,12 +127,17 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 class CreditNoteLineItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
+    sales_unit_name = serializers.CharField(required=False, write_only=True)
+    conversion_factor = serializers.DecimalField(
+        max_digits=12, decimal_places=3, required=False, write_only=True
+    )
 
     class Meta:
         model = CreditNoteLineItem
         fields = [
             "id", "credit_note", "invoice_line_item", "product", "product_name",
-            "quantity", "rate_charged", "discount_amount", "tax_rate", "tax_amount",
+            "quantity", "sales_unit_name", "conversion_factor",
+            "rate_charged", "discount_amount", "tax_rate", "tax_amount",
             "cgst_rate", "cgst_amount", "sgst_rate", "sgst_amount",
             "igst_rate", "igst_amount", "line_total", "created_at",
         ]

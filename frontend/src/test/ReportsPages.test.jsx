@@ -58,28 +58,28 @@ const PURCHASES = {
 
 const INVENTORY = {
   product_count: 2,
-  quantity_on_hand: '138.000',
+  quantity_on_hand: '138',
   total_value: '924.00',
   by_warehouse: [
-    { warehouse_id: 1, warehouse_name: 'Main Warehouse', warehouse_code: 'MAIN', product_count: 2, quantity: '138.000', value: '924.00' },
+    { warehouse_id: 1, warehouse_name: 'Main Warehouse', warehouse_code: 'MAIN', product_count: 2, quantity: '138', value: '924.00' },
   ],
 }
 
 const MOVEMENT = {
   movement_count: 7,
-  inflow: '160.000',
-  outflow: '-12.000',
-  net_quantity: '148.000',
+  inflow: '160',
+  outflow: '-12',
+  net_quantity: '148',
   by_movement_type: [
-    { movement_type: 'PURCHASE', movement_count: 2, net_quantity: '160.000' },
-    { movement_type: 'SALE', movement_count: 2, net_quantity: '-12.000' },
+    { movement_type: 'PURCHASE', movement_count: 2, net_quantity: '160' },
+    { movement_type: 'SALE', movement_count: 2, net_quantity: '-12' },
   ],
 }
 
 const PRODUCT_SALES = {
   from: '2026-09-01', to: '2026-09-30',
   products: [
-    { product_id: 1, product_name: 'Report Product A', variant_snapshot: 'Report Product A', base_unit: 'piece', quantity_sold: '10.000', gross_sales: '100.00', discounts: '0.00', taxable_sales: '100.00', gst: '18.00', sales_value: '118.00', cogs: '60.00', gross_profit: '58.00', margin_percent: '49.2' },
+    { product_id: 1, product_name: 'Report Product A', variant_snapshot: 'Report Product A', base_unit: 'piece', quantity_sold: '10', gross_sales: '100.00', discounts: '0.00', taxable_sales: '100.00', gst: '18.00', sales_value: '118.00', cogs: '60.00', gross_profit: '58.00', margin_percent: '49.2' },
   ],
   total_revenue: '166.00',
   total_cogs: '76.00',
@@ -120,7 +120,7 @@ const TOP = {
   from: '2026-09-01', to: '2026-09-30',
   sort_by: 'quantity',
   products: [
-    { product_id: 1, product_name: 'Report Product A', variant_snapshot: 'Report Product A', rank: 1, total_quantity: '10.000', total_revenue: '118.00', total_cogs: '60.00', total_profit: '58.00' },
+    { product_id: 1, product_name: 'Report Product A', variant_snapshot: 'Report Product A', rank: 1, total_quantity: '10', total_revenue: '118.00', total_cogs: '60.00', total_profit: '58.00' },
   ],
 }
 
@@ -132,10 +132,10 @@ const DASHBOARD = {
   active_customers: 2,
   active_suppliers: 3,
   period: { revenue: '165.20', cogs: '76.00', gross_profit: '89.20' },
-  low_stock: [{ id: 1, name: 'Report Product A', current_stock: '2.000', low_stock_threshold: '10.000' }],
+  low_stock: [{ id: 1, name: 'Report Product A', current_stock: '2', low_stock_threshold: '10' }],
   recent_sales: [{ id: 11, invoice_number: 'INV-1', invoice_date: '2026-09-13', total_amount: '118.00', customer_name_snapshot: 'J K Traders' }],
   recent_purchases: [{ id: 7, purchase_number: 'PI/26-27/000004', invoice_date: '2026-09-10', total_amount: '708.00', supplier_name_snapshot: 'Alpha Traders' }],
-  top_products: [{ product_id: 1, product_name: 'Report Product A', total_quantity: '10.000', total_revenue: '118.00' }],
+  top_products: [{ product_id: 1, product_name: 'Report Product A', total_quantity: '10', total_revenue: '118.00' }],
 }
 
 const customersList = { count: 1, next: null, previous: null, results: [{ id: 1, name: 'J K Traders' }] }
@@ -252,7 +252,7 @@ describe('InventoryReportPage', () => {
 
     // ₹924.00 appears in the total metric and the warehouse breakdown.
     await screen.findAllByText('₹924.00')
-    expect(screen.getAllByText('138.000').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('138').length).toBeGreaterThan(0)
     // Main Warehouse appears as a dropdown option and a breakdown row.
     expect(screen.getAllByText('Main Warehouse').length).toBeGreaterThan(1)
   })
@@ -285,8 +285,8 @@ describe('StockMovementReportPage', () => {
 
     mount(<StockMovementReportPage />)
 
-    await screen.findByText('148.000')
-    expect(screen.getByText('+160.000')).toBeInTheDocument()
+    await screen.findByText('148')
+    expect(screen.getByText('+160')).toBeInTheDocument()
     // 'Purchase' appears as a movement label and dropdown option.
     expect(screen.getAllByText('Purchase').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Sale').length).toBeGreaterThan(0)

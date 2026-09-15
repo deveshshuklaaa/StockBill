@@ -2,7 +2,7 @@
 
 - Inventory balances are stored per product and warehouse in base units. `Product.current_stock` remains a compatibility cache equal to the sum of warehouse balances.
 - Every balance-changing operation runs inside `transaction.atomic()`, locks the relevant balance with `select_for_update()`, and creates a `StockLedger` event.
-- Product conversion factors must be positive. Existing invoice quantities are interpreted as base-unit quantities until display-unit capture is introduced.
+- Product conversion factors must be positive. Invoice lines now capture entered unit (piece/master box), conversion factor, and base quantity; stock deduction uses base quantity.
 - Sale lines snapshot `cost_price_snapshot` and `cogs_amount`; changing a product's current cost does not change historical gross profit.
 - Posted invoices are read-only through the API. Corrections use credit notes; products are archived rather than deleted.
 - Draft invoices are created through `/api/invoices/drafts/` and post through `/api/invoices/{id}/post/`; posting is the point at which inventory and cash-ledger effects occur.

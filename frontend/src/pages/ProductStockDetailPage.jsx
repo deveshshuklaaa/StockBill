@@ -3,14 +3,15 @@ import { Link, useParams } from 'react-router-dom'
 import { apiErrorMessage } from '../api/client'
 import { fetchProductInventory, fetchStockLedger } from '../api/inventory'
 import StatusMessage from '../components/StatusMessage'
+import { formatMasterBoxView, formatNetWeight, formatQuantity, formatQuantityWithUnit, masterBoxSize } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
 
 function formatAttributes(attributes) {
   if (!attributes || Object.keys(attributes).length === 0) return null
   const parts = []
-  if (attributes.net_weight) parts.push(`${attributes.net_weight}${attributes.net_weight_unit || ''}`)
+  const weight = formatNetWeight(attributes.net_weight)
+  if (weight) parts.push(weight)
   if (attributes.units_per_master_box) parts.push(`${attributes.units_per_master_box} per M.Box`)
   return parts.join(' · ')
 }
@@ -125,6 +126,10 @@ export default function ProductStockDetailPage() {
   const totalStock = productRows.reduce((sum, b) => sum + Number(b.quantity_on_hand), 0)
   const totalValue = productRows.reduce((sum, b) => sum + Number(b.quantity_on_hand) * Number(b.average_cost), 0)
   const attrs = formatAttributes(firstBalance.product_attributes)
+  const productBoxSize = masterBoxSize({ attributes: firstBalance.product_attributes })
+  const totalStockMasterBoxView = productBoxSize
+    ? formatMasterBoxView(totalStock, productBoxSize)
+    : ''
 
   const totalPages = Math.max(1, Math.ceil(total / 25))
 
@@ -155,7 +160,12 @@ export default function ProductStockDetailPage() {
       </div>
       <div className="info-card">
         <div className="info-label">Total Stock</div>
-        <div className="info-value"><strong>{qty(totalStock)} {firstBalance.product_base_unit}</strong></div>
+        <div className="info-value"><strong>{formatQuantityWithUnit(totalStock, firstBalance.product_base_unit)}</strong></div>
+        {totalStockMasterBoxView && (
+          <div className="info-value" style={{ fontSize: '0.85rem', color: '#666' }}>
+            {totalStockMasterBoxView}
+          </div>
+        )}
       </div>
       <div className="info-card">
         <div className="info-label">Total Value</div>
@@ -179,7 +189,7 @@ export default function ProductStockDetailPage() {
             {productRows.map((balance) => (
               <tr key={balance.id}>
                 <td><strong>{balance.warehouse_name}</strong></td>
-                <td style={{ textAlign: 'right' }}>{qty(balance.quantity_on_hand)}</td>
+                <td style={{ textAlign: 'right' }}>{formatQuantityWithUnit(balance.quantity_on_hand, balance.product_base_unit)}</td>
                 <td style={{ textAlign: 'right' }}>{money(balance.average_cost)}</td>
                 <td style={{ textAlign: 'right' }}><strong>{money(Number(balance.quantity_on_hand) * Number(balance.average_cost))}</strong></td>
               </tr>
@@ -224,7 +234,7 @@ export default function ProductStockDetailPage() {
                     <td><code>{movement.reference || '-'}</code></td>
                     <td>{movement.warehouse_name}</td>
                     <td style={{ textAlign: 'right', color: Number(movement.quantity_change) >= 0 ? '#16a34a' : '#dc2626' }}>
-                      <strong>{Number(movement.quantity_change) >= 0 ? '+' : ''}{qty(movement.quantity_change)}</strong>
+                      <strong>{Number(movement.quantity_change) >= 0 ? '+' : ''}{formatQuantity(movement.quantity_change, 'piece')}</strong>
                     </td>
                     <td style={{ textAlign: 'right' }}>{movement.unit_cost ? money(movement.unit_cost) : '-'}</td>
                     <td>{movement.created_by_username || '-'}</td>

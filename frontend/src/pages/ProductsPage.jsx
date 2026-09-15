@@ -10,15 +10,18 @@ import ProductForm, {
   mapFieldErrors,
 } from '../components/ProductForm'
 import { useAuth } from '../context/AuthContext'
+import { formatNetWeight, formatStockWithBoxes } from '../utils/format'
 
 function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
 function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
 function formatAttributes(attributes) {
-  return Object.entries(attributes || {})
-    .filter(([, value]) => value !== null && value !== undefined && value !== '')
-    .map(([code, value]) => `${code.replace(/_/g, ' ')}: ${String(value)}`)
-    .join(' · ')
+  if (!attributes || Object.keys(attributes).length === 0) return null
+  const parts = []
+  const weight = formatNetWeight(attributes.net_weight)
+  if (weight) parts.push(weight)
+  if (attributes.units_per_master_box) parts.push(`${attributes.units_per_master_box} per M.Box`)
+  return parts.join(' · ')
 }
 
 export default function ProductsPage() {
@@ -121,7 +124,7 @@ export default function ProductsPage() {
     })
     if (Object.keys(localErrors).length) { setFieldErrors(localErrors); setSaving(false); return }
 
-    const payload = buildProductPayload({ form, attributeValues, isAdmin, isEdit: false })
+    const payload = buildProductPayload({ form, attributeValues })
     try {
       await api.post('/products/', payload)
       setShowForm(false); await loadProducts(page)
@@ -159,16 +162,14 @@ export default function ProductsPage() {
         </div>
       </div>
       {busy ? <div className="empty-state">Loading products...</div> : products.length === 0 ? <div className="empty-state">{search || categoryFilter || statusFilter !== '' ? 'No products match your filters.' : 'No products yet.'}</div> : <div className="table-scroll"><table>
-        <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Brand</th><th>MRP</th>{isAdmin && <th>Cost price</th>}<th>Selling price</th><th>Stock</th><th>Tax</th><th>Status</th>{isAdmin && <th aria-label="Actions" />}</tr></thead>
-        <tbody>{products.map((product) => { const low = Number(product.current_stock) <= Number(product.low_stock_threshold); return <tr key={product.id} className={product.is_active ? '' : 'archived-row'}>
+        <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Brand</th><th>MRP</th><th>Stock</th><th>Tax</th><th>Status</th>{isAdmin && <th aria-label="Actions" />}</tr></thead>
+        <tbody>{products.map((product) => { const _low = Number(product.current_stock) <= Number(product.low_stock_threshold); return <tr key={product.id} className={product.is_active ? '' : 'archived-row'}>
           <td><strong>{product.name}</strong><small className="attribute-summary">{formatAttributes(product.attributes)}</small></td>
           <td><code>{product.sku || '-'}</code></td>
           <td>{product.category_name || '-'}</td>
           <td>{product.brand || '-'}</td>
           <td>{product.mrp != null ? money(product.mrp) : '-'}</td>
-          {isAdmin && <td>{money(product.cost_price)}</td>}
-          <td>{money(product.default_price)}</td>
-          <td><span className={low ? 'stock-value low' : 'stock-value'}>{product.current_stock}{low && <em>Low</em>}</span></td>
+          <td>{formatStockWithBoxes(product.current_stock, product)}</td>
           <td><span className="tax-chip">{product.tax_rate != null ? `${Number(product.tax_rate).toFixed(0)}%` : '-'}</span></td>
           <td>{product.is_active ? 'Active' : 'Archived'}</td>
           {isAdmin && <td><div className="row-actions">

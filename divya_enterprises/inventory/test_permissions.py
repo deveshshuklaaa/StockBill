@@ -82,17 +82,17 @@ class CatalogCustomerPermissionTests(APITestCase):
         )
         self.assertEqual(response.status_code, 201, response.data)
         self.assertFalse(response.data["is_active"] is None)
-        self.assertIn("cost_price", response.data)
+        self.assertNotIn("cost_price", response.data)
 
     def test_uppercase_admin_can_update_product(self):
         response = self.client_as(self.admin).patch(
             f"/api/products/{self.existing_product.pk}/",
-            {"default_price": "120.00"},
+            {"mrp": "120.00"},
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
         self.existing_product.refresh_from_db()
-        self.assertEqual(self.existing_product.default_price, Decimal("120.00"))
+        self.assertEqual(self.existing_product.mrp, Decimal("120.00"))
 
     def test_uppercase_admin_archive_is_ignored_by_destroy(self):
         # Destroy archives the product (sets is_active=False) instead of deleting.
@@ -104,10 +104,10 @@ class CatalogCustomerPermissionTests(APITestCase):
         self.assertFalse(self.existing_product.is_active)
         self.assertTrue(Product.objects.filter(pk=self.existing_product.pk).exists())
 
-    def test_uppercase_admin_sees_cost_price_in_product_list(self):
+    def test_uppercase_admin_sees_cost_price_not_in_product_list(self):
         response = self.client_as(self.admin).get("/api/products/")
         row = response.data["results"][0]
-        self.assertIn("cost_price", row)
+        self.assertNotIn("cost_price", row)
 
     # --- ADMIN: customers ---
 

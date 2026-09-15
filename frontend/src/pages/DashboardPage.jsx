@@ -4,9 +4,9 @@ import { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { fetchDashboard } from '../api/reports'
 import StatusMessage from '../components/StatusMessage'
 import { daysAgo, today } from '../components/ReportsShared'
+import { formatQuantity } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
 
 // Every number comes from the tested /reports/dashboard endpoint; each
 // card links into the corresponding report. No fabricated graphs.
@@ -85,8 +85,8 @@ export default function DashboardPage() {
           <thead><tr><th>Product</th><th style={{ textAlign: 'right' }}>On hand</th><th style={{ textAlign: 'right' }}>Threshold</th></tr></thead>
           <tbody>{data.low_stock.map((row) => <tr key={row.id} className="archived-row">
             <td><strong>{row.name}</strong></td>
-            <td style={{ textAlign: 'right' }}>{qty(row.current_stock)}</td>
-            <td style={{ textAlign: 'right' }}>{qty(row.low_stock_threshold)}</td>
+            <td style={{ textAlign: 'right' }}>{formatQuantity(row.current_stock, 'piece')}</td>
+            <td style={{ textAlign: 'right' }}>{formatQuantity(row.low_stock_threshold, 'piece')}</td>
           </tr>)}</tbody>
         </table></div>
       </div>}
@@ -121,7 +121,7 @@ export default function DashboardPage() {
           <thead><tr><th>Product</th><th style={{ textAlign: 'right' }}>Qty</th><th style={{ textAlign: 'right' }}>Revenue</th></tr></thead>
           <tbody>{data.top_products.map((row) => <tr key={row.product_id}>
             <td><strong>{row.product_name}</strong></td>
-            <td style={{ textAlign: 'right' }}>{qty(row.total_quantity)}</td>
+            <td style={{ textAlign: 'right' }}>{formatQuantity(row.total_quantity, 'piece')}</td>
             <td style={{ textAlign: 'right' }}>{money(row.total_revenue)}</td>
           </tr>)}</tbody>
         </table></div>

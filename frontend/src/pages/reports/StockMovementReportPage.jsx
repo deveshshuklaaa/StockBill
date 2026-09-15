@@ -3,8 +3,7 @@ import { apiErrorMessage } from '../../api/client'
 import { fetchStockMovementReport } from '../../api/reports'
 import { fetchWarehouses } from '../../api/warehouses'
 import StatusMessage from '../../components/StatusMessage'
-
-function qty(value) { return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 }) }
+import { formatQuantity } from '../../utils/format'
 
 const MOVEMENT_LABELS = {
   OPENING_STOCK: 'Opening Stock',
@@ -67,9 +66,9 @@ export default function StockMovementReportPage() {
 
       {report && <div className="metric-grid">
         <div className="metric-card"><div className="metric-label">Movements</div><div className="metric-value">{report.movement_count}</div></div>
-        <div className="metric-card"><div className="metric-label">Inflow</div><div className="metric-value">+{qty(report.inflow)}</div></div>
-        <div className="metric-card"><div className="metric-label">Outflow</div><div className="metric-value">{qty(report.outflow)}</div></div>
-        <div className="metric-card"><div className="metric-label">Net quantity</div><div className="metric-value">{qty(report.net_quantity)}</div></div>
+        <div className="metric-card"><div className="metric-label">Inflow</div><div className="metric-value">+{formatQuantity(report.inflow, 'piece')}</div></div>
+        <div className="metric-card"><div className="metric-label">Outflow</div><div className="metric-value">{formatQuantity(report.outflow, 'piece')}</div></div>
+        <div className="metric-card"><div className="metric-label">Net quantity</div><div className="metric-value">{formatQuantity(report.net_quantity, 'piece')}</div></div>
       </div>}
 
       {report && report.by_movement_type.length > 0 && <div className="table-scroll"><table>
@@ -77,7 +76,7 @@ export default function StockMovementReportPage() {
         <tbody>{report.by_movement_type.map((row) => <tr key={row.movement_type}>
           <td><span className="type-chip">{MOVEMENT_LABELS[row.movement_type] || row.movement_type}</span></td>
           <td style={{ textAlign: 'right' }}>{row.movement_count}</td>
-          <td style={{ textAlign: 'right' }}><strong>{qty(row.net_quantity)}</strong></td>
+          <td style={{ textAlign: 'right' }}><strong>{formatQuantity(row.net_quantity, 'piece')}</strong></td>
         </tr>)}</tbody>
       </table></div>}
     </div>
