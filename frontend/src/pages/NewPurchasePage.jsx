@@ -24,14 +24,14 @@ function variantSummary(product) {
 
 function calculateLine(line, taxMode) {
   const quantity = Number(line.quantity) || 0
-  const factor = Number(line.conversion_factor) || 1
+  const factor = Number(line.conversionFactor ?? line.conversion_factor) || 1
   const baseQty = quantity * factor
   const rate = Number(line.rate) || 0
-  const discount = Number(line.discount_amount) || 0
-  const taxRate = Number(line.taxRate) || 0
+  const discount = Number(line.discountAmount ?? line.discount_amount) || 0
+  const taxRate = Number(line.taxRate ?? line.tax_rate) || 0
 
   const gross = baseQty * rate
-  const net = gross - discount
+  const net = Math.max(0, gross - discount)
   let taxable = net
   let tax = net * taxRate / 100
   if (taxMode === 'inclusive') {
@@ -39,7 +39,7 @@ function calculateLine(line, taxMode) {
     tax = net - taxable
   }
   const unitCost = baseQty > 0 ? taxable / baseQty : 0
-  return { gross, discount, taxable, tax, total: taxable + tax, baseQty, unitCost }
+  return { gross, discount, taxable, tax, total: taxable + tax, baseQty, unitCost, taxRate }
 }
 
 export default function NewPurchasePage() {
@@ -291,26 +291,33 @@ export default function NewPurchasePage() {
             {lines.map((line) => {
               const calculated = calculateLine(line, taxMode)
               const box = masterBoxSize(line.productData)
+              const isMasterBox = line.purchaseUnit === 'master box'
               return <div className="invoice-line" key={line.key}>
                 <div className="line-product">
                   <strong>{line.productData.name}</strong>
                   <span className="variant-line">{variantSummary(line.productData) || line.productData.base_unit}</span>
-                  <span>
-                    {line.purchaseUnit === 'master box' && box
-                      ? `${line.quantity || 0} × ${box} = ${calculated.baseQty} pieces`
-                      : `${calculated.baseQty} ${line.productData.base_unit || 'pieces'}`}
-                    {' · '}cost {money(calculated.unitCost)}/pc
+                  <span className="line-conversion-badge" style={{ display: 'block', marginTop: 4, color: '#1e40af', fontSize: '0.85rem' }}>
+                    {isMasterBox && box
+                      ? `Conversion: ${line.quantity || 0} × ${box} = ${calculated.baseQty} Pieces`
+                      : `${calculated.baseQty} ${line.productData.base_unit || 'Pieces'}`}
+                    {' · '}Effective cost: {money(calculated.unitCost)} / pc
                   </span>
                 </div>
                 <label>Unit<select value={line.purchaseUnit} onChange={(e) => updateLine(line.key, 'purchaseUnit', e.target.value)}>
                   <option value="piece">Pieces</option>
-                  {box && <option value="master box">Master box ({box})</option>}
+                  {box && <option value="master box">Master Box ({box} pcs)</option>}
                 </select></label>
-                <label>Qty<input type="number" min="0.001" step={line.purchaseUnit === 'piece' ? '1' : '0.001'} value={line.quantity} onChange={(e) => updateLine(line.key, 'quantity', e.target.value)} /></label>
-                <label>Rate / Piece<input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => updateLine(line.key, 'rate', e.target.value)} placeholder="₹ / piece" aria-label={`Purchase rate per piece for ${line.productData.name}`} /></label>
-                <label>Disc<input type="number" min="0" step="0.01" value={line.discountAmount} onChange={(e) => updateLine(line.key, 'discountAmount', e.target.value)} /></label>
-                <div className="line-tax">{calculated.taxRate}%</div>
-                <div className="line-total">{money(calculated.total)}</div>
+                <label>{isMasterBox ? 'Master Boxes' : 'Pieces'}<input type="number" min="0.001" step={isMasterBox ? '1' : '0.001'} value={line.quantity} onChange={(e) => updateLine(line.key, 'quantity', e.target.value)} placeholder={isMasterBox ? 'Boxes' : 'Pieces'} aria-label={`Quantity in ${isMasterBox ? 'master boxes' : 'pieces'} for ${line.productData.name}`} /></label>
+                <label>Purchase Rate (per Piece)<input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => updateLine(line.key, 'rate', e.target.value)} placeholder="₹ / piece" aria-label={`Purchase rate per piece for ${line.productData.name}`} /></label>
+                <label>Disc (₹)<input type="number" min="0" step="0.01" value={line.discountAmount} onChange={(e) => updateLine(line.key, 'discountAmount', e.target.value)} placeholder="0.00" aria-label={`Discount amount for ${line.productData.name}`} /></label>
+                <div className="line-tax" style={{ minWidth: 65, textAlign: 'center' }}>
+                  <span>{calculated.taxRate}%</span>
+                  <small style={{ display: 'block', color: '#64748b' }}>{money(calculated.tax)}</small>
+                </div>
+                <div className="line-total" style={{ minWidth: 110, textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Taxable: {money(calculated.taxable)}</div>
+                  <strong>{money(calculated.total)}</strong>
+                </div>
                 <button type="button" className="remove-line" onClick={() => removeLine(line.key)} aria-label="Remove line">×</button>
               </div>
             })}

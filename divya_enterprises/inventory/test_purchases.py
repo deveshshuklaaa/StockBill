@@ -1107,3 +1107,427 @@ class SalesRegressionTests(PurchaseAPITestBase):
             product=self.product, warehouse=self.warehouse
         )
         self.assertEqual(balance.quantity_on_hand, Decimal("90.000"))
+
+
+class MasterBoxPurchaseRateValidationTests(PurchaseAPITestBase):
+    """Business rule validation:
+    Rate is ALWAYS per base unit / piece, regardless of whether purchase_unit
+    is 'piece' or 'master box'.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.tax_5, _ = TaxRate.objects.get_or_create(
+            name="GST 5%", defaults={"rate": Decimal("5.00")}
+        )
+        self.tax_5.rate = Decimal("5.00")
+        self.tax_5.save(update_fields=["rate"])
+
+        # Create products for 120 and 252 units per master box
+        from inventory.models import ProductAttributeValue
+
+        self.product_120 = Product.objects.create(
+            name="Chheda 120-box Product",
+            base_unit=Product.UNIT_PIECE,
+            unit_type=Product.UNIT_PIECE,
+            unit_conversion_factor=1,
+            default_price=5,
+            cost_price=0,
+            mrp=5,
+            tax=self.tax_5,
+            catalogue_category=self.category,
+            current_stock=0,
+        )
+        ProductAttributeValue.objects.create(
+            product=self.product_120,
+            attribute_definition=self.master_box_attr,
+            value_integer=120,
+        )
+
+        self.product_252 = Product.objects.create(
+            name="Chheda 252-box Product",
+            base_unit=Product.UNIT_PIECE,
+            unit_type=Product.UNIT_PIECE,
+            unit_conversion_factor=1,
+            default_price=10,
+            cost_price=0,
+            mrp=10,
+            tax=self.tax_5,
+            catalogue_category=self.category,
+            current_stock=0,
+        )
+        ProductAttributeValue.objects.create(
+            product=self.product_252,
+            attribute_definition=self.master_box_attr,
+            value_integer=252,
+        )
+
+        self.product.tax = self.tax_5
+        self.product.save(update_fields=["tax"])
+
+    def test_piece_purchase(self):
+        """TEST 1: Piece purchase
+        quantity = 960, unit = piece, rate = 6.66
+        -> base_quantity = 960, taxable = 6393.60
+        """
+        payload = {
+            "supplier": self.supplier_intra.pk,
+            "warehouse": self.warehouse.pk,
+            "supplier_invoice_no": "TEST-PC-01",
+            "invoice_date": "2026-09-10",
+            "tax_mode": "exclusive",
+            "line_items": [
+                {
+                    "product": self.product.pk,
+                    "quantity": "960",
+                    "purchase_unit_name": "piece",
+                    "conversion_factor": "1",
+                    "rate": "6.66",
+                    "discount_amount": "0",
+                }
+            ],
+            "post": True,
+        }
+        res = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", payload, format="json"
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        line = res.data["line_items"][0]
+        self.assertEqual(Decimal(str(line["base_quantity"])), Decimal("960"))
+        self.assertEqual(Decimal(str(line["taxable_value"])), Decimal("6393.60"))
+        self.assertEqual(Decimal(str(res.data["taxable_total"])), Decimal("6393.60"))
+
+    def test_master_box_purchase(self):
+        """TEST 2: Master box purchase
+        quantity = 5, unit = master box, conversion_factor = 192, rate = 6.66
+        -> base_quantity = 960, taxable = 6393.60
+        """
+        payload = {
+            "supplier": self.supplier_intra.pk,
+            "warehouse": self.warehouse.pk,
+            "supplier_invoice_no": "TEST-MB-01",
+            "invoice_date": "2026-09-10",
+            "tax_mode": "exclusive",
+            "line_items": [
+                {
+                    "product": self.product.pk,
+                    "quantity": "5",
+                    "purchase_unit_name": "master box",
+                    "conversion_factor": "192",
+                    "rate": "6.66",
+                    "discount_amount": "0",
+                }
+            ],
+            "post": True,
+        }
+        res = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", payload, format="json"
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        line = res.data["line_items"][0]
+        self.assertEqual(Decimal(str(line["quantity"])), Decimal("5"))
+        self.assertEqual(line["purchase_unit_name"], "master box")
+        self.assertEqual(Decimal(str(line["conversion_factor"])), Decimal("192"))
+        self.assertEqual(Decimal(str(line["base_quantity"])), Decimal("960"))
+        self.assertEqual(Decimal(str(line["rate"])), Decimal("6.66"))
+        self.assertEqual(Decimal(str(line["taxable_value"])), Decimal("6393.60"))
+        self.assertEqual(Decimal(str(res.data["taxable_total"])), Decimal("6393.60"))
+
+    def test_piece_and_master_box_equivalence(self):
+        """TEST 3: Piece and Master Box equivalence
+        A: 960 pieces @ 6.66
+        B: 5 master boxes x 192 @ 6.66
+        They must produce identical:
+        - base_quantity
+        - taxable amount
+        - GST
+        - inventory value
+        - unit cost
+        - WAC effect
+        """
+        from inventory.models import ProductAttributeValue
+
+        # Create two identical products with units_per_master_box = 192
+        product_a = Product.objects.create(
+            name="Equiv Product A",
+            base_unit=Product.UNIT_PIECE,
+            unit_type=Product.UNIT_PIECE,
+            tax=self.tax_5,
+            catalogue_category=self.category,
+        )
+        ProductAttributeValue.objects.create(
+            product=product_a,
+            attribute_definition=self.master_box_attr,
+            value_integer=192,
+        )
+
+        product_b = Product.objects.create(
+            name="Equiv Product B",
+            base_unit=Product.UNIT_PIECE,
+            unit_type=Product.UNIT_PIECE,
+            tax=self.tax_5,
+            catalogue_category=self.category,
+        )
+        ProductAttributeValue.objects.create(
+            product=product_b,
+            attribute_definition=self.master_box_attr,
+            value_integer=192,
+        )
+
+        inv_a = create_purchase(
+            supplier=self.supplier_intra,
+            warehouse=self.warehouse,
+            invoice_date=datetime.date(2026, 9, 10),
+            supplier_invoice_no="EQUIV-A",
+            tax_mode="exclusive",
+            line_items=[
+                {
+                    "product": product_a,
+                    "quantity": Decimal("960"),
+                    "purchase_unit_name": "piece",
+                    "conversion_factor": Decimal("1"),
+                    "rate": Decimal("6.66"),
+                    "discount_amount": Decimal("0"),
+                }
+            ],
+            created_by=self.admin,
+            post=True,
+        )
+        line_a = inv_a.line_items.first()
+
+        inv_b = create_purchase(
+            supplier=self.supplier_intra,
+            warehouse=self.warehouse,
+            invoice_date=datetime.date(2026, 9, 10),
+            supplier_invoice_no="EQUIV-B",
+            tax_mode="exclusive",
+            line_items=[
+                {
+                    "product": product_b,
+                    "quantity": Decimal("5"),
+                    "purchase_unit_name": "master box",
+                    "conversion_factor": Decimal("192"),
+                    "rate": Decimal("6.66"),
+                    "discount_amount": Decimal("0"),
+                }
+            ],
+            created_by=self.admin,
+            post=True,
+        )
+        line_b = inv_b.line_items.first()
+
+        self.assertEqual(line_a.base_quantity, line_b.base_quantity)
+        self.assertEqual(line_a.base_quantity, Decimal("960.000"))
+        self.assertEqual(line_a.taxable_value, line_b.taxable_value)
+        self.assertEqual(line_a.taxable_value, Decimal("6393.60"))
+        self.assertEqual(inv_a.cgst_total, inv_b.cgst_total)
+        self.assertEqual(inv_a.sgst_total, inv_b.sgst_total)
+        self.assertEqual(inv_a.total_amount, inv_b.total_amount)
+        self.assertEqual(line_a.unit_cost_snapshot, line_b.unit_cost_snapshot)
+        self.assertEqual(line_a.unit_cost_snapshot, Decimal("6.66"))
+
+        # Inventory value and WAC effect comparison
+        balance_a = InventoryBalance.objects.get(product=product_a, warehouse=self.warehouse)
+        balance_b = InventoryBalance.objects.get(product=product_b, warehouse=self.warehouse)
+        self.assertEqual(balance_a.quantity_on_hand, balance_b.quantity_on_hand)
+        self.assertEqual(balance_a.quantity_on_hand, Decimal("960.000"))
+        self.assertEqual(balance_a.average_cost, balance_b.average_cost)
+        self.assertEqual(balance_a.average_cost, Decimal("6.66"))
+        self.assertEqual(balance_a.quantity_on_hand * balance_a.average_cost, balance_b.quantity_on_hand * balance_b.average_cost)
+
+
+    def test_120_piece_box_purchase(self):
+        """TEST 4: 120-piece box
+        12 master boxes x 120 @ 3.33/piece
+        -> base_quantity = 1440, taxable = 4795.20
+        """
+        payload = {
+            "supplier": self.supplier_intra.pk,
+            "warehouse": self.warehouse.pk,
+            "supplier_invoice_no": "TEST-120-01",
+            "invoice_date": "2026-09-10",
+            "tax_mode": "exclusive",
+            "line_items": [
+                {
+                    "product": self.product_120.pk,
+                    "quantity": "12",
+                    "purchase_unit_name": "master box",
+                    "conversion_factor": "120",
+                    "rate": "3.33",
+                    "discount_amount": "0",
+                }
+            ],
+            "post": True,
+        }
+        res = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", payload, format="json"
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        line = res.data["line_items"][0]
+        self.assertEqual(Decimal(str(line["base_quantity"])), Decimal("1440"))
+        self.assertEqual(Decimal(str(line["taxable_value"])), Decimal("4795.20"))
+        self.assertEqual(Decimal(str(res.data["taxable_total"])), Decimal("4795.20"))
+
+    def test_252_piece_box_purchase(self):
+        """TEST 5: 252-piece box
+        5 master boxes x 252 @ 6.66/piece
+        -> base_quantity = 1260, taxable = 8391.60
+        """
+        payload = {
+            "supplier": self.supplier_intra.pk,
+            "warehouse": self.warehouse.pk,
+            "supplier_invoice_no": "TEST-252-01",
+            "invoice_date": "2026-09-10",
+            "tax_mode": "exclusive",
+            "line_items": [
+                {
+                    "product": self.product_252.pk,
+                    "quantity": "5",
+                    "purchase_unit_name": "master box",
+                    "conversion_factor": "252",
+                    "rate": "6.66",
+                    "discount_amount": "0",
+                }
+            ],
+            "post": True,
+        }
+        res = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", payload, format="json"
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        line = res.data["line_items"][0]
+        self.assertEqual(Decimal(str(line["base_quantity"])), Decimal("1260"))
+        self.assertEqual(Decimal(str(line["taxable_value"])), Decimal("8391.60"))
+        self.assertEqual(Decimal(str(res.data["taxable_total"])), Decimal("8391.60"))
+
+    def test_discount_calculated_on_base_quantity_times_rate(self):
+        """TEST 6: Discount is calculated against base_quantity * rate_per_piece,
+        NOT master_boxes * rate_per_piece.
+        5 boxes * 192 = 960 pcs. Rate = 6.66. Gross = 6393.60.
+        Discount = 100.00.
+        Taxable = 6393.60 - 100.00 = 6293.60.
+        """
+        payload = {
+            "supplier": self.supplier_intra.pk,
+            "warehouse": self.warehouse.pk,
+            "supplier_invoice_no": "TEST-DISC-01",
+            "invoice_date": "2026-09-10",
+            "tax_mode": "exclusive",
+            "line_items": [
+                {
+                    "product": self.product.pk,
+                    "quantity": "5",
+                    "purchase_unit_name": "master box",
+                    "conversion_factor": "192",
+                    "rate": "6.66",
+                    "discount_amount": "100.00",
+                }
+            ],
+            "post": True,
+        }
+        res = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", payload, format="json"
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        line = res.data["line_items"][0]
+        self.assertEqual(Decimal(str(line["taxable_value"])), Decimal("6293.60"))
+        self.assertEqual(Decimal(str(res.data["taxable_total"])), Decimal("6293.60"))
+
+    def test_gst_calculated_from_base_quantity_taxable_amount(self):
+        """TEST 7: GST is calculated from the corrected taxable amount.
+        Taxable = 6393.60, GST 5% intra-state:
+        CGST 2.5% = 159.84, SGST 2.5% = 159.84, Total GST = 319.68
+        Total = 6713.28
+        """
+        payload = {
+            "supplier": self.supplier_intra.pk,
+            "warehouse": self.warehouse.pk,
+            "supplier_invoice_no": "TEST-GST-01",
+            "invoice_date": "2026-09-10",
+            "tax_mode": "exclusive",
+            "line_items": [
+                {
+                    "product": self.product.pk,
+                    "quantity": "5",
+                    "purchase_unit_name": "master box",
+                    "conversion_factor": "192",
+                    "rate": "6.66",
+                    "discount_amount": "0",
+                }
+            ],
+            "post": True,
+        }
+        res = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", payload, format="json"
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Decimal(str(res.data["taxable_total"])), Decimal("6393.60"))
+        self.assertEqual(Decimal(str(res.data["cgst_total"])), Decimal("159.84"))
+        self.assertEqual(Decimal(str(res.data["sgst_total"])), Decimal("159.84"))
+        self.assertEqual(Decimal(str(res.data["total_amount"])), Decimal("6713.28"))
+
+    def test_master_box_purchase_rate_is_per_base_unit(self):
+        """REGRESSION TEST:
+        Proves that when user purchases 5 Master Boxes with conversion_factor 192
+        at rate 6.66 (per piece):
+        1. base_quantity is 960 (NOT 5)
+        2. taxable_amount is 6393.60 (NOT 5 * 6.66 = 33.30)
+        3. StockLedger logs +960 base units (NOT 5)
+        4. InventoryBalance records quantity_on_hand = 960
+        5. InventoryBalance average_cost = 6.66 (per base unit)
+        6. unit_cost_snapshot = 6.66
+        """
+        payload = {
+            "supplier": self.supplier_intra.pk,
+            "warehouse": self.warehouse.pk,
+            "supplier_invoice_no": "REG-MB-RATE-01",
+            "invoice_date": "2026-09-10",
+            "tax_mode": "exclusive",
+            "line_items": [
+                {
+                    "product": self.product.pk,
+                    "quantity": "5",
+                    "purchase_unit_name": "master box",
+                    "conversion_factor": "192",
+                    "rate": "6.66",
+                    "discount_amount": "0",
+                }
+            ],
+            "post": True,
+        }
+        res = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", payload, format="json"
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Decimal(str(res.data["taxable_total"])), Decimal("6393.60"))
+        self.assertNotEqual(Decimal(str(res.data["taxable_total"])), Decimal("33.30"))
+        self.assertEqual(Decimal(str(res.data["total_amount"])), Decimal("6713.28"))
+
+        # Check posted line item
+        line = PurchaseLineItem.objects.get(purchase_invoice__id=res.data["id"])
+        self.assertEqual(line.quantity, Decimal("5.000"))
+        self.assertEqual(line.purchase_unit_name, "master box")
+        self.assertEqual(line.conversion_factor, Decimal("192.000"))
+        self.assertEqual(line.base_quantity, Decimal("960.000"))
+        self.assertEqual(line.rate, Decimal("6.66"))
+        self.assertEqual(line.unit_cost_snapshot, Decimal("6.66"))
+        self.assertEqual(line.taxable_value, Decimal("6393.60"))
+
+        # Check stock ledger
+        ledger_entry = StockLedger.objects.filter(
+            product=self.product,
+            movement_type=StockLedger.PURCHASE,
+            reference_id=str(res.data["id"]),
+        ).first()
+        self.assertIsNotNone(ledger_entry)
+        self.assertEqual(ledger_entry.quantity_change, Decimal("960.000"))
+        self.assertEqual(ledger_entry.unit_cost, Decimal("6.66"))
+
+        # Check inventory balance
+        balance = InventoryBalance.objects.get(
+            product=self.product, warehouse=self.warehouse
+        )
+        self.assertEqual(balance.quantity_on_hand, Decimal("960.000"))
+        self.assertEqual(balance.average_cost, Decimal("6.66"))
+
+
