@@ -335,6 +335,8 @@ class StockLedger(models.Model):
     ADJUSTMENT = "ADJUSTMENT"
     TRANSFER_IN = "TRANSFER_IN"
     TRANSFER_OUT = "TRANSFER_OUT"
+    STOCK_ADJUSTMENT_IN = "STOCK_ADJUSTMENT_IN"
+    STOCK_ADJUSTMENT_OUT = "STOCK_ADJUSTMENT_OUT"
     MOVEMENT_CHOICES = [
         (value, value.replace("_", " ").title())
         for value in [
@@ -349,6 +351,8 @@ class StockLedger(models.Model):
             ADJUSTMENT,
             TRANSFER_IN,
             TRANSFER_OUT,
+            STOCK_ADJUSTMENT_IN,
+            STOCK_ADJUSTMENT_OUT,
         ]
     ]
     product = models.ForeignKey(
@@ -364,7 +368,7 @@ class StockLedger(models.Model):
         max_digits=12, decimal_places=3, null=True, blank=True
     )
     movement_type = models.CharField(
-        max_length=20, choices=MOVEMENT_CHOICES, default=ADJUSTMENT
+        max_length=30, choices=MOVEMENT_CHOICES, default=ADJUSTMENT
     )
     reference = models.CharField(max_length=255, blank=True)
     reference_type = models.CharField(max_length=50, blank=True)
@@ -669,3 +673,131 @@ class PurchaseIdempotencyKey(models.Model):
         PurchaseInvoice, on_delete=models.PROTECT, related_name="idempotency_record"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class StockAdjustment(models.Model):
+    """Authoritative record for controlled physical stock adjustments."""
+
+    ADJUSTMENT_TYPE_IN = "STOCK_ADJUSTMENT_IN"
+    ADJUSTMENT_TYPE_OUT = "STOCK_ADJUSTMENT_OUT"
+    ADJUSTMENT_TYPE_CHOICES = [
+        (ADJUSTMENT_TYPE_IN, "Stock Adjustment In"),
+        (ADJUSTMENT_TYPE_OUT, "Stock Adjustment Out"),
+    ]
+
+    UNIT_PIECE = "piece"
+    UNIT_MASTER_BOX = "master box"
+    UNIT_CHOICES = [
+        (UNIT_PIECE, "Piece"),
+        (UNIT_MASTER_BOX, "Master Box"),
+    ]
+
+    REASON_PHYSICAL_COUNT_INCREASE = "Physical Count Increase"
+    REASON_FOUND_STOCK = "Found Stock"
+    REASON_PHYSICAL_COUNT_DECREASE = "Physical Count Decrease"
+    REASON_DAMAGED = "Damaged"
+    REASON_EXPIRED = "Expired"
+    REASON_MISSING_SHORT = "Missing/Short"
+    REASON_OTHER = "Other"
+
+    REASONS_IN = [
+        REASON_PHYSICAL_COUNT_INCREASE,
+        REASON_FOUND_STOCK,
+        REASON_OTHER,
+    ]
+    REASONS_OUT = [
+        REASON_PHYSICAL_COUNT_DECREASE,
+        REASON_DAMAGED,
+        REASON_EXPIRED,
+        REASON_MISSING_SHORT,
+        REASON_OTHER,
+    ]
+
+    adjustment_number = models.CharField(max_length=50, unique=True)
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="stock_adjustments"
+    )
+    warehouse = models.ForeignKey(
+        Warehouse, on_delete=models.PROTECT, related_name="stock_adjustments"
+    )
+    adjustment_type = models.CharField(max_length=30, choices=ADJUSTMENT_TYPE_CHOICES)
+    quantity = models.DecimalField(
+        max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))]
+    )
+    unit = models.CharField(max_length=50, choices=UNIT_CHOICES, default=UNIT_PIECE)
+    conversion_factor = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        default=1,
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+    base_quantity = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+    cost_per_base_unit_snapshot = models.DecimalField(
+        max_digits=12, decimal_places=2, validators=[MinValueValidator(0)]
+    )
+    adjustment_value = models.DecimalField(
+        max_digits=14, decimal_places=2, validators=[MinValueValidator(0)]
+    )
+    reason = models.CharField(max_length=100)
+    note = models.TextField(blank=True)
+    effective_date = models.DateField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_stock_adjustments",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["product", "warehouse", "-effective_date"]),
+            models.Index(fields=["adjustment_type", "-effective_date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.adjustment_number} ({self.adjustment_type}): {self.product.name} {self.base_quantity} pcs"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError(
+                "Stock adjustments are append-only historical records and cannot be edited."
+            )
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Stock adjustments cannot be deleted.")
+
+
+class StockAdjustmentNumberCounter(models.Model):
+    """One row per financial year; serializes StockAdjustment number assignment."""
+
+    fy_code = models.CharField(max_length=10, unique=True)
+    last_serial = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Adjustment number counters cannot be deleted.")
+
+
+class StockAdjustmentIdempotencyKey(models.Model):
+    key = models.CharField(max_length=255, unique=True)
+    request_hash = models.CharField(max_length=64, default="")
+    adjustment = models.OneToOneField(
+        StockAdjustment, on_delete=models.PROTECT, related_name="idempotency_record"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Stock adjustment idempotency keys are append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Stock adjustment idempotency keys cannot be deleted.")

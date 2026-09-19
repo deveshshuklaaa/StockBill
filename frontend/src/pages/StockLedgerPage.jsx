@@ -17,6 +17,8 @@ const MOVEMENT_LABELS = {
   PURCHASE_RETURN: 'Purchase Return',
   DAMAGE: 'Damage',
   ADJUSTMENT: 'Adjustment',
+  STOCK_ADJUSTMENT_IN: 'Stock Adjustment In',
+  STOCK_ADJUSTMENT_OUT: 'Stock Adjustment Out',
   TRANSFER_IN: 'Transfer In',
   TRANSFER_OUT: 'Transfer Out',
 }

@@ -16,6 +16,7 @@ from .models import (
     Product,
     PurchaseInvoice,
     PurchaseLineItem,
+    StockAdjustment,
     StockLedger,
     Supplier,
     TaxRate,
@@ -701,3 +702,91 @@ class PurchaseInvoiceUpdateSerializer(PurchaseInvoiceSerializer):
             **validated_data,
         )
         return purchase
+
+
+class StockAdjustmentSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_sku = serializers.CharField(source="product.sku", read_only=True)
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    warehouse_code = serializers.CharField(source="warehouse.code", read_only=True)
+    created_by_username = serializers.CharField(
+        source="created_by.username", read_only=True, default=""
+    )
+
+    class Meta:
+        model = StockAdjustment
+        fields = [
+            "id",
+            "adjustment_number",
+            "product",
+            "product_name",
+            "product_sku",
+            "warehouse",
+            "warehouse_name",
+            "warehouse_code",
+            "adjustment_type",
+            "quantity",
+            "unit",
+            "conversion_factor",
+            "base_quantity",
+            "cost_per_base_unit_snapshot",
+            "adjustment_value",
+            "reason",
+            "note",
+            "effective_date",
+            "created_by",
+            "created_by_username",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class StockAdjustmentCreateSerializer(serializers.Serializer):
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.filter(is_active=True)
+    )
+    warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=Warehouse.objects.all(), required=False
+    )
+    adjustment_type = serializers.ChoiceField(
+        choices=StockAdjustment.ADJUSTMENT_TYPE_CHOICES
+    )
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=3)
+    unit = serializers.ChoiceField(
+        choices=StockAdjustment.UNIT_CHOICES, default=StockAdjustment.UNIT_PIECE
+    )
+    conversion_factor = serializers.DecimalField(
+        max_digits=12, decimal_places=3, required=False, allow_null=True
+    )
+    cost_per_piece = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True
+    )
+    reason = serializers.CharField(max_length=100)
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+    effective_date = serializers.DateField()
+
+    def create(self, validated_data):
+        from .adjustment_services import post_stock_adjustment
+        from .services import get_default_warehouse
+
+        warehouse = validated_data.get("warehouse") or get_default_warehouse()
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        idempotency_key = self.context.get("idempotency_key")
+        request_hash = self.context.get("request_hash", "")
+
+        return post_stock_adjustment(
+            product=validated_data["product"],
+            warehouse=warehouse,
+            adjustment_type=validated_data["adjustment_type"],
+            quantity=validated_data["quantity"],
+            unit=validated_data.get("unit", StockAdjustment.UNIT_PIECE),
+            conversion_factor=validated_data.get("conversion_factor"),
+            cost_per_piece=validated_data.get("cost_per_piece"),
+            reason=validated_data["reason"],
+            note=validated_data.get("note", ""),
+            effective_date=validated_data["effective_date"],
+            created_by=user,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )

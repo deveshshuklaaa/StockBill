@@ -18,6 +18,9 @@ from .views import (
     PurchaseInvoiceListCreateView,
     PurchaseInvoiceNextNumberView,
     PurchaseInvoicePostView,
+    StockAdjustmentDetailView,
+    StockAdjustmentListCreateView,
+    StockAdjustmentNextNumberView,
     StockLedgerDetailView,
     StockLedgerListCreateView,
     SupplierDetailView,
@@ -125,5 +128,35 @@ urlpatterns = [
         "purchase-invoices/<int:pk>/cancel/",
         PurchaseInvoiceCancelView.as_view(),
         name="purchase-invoice-cancel",
+    ),
+    path(
+        "inventory/adjustments/",
+        StockAdjustmentListCreateView.as_view(),
+        name="stock-adjustment-list-create",
+    ),
+    path(
+        "inventory/adjustments/next-number/",
+        StockAdjustmentNextNumberView.as_view(),
+        name="stock-adjustment-next-number",
+    ),
+    path(
+        "inventory/adjustments/<int:pk>/",
+        StockAdjustmentDetailView.as_view(),
+        name="stock-adjustment-detail",
+    ),
+    path(
+        "adjustments/",
+        StockAdjustmentListCreateView.as_view(),
+        name="adjustment-list-create-alias",
+    ),
+    path(
+        "adjustments/next-number/",
+        StockAdjustmentNextNumberView.as_view(),
+        name="adjustment-next-number-alias",
+    ),
+    path(
+        "adjustments/<int:pk>/",
+        StockAdjustmentDetailView.as_view(),
+        name="adjustment-detail-alias",
     ),
 ]

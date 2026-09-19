@@ -33,6 +33,9 @@ import TaxReportPage from './pages/reports/TaxReportPage'
 import TopProductsReportPage from './pages/reports/TopProductsReportPage'
 import WarehousesPage from './pages/WarehousesPage'
 import InventoryReportPage from './pages/reports/InventoryReportPage'
+import StockAdjustmentsPage from './pages/StockAdjustmentsPage'
+import NewStockAdjustmentPage from './pages/NewStockAdjustmentPage'
+import StockAdjustmentDetailPage from './pages/StockAdjustmentDetailPage'
 import './App.css'
 
 function App() {
@@ -57,6 +60,9 @@ function App() {
       <Route path="/customers/:id" element={<CustomerDetailPage />} />
       <Route path="/inventory" element={<InventoryPage />} />
       <Route path="/inventory/:productId" element={<ProductStockDetailPage />} />
+      <Route path="/inventory/adjustments" element={<StockAdjustmentsPage />} />
+      <Route path="/inventory/adjustments/new" element={<NewStockAdjustmentPage />} />
+      <Route path="/inventory/adjustments/:id" element={<StockAdjustmentDetailPage />} />
       <Route path="/stock-ledger" element={<StockLedgerPage />} />
       <Route path="/purchases" element={<PurchasesPage />} />
       <Route path="/purchases/new" element={<NewPurchasePage />} />
