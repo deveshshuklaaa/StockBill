@@ -85,10 +85,10 @@ class ReportingEndpointTests(APITestCase):
         self.assertEqual(response.data["invoice_count"], 2)
         self.assertEqual(response.data["invoice_count_by_payment_type"], {"cash": 1, "credit": 1})
         self.assertEqual(response.data["sold_cash_today"], Decimal("118.00"))
-        self.assertEqual(response.data["sold_on_credit_today"], Decimal("188.00"))
+        self.assertEqual(response.data["sold_on_credit_today"], Decimal("188.80"))
         self.assertEqual(response.data["cash_collected_today"], Decimal("118.00"))
-        self.assertEqual(response.data["total_revenue"], Decimal("306.00"))
-        self.assertEqual(response.data["tax_collected_by_slab"]["18"], Decimal("46.00"))
+        self.assertEqual(response.data["total_revenue"], Decimal("306.80"))
+        self.assertEqual(response.data["tax_collected_by_slab"]["18"], Decimal("46.80"))
 
     def test_prior_day_credit_invoice_payment_counts_as_today_cash_collection_only(self):
         client = self.client_as(self.admin)

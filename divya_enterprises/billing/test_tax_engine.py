@@ -1,6 +1,6 @@
 from decimal import Decimal
 from django.test import TestCase
-from billing.tax_engine import calculate_gst, TAX_MODE_EXCLUSIVE, TAX_MODE_INCLUSIVE
+from billing.tax_engine import calculate_gst, round_inr, round_paise, TAX_MODE_EXCLUSIVE, TAX_MODE_INCLUSIVE
 
 
 class DummyProfile:
@@ -64,18 +64,15 @@ class TaxEngineTests(TestCase):
         self.assertEqual(line["sgst_amount"], Decimal("81"))
         self.assertEqual(result["totals"]["grand_total"], Decimal("1062.00"))
 
-    def test_rounding_nearest_rupee(self):
-        # 10.50 tax should round up to 11
-        # taxable = 116.67, 9% = 10.5003 -> 11
+    def test_rounding_paise_precision(self):
+        # 116.67 at 18% = 21.0006 -> 21.00 total tax (10.50 CGST + 10.50 SGST)
         lines = [
             {"quantity": 1, "rate_charged": Decimal("116.67"), "tax_rate": 18}
         ]
         result = calculate_gst(self.seller, self.buyer_intra, lines, tax_mode=TAX_MODE_EXCLUSIVE)
 
         line = result["lines"][0]
-        self.assertEqual(line["cgst_amount"], Decimal("11"))
-        self.assertEqual(line["sgst_amount"], Decimal("11"))
-        self.assertEqual(result["totals"]["total_tax"], Decimal("22"))
-
-        # 116.67 + 22 = 138.67
-        self.assertEqual(line["line_total"], Decimal("138.67"))
+        self.assertEqual(line["cgst_amount"], Decimal("10.50"))
+        self.assertEqual(line["sgst_amount"], Decimal("10.50"))
+        self.assertEqual(result["totals"]["total_tax"], Decimal("21.00"))
+        self.assertEqual(line["line_total"], Decimal("137.67"))

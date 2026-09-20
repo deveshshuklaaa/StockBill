@@ -523,8 +523,8 @@ class InvoiceUnitConversionTests(APITestCase):
         )
         self.assertEqual(cn_res.status_code, 201, cn_res.data)
         cn = cn_res.data
-        # 1 box at 1248.00 (192 * 6.50) + 18% GST (rounded per tax engine) = 1473.00
-        self.assertEqual(Decimal(cn["total_amount"]), Decimal("1473.00"))
+        # 1 box at 1248.00 (192 * 6.50) + 18% GST (paise precision) = 1472.64
+        self.assertEqual(Decimal(cn["total_amount"]), Decimal("1472.64"))
 
         # Check stock restoration uses base quantity: 116 + 192 = 308
         self.product.refresh_from_db()
@@ -580,8 +580,8 @@ class InvoiceUnitConversionTests(APITestCase):
             },
             format="json",
         )
-        # 10 pieces * 10/pc = 100.00 taxable + 18.02 GST (proportional line tax) = 118.02
-        self.assertEqual(Decimal(cn_res.data["total_amount"]), Decimal("118.02"))
+        # 10 pieces * 10/pc = 100.00 taxable + 18.00 GST (proportional line tax) = 118.00
+        self.assertEqual(Decimal(cn_res.data["total_amount"]), Decimal("118.00"))
 
     def test_credit_note_cannot_exceed_billed_base_quantity(self):
         """Credit note reversal cannot exceed the line's original billed base quantity."""
@@ -781,8 +781,8 @@ class InvoicePricingFieldsTests(APITestCase):
         self.assertEqual(len(products), 1)
         # COGS uses WAC 6.50 * 5 = 32.50, NOT product.cost_price
         self.assertEqual(Decimal(str(products[0]["cogs"])), Decimal("32.50"))
-        # Rate is the actual invoice rate, not product.default_price (50.00 + 10.00 GST rounded = 60.00)
-        self.assertEqual(Decimal(str(products[0]["sales_value"])), Decimal("60.00"))
+        # Rate is the actual invoice rate, not product.default_price (50.00 + 9.00 GST = 59.00)
+        self.assertEqual(Decimal(str(products[0]["sales_value"])), Decimal("59.00"))
 
     def test_flows_work_without_product_prices(self):
         """Purchases, invoices, and reports work when product cost_price/default_price are zero."""

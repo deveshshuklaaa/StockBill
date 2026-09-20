@@ -15,10 +15,18 @@ def round_paise(value):
     return value.quantize(PAISE_QUANTUM, rounding=ROUND_HALF_UP)
 
 
-def calculate_gst(seller_profile, customer, lines, place_of_supply_state_code=None, tax_mode=TAX_MODE_EXCLUSIVE, rounding=round_inr):
+def calculate_gst(seller_profile, customer, lines, place_of_supply_state_code=None, tax_mode=TAX_MODE_EXCLUSIVE, rounding=round_paise):
     """
-    Computes deterministic GST totals across an invoice.
-    All calculations operate on python Decimals.
+    Computes deterministic GST totals across an invoice using StockBill rounding policy:
+    1. Calculate total line GST at paise precision (using Python Decimal).
+    2. Round total line GST to ₹0.01 (round_paise with ROUND_HALF_UP).
+    3. For intra-state GST, split the rounded line GST into CGST and SGST:
+       - CGST is rounded to paise (round_paise(line_tax_target / 2)).
+       - SGST = rounded line GST - CGST.
+       - Therefore CGST + SGST always equals the line GST exactly (no odd-paisa drift).
+    4. For inter-state GST, full tax is allocated to IGST (rounded to paise).
+    5. Line total = taxable value (quantized to 0.01) + line GST.
+    6. Invoice totals are the exact sums of the line components.
     """
 
     seller_state_code = getattr(seller_profile, 'state_code', None) if seller_profile else None
@@ -43,10 +51,10 @@ def calculate_gst(seller_profile, customer, lines, place_of_supply_state_code=No
             "subtotal": Decimal("0.00"),  # Base before discount
             "discount_total": Decimal("0.00"),
             "taxable_value": Decimal("0.00"),
-            "cgst_total": Decimal("0"),
-            "sgst_total": Decimal("0"),
-            "igst_total": Decimal("0"),
-            "total_tax": Decimal("0"),
+            "cgst_total": Decimal("0.00"),
+            "sgst_total": Decimal("0.00"),
+            "igst_total": Decimal("0.00"),
+            "total_tax": Decimal("0.00"),
             "grand_total": Decimal("0.00"),
         }
     }
@@ -75,13 +83,13 @@ def calculate_gst(seller_profile, customer, lines, place_of_supply_state_code=No
             taxable_value = net_base_amount
             total_tax_raw = taxable_value * (tax_rate_val / Decimal(100))
 
-        # Rounding logic per line component based on Section 170
-        cgst_rate = Decimal("0")
-        sgst_rate = Decimal("0")
-        igst_rate = Decimal("0")
-        cgst_amount = Decimal("0")
-        sgst_amount = Decimal("0")
-        igst_amount = Decimal("0")
+        # Precision tax calculation per line component
+        cgst_rate = Decimal("0.00")
+        sgst_rate = Decimal("0.00")
+        igst_rate = Decimal("0.00")
+        cgst_amount = Decimal("0.00")
+        sgst_amount = Decimal("0.00")
+        igst_amount = Decimal("0.00")
 
         half_rate = tax_rate_val / Decimal(2)
 
@@ -91,11 +99,9 @@ def calculate_gst(seller_profile, customer, lines, place_of_supply_state_code=No
         else:
             cgst_rate = half_rate
             sgst_rate = half_rate
-            # Strictly speaking, split the raw tax and round
-            cgst_raw = taxable_value * (cgst_rate / Decimal(100))
-            sgst_raw = taxable_value * (sgst_rate / Decimal(100))
-            cgst_amount = rounding(cgst_raw)
-            sgst_amount = rounding(sgst_raw)
+            line_tax_target = rounding(total_tax_raw)
+            cgst_amount = rounding(line_tax_target / Decimal(2))
+            sgst_amount = line_tax_target - cgst_amount
 
         # Line level total
         line_tax = cgst_amount + sgst_amount + igst_amount

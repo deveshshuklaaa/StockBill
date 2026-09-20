@@ -9,9 +9,8 @@ from rest_framework import serializers
 from customers.models import Customer
 from inventory.models import InventoryBalance, Product, ProductAttributeValue, StockLedger
 from inventory.services import adjust_inventory, ensure_inventory_balance, get_default_warehouse
-
 from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment, PaymentReversal, refresh_invoice_payment_status
-from .tax_engine import calculate_gst
+from .tax_engine import calculate_gst, round_paise
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -211,7 +210,8 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
         customer=customer,
         lines=calculated_lines_input,
         place_of_supply_state_code=place_of_supply,
-        tax_mode=tax_mode
+        tax_mode=tax_mode,
+        rounding=round_paise,
     )
 
     total_amount = calc_result["totals"]["grand_total"]
@@ -548,6 +548,7 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
         lines=calculated_lines_input,
         place_of_supply_state_code=place_of_supply,
         tax_mode=tax_mode,
+        rounding=round_paise,
     )
 
     total_amount = calc_result["totals"]["grand_total"]
