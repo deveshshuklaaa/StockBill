@@ -53,7 +53,7 @@ export async function printInvoicePdf(id, { copy = 'original', invoiceNumber = '
 
     if (win && !win.closed && win.document) {
       win.document.open()
-      win.document.write(`<!DOCTYPE html><html><head><title>${title}</title><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#525659;}embed{width:100%;height:100%;border:none;}</style></head><body><embed src="${blobUrl}" type="application/pdf" width="100%" height="100%" /></body></html>`)
+      win.document.write(`<!DOCTYPE html><html><head><title>${title}</title><style>@page{size:A5 landscape;margin:0;}html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#525659;}embed{width:100%;height:100%;border:none;}@media print{body{background:transparent;}embed{width:100%;height:100%;}}</style></head><body><embed src="${blobUrl}" type="application/pdf" width="100%" height="100%" /></body></html>`)
       win.document.close()
     } else {
       const link = document.createElement('a')

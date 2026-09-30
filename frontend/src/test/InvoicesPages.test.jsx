@@ -381,4 +381,30 @@ describe('InvoiceDetailPage', () => {
     await user.click(origButtons[0])
     expect(printSpy).toHaveBeenCalledWith(11, { copy: 'original', invoiceNumber: 'INV-20260912-1' })
   })
+
+  it('printInvoicePdf writes HTML print-wrapper with @page A5 landscape', async () => {
+    const mockWin = {
+      closed: false,
+      document: {
+        title: '',
+        open: vi.fn(),
+        write: vi.fn(),
+        close: vi.fn(),
+      },
+    }
+    vi.spyOn(window, 'open').mockReturnValue(mockWin)
+    vi.spyOn(client.default, 'get').mockResolvedValue({
+      data: new Blob(['%PDF-1.4 test'], { type: 'application/pdf' }),
+    })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
+
+    await invoicesApi.printInvoicePdf(11, { copy: 'original', invoiceNumber: 'INV-20260912-1' })
+
+    expect(mockWin.document.open).toHaveBeenCalled()
+    expect(mockWin.document.write).toHaveBeenCalledTimes(1)
+    const writtenHtml = mockWin.document.write.mock.calls[0][0]
+    expect(writtenHtml).toContain('@page{size:A5 landscape;margin:0;}')
+    expect(writtenHtml).toContain('<embed src="blob:mock-url" type="application/pdf"')
+    expect(mockWin.document.close).toHaveBeenCalled()
+  })
 })

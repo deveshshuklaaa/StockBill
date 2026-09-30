@@ -265,6 +265,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
     total_pages = len(pages_chunks)
     c = NumberedCanvas(buffer, pagesize=landscape(A5))
+    c.setViewerPreference("PrintScaling", "None")
     logo_path = _resolve_logo_path()
 
     cumulative_amount = Decimal("0.00")
@@ -296,6 +297,21 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.setStrokeColor(COLOR_BORDER)
         c.setLineWidth(0.75)
         c.rect(left_x, bottom_y, usable_w, top_y - bottom_y)
+
+        # Subtle background watermark for cancelled or draft invoices
+        if invoice.state in (Invoice.STATE_CANCELLED, Invoice.STATE_DRAFT):
+            c.saveState()
+            c.setFont("Helvetica-Bold", 45)
+            if invoice.state == Invoice.STATE_CANCELLED:
+                c.setFillColor(Color(0.85, 0.2, 0.2, alpha=0.10))
+                wm_text = "CANCELLED"
+            else:
+                c.setFillColor(Color(0.5, 0.5, 0.5, alpha=0.10))
+                wm_text = "DRAFT"
+            c.translate(PAGE_WIDTH / 2, PAGE_HEIGHT / 2)
+            c.rotate(28)
+            c.drawCentredString(0, 0, wm_text)
+            c.restoreState()
 
         # ------------------------------------------------------------------
         # 1. HEADER SECTION (Company Details + Invoice Metadata)
@@ -359,8 +375,15 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.rect(meta_x, top_y - title_box_h, meta_w, title_box_h, fill=1, stroke=1)
         c.setFillColor(COLOR_TEXT)
         c.setFont("Helvetica-Bold", 8.5)
-        c.drawString(meta_x + 6, top_y - 11, "TAX INVOICE")
-        c.drawRightString(right_x - 6, top_y - 11, f"[ {copy_badge} ]")
+        if invoice.state == Invoice.STATE_CANCELLED:
+            c.drawString(meta_x + 6, top_y - 11, "CANCELLED INVOICE")
+            c.drawRightString(right_x - 6, top_y - 11, "[ CANCELLED ]")
+        elif invoice.state == Invoice.STATE_DRAFT:
+            c.drawString(meta_x + 6, top_y - 11, "DRAFT INVOICE")
+            c.drawRightString(right_x - 6, top_y - 11, "[ DRAFT ]")
+        else:
+            c.drawString(meta_x + 6, top_y - 11, "TAX INVOICE")
+            c.drawRightString(right_x - 6, top_y - 11, f"[ {copy_badge} ]")
 
         meta_y = top_y - title_box_h - 10
         c.setFont("Helvetica-Bold", 7.5)
@@ -385,21 +408,6 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         meta_y -= 12
         c.setFont("Helvetica-Bold", 6.5)
         c.drawString(meta_x + 6, meta_y, f"Place of Supply: {pos} - {cust_state}")
-
-        # Draft / Cancelled Watermark banner if applicable
-        if invoice.state == Invoice.STATE_CANCELLED:
-            c.saveState()
-            c.setFillColor(COLOR_CANCELLED)
-            c.setFont("Helvetica-Bold", 8)
-            reason_txt = f"CANCELLED: {invoice.cancellation_reason or 'No reason provided'}"
-            c.drawCentredString(left_x + (usable_w / 2), top_y - 8, reason_txt[:80])
-            c.restoreState()
-        elif invoice.state == Invoice.STATE_DRAFT:
-            c.saveState()
-            c.setFillColor(COLOR_DRAFT)
-            c.setFont("Helvetica-Bold", 8)
-            c.drawCentredString(left_x + (usable_w / 2), top_y - 8, "DRAFT - NOT FOR TAX PURPOSES")
-            c.restoreState()
 
         # ------------------------------------------------------------------
         # 2. CUSTOMER BLOCK (Bill To)
@@ -428,7 +436,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         cy -= 8
         c.drawString(left_x + 6, cy, f"GSTIN: {cust_gstin} | State: {cust_state} ({cust_state_code})" + (f" | Phone: {cust_phone}" if cust_phone else ""))
 
-        # Right: Transport / Notes
+        # Right: Transport / Notes / Status
         cy_r = header_bottom - 9
         c.setFont("Helvetica", 6)
         c.drawString(cust_col2_x + 6, cy_r, "Reverse Charge:")
@@ -441,7 +449,17 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.drawString(cust_col2_x + 75, cy_r, "-")
 
         cy_r -= 8
-        if invoice.notes:
+        if invoice.state == Invoice.STATE_CANCELLED:
+            c.setFont("Helvetica-Bold", 6)
+            c.setFillColor(COLOR_CANCELLED)
+            c.drawString(cust_col2_x + 6, cy_r, f"Cancelled: {invoice.cancellation_reason or 'No reason provided'}"[:38])
+            c.setFillColor(COLOR_TEXT)
+        elif invoice.state == Invoice.STATE_DRAFT:
+            c.setFont("Helvetica-Bold", 6)
+            c.setFillColor(COLOR_DRAFT)
+            c.drawString(cust_col2_x + 6, cy_r, "DRAFT - NOT FOR TAX PURPOSES")
+            c.setFillColor(COLOR_TEXT)
+        elif invoice.notes:
             c.drawString(cust_col2_x + 6, cy_r, f"Notes: {invoice.notes[:35]}")
 
         # ------------------------------------------------------------------
