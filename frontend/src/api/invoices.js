@@ -92,3 +92,8 @@ export async function amendInvoice(id, payload) {
   return data // { original: Invoice, replacement: Invoice }
 }
 
+export async function fetchInvoiceItemSummary(invoiceIds) {
+  const { data } = await api.post('/invoices/item-summary/', { invoice_ids: invoiceIds })
+  return data
+}
+
