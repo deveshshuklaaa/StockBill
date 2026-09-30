@@ -13,6 +13,7 @@ from .models import (
     Category,
     CategoryAttribute,
     InventoryBalance,
+    OpeningStock,
     Product,
     PurchaseInvoice,
     PurchaseLineItem,
@@ -192,8 +193,40 @@ class SupplierSerializer(serializers.ModelSerializer):
 class WarehouseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Warehouse
-        fields = ["id", "name", "code", "address"]
-        read_only_fields = ["id"]
+        fields = [
+            "id",
+            "name",
+            "code",
+            "address",
+            "state",
+            "state_code",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_name(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Warehouse name is required.")
+        return str(value).strip()
+
+    def validate_code(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Warehouse code is required.")
+        code = str(value).strip().upper()
+        qs = Warehouse.objects.filter(code__iexact=code)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(f"Warehouse with code '{code}' already exists.")
+        return code
+
+    def validate_state_code(self, value):
+        val = (value or "").strip()
+        if val and (not val.isdigit() or len(val) != 2):
+            raise serializers.ValidationError("State code must be a 2-digit numeric code, e.g. 27 for Maharashtra.")
+        return val
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -652,6 +685,9 @@ class PurchaseInvoiceDetailSerializer(PurchaseInvoiceSerializer):
 class PurchaseInvoiceCreateSerializer(PurchaseInvoiceSerializer):
     """Create-side: lines are required and posting can be requested inline."""
 
+    warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=Warehouse.objects.filter(is_active=True), required=False, allow_null=True
+    )
     line_items = PurchaseLineInputSerializer(many=True, required=True)
 
     def validate(self, attrs):
@@ -746,7 +782,7 @@ class StockAdjustmentCreateSerializer(serializers.Serializer):
         queryset=Product.objects.filter(is_active=True)
     )
     warehouse = serializers.PrimaryKeyRelatedField(
-        queryset=Warehouse.objects.all(), required=False
+        queryset=Warehouse.objects.filter(is_active=True), required=False
     )
     adjustment_type = serializers.ChoiceField(
         choices=StockAdjustment.ADJUSTMENT_TYPE_CHOICES
@@ -783,6 +819,111 @@ class StockAdjustmentCreateSerializer(serializers.Serializer):
             unit=validated_data.get("unit", StockAdjustment.UNIT_PIECE),
             conversion_factor=validated_data.get("conversion_factor"),
             cost_per_piece=validated_data.get("cost_per_piece"),
+            reason=validated_data["reason"],
+            note=validated_data.get("note", ""),
+            effective_date=validated_data["effective_date"],
+            created_by=user,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+
+
+class OpeningStockSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_sku = serializers.CharField(source="product.sku", read_only=True)
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    warehouse_code = serializers.CharField(source="warehouse.code", read_only=True)
+    created_by_username = serializers.CharField(
+        source="created_by.username", read_only=True, default=""
+    )
+
+    class Meta:
+        model = OpeningStock
+        fields = [
+            "id",
+            "opening_stock_number",
+            "product",
+            "product_name",
+            "product_sku",
+            "warehouse",
+            "warehouse_name",
+            "warehouse_code",
+            "quantity",
+            "unit",
+            "conversion_factor",
+            "base_quantity",
+            "cost_per_piece",
+            "opening_value",
+            "reason",
+            "note",
+            "effective_date",
+            "created_by",
+            "created_by_username",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class OpeningStockCreateSerializer(serializers.Serializer):
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.filter(is_active=True)
+    )
+    warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=Warehouse.objects.all(), required=False
+    )
+    quantity = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=Decimal("0.001")
+    )
+    unit = serializers.ChoiceField(
+        choices=OpeningStock.UNIT_CHOICES, default=OpeningStock.UNIT_PIECE
+    )
+    conversion_factor = serializers.DecimalField(
+        max_digits=12, decimal_places=3, required=False, allow_null=True
+    )
+    cost_per_piece = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal("0.00")
+    )
+    reason = serializers.CharField(max_length=100)
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+    effective_date = serializers.DateField()
+
+    def validate(self, attrs):
+        from .opening_stock_services import validate_opening_stock_payload
+        from .services import get_default_warehouse
+
+        warehouse = attrs.get("warehouse") or get_default_warehouse()
+        if not warehouse.is_active:
+            raise serializers.ValidationError({"warehouse": "Cannot initialize opening stock for an inactive warehouse."})
+        attrs["warehouse"] = warehouse
+
+        validate_opening_stock_payload(
+            product=attrs["product"],
+            warehouse=warehouse,
+            quantity=attrs["quantity"],
+            unit=attrs.get("unit", OpeningStock.UNIT_PIECE),
+            conversion_factor=attrs.get("conversion_factor"),
+            cost_per_piece=attrs["cost_per_piece"],
+            reason=attrs["reason"],
+            note=attrs.get("note", ""),
+            effective_date=attrs["effective_date"],
+        )
+        return attrs
+
+    def create(self, validated_data):
+        from .opening_stock_services import create_opening_stock
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        idempotency_key = self.context.get("idempotency_key")
+        request_hash = self.context.get("request_hash", "")
+
+        return create_opening_stock(
+            product=validated_data["product"],
+            warehouse=validated_data["warehouse"],
+            quantity=validated_data["quantity"],
+            unit=validated_data.get("unit", OpeningStock.UNIT_PIECE),
+            conversion_factor=validated_data.get("conversion_factor"),
+            cost_per_piece=validated_data["cost_per_piece"],
             reason=validated_data["reason"],
             note=validated_data.get("note", ""),
             effective_date=validated_data["effective_date"],

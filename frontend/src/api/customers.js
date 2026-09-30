@@ -56,3 +56,35 @@ export async function reversePayment(id, amount, reason) {
   const { data } = await api.post(`/payments/${id}/reverse/`, { amount, reason })
   return data
 }
+
+export async function fetchCustomerMRPPricing(customerId) {
+  const { data } = await api.get(`/customers/${customerId}/mrp-pricing/`)
+  return data
+}
+
+export async function saveCustomerMRPPricing(customerId, pricingData) {
+  const { data } = await api.post(`/customers/${customerId}/mrp-pricing/`, pricingData)
+  return data
+}
+
+export async function updateCustomerMRPPricing(customerId, pricingId, pricingData) {
+  const { data } = await api.patch(
+    `/customers/${customerId}/mrp-pricing/${pricingId}/`,
+    pricingData
+  )
+  return data
+}
+
+export async function deleteCustomerMRPPricing(customerId, pricingId) {
+  const { data } = await api.delete(
+    `/customers/${customerId}/mrp-pricing/${pricingId}/`
+  )
+  return data
+}
+
+export async function lookupCustomerMRPPricing(customerId, mrp) {
+  const { data } = await api.get(`/customers/${customerId}/mrp-pricing/lookup/`, {
+    params: { mrp },
+  })
+  return data
+}

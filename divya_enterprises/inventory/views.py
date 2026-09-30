@@ -20,6 +20,8 @@ from .models import (
     Category,
     CategoryAttribute,
     InventoryBalance,
+    OpeningStock,
+    OpeningStockIdempotencyKey,
     Product,
     PurchaseInvoice,
     PurchaseIdempotencyKey,
@@ -38,6 +40,8 @@ from .serializers import (
     CategoryAttributeSerializer,
     CategorySerializer,
     InventoryBalanceSerializer,
+    OpeningStockCreateSerializer,
+    OpeningStockSerializer,
     ProductPublicSerializer,
     ProductSerializer,
     PurchaseInvoiceCreateSerializer,
@@ -223,8 +227,13 @@ class WarehouseSummaryView(APIView):
             summaries.append(
                 {
                     "warehouse": warehouse.pk,
+                    "id": warehouse.pk,
                     "name": warehouse.name,
                     "code": warehouse.code,
+                    "address": warehouse.address,
+                    "state": warehouse.state,
+                    "state_code": warehouse.state_code,
+                    "is_active": warehouse.is_active,
                     "product_count": row["product_count"] if row else 0,
                     "total_quantity": row["total_quantity"] if row else Decimal("0.000"),
                     "total_value": (
@@ -232,6 +241,8 @@ class WarehouseSummaryView(APIView):
                         if row and row["total_value"] is not None
                         else Decimal("0.00")
                     ),
+                    "created_at": warehouse.created_at,
+                    "updated_at": warehouse.updated_at,
                 }
             )
         return Response(summaries)
@@ -503,15 +514,61 @@ class SupplierDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class WarehouseListCreateView(generics.ListCreateAPIView):
-    queryset = Warehouse.objects.all().order_by("name")
     serializer_class = WarehouseSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        qs = Warehouse.objects.all().order_by("name")
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            if is_active.lower() in ("true", "1"):
+                qs = qs.filter(is_active=True)
+            elif is_active.lower() in ("false", "0"):
+                qs = qs.filter(is_active=False)
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(code__icontains=search))
+        return qs
+
+    def perform_create(self, serializer):
+        warehouse = serializer.save()
+        _audit(self.request, "warehouse_created", "Warehouse", warehouse.pk)
 
 
 class WarehouseDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Warehouse.objects.all()
     serializer_class = WarehouseSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def perform_update(self, serializer):
+        was_active = serializer.instance.is_active
+        warehouse = serializer.save()
+        if was_active and not warehouse.is_active:
+            _audit(self.request, "warehouse_deactivated", "Warehouse", warehouse.pk)
+        elif not was_active and warehouse.is_active:
+            _audit(self.request, "warehouse_activated", "Warehouse", warehouse.pk)
+        else:
+            _audit(self.request, "warehouse_updated", "Warehouse", warehouse.pk)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        has_balances = instance.inventory_balances.filter(quantity_on_hand__gt=0).exists()
+        has_ledger = instance.stock_entries.exists()
+        has_purchases = instance.purchase_invoices.exists()
+        has_adjustments = instance.stock_adjustments.exists()
+        has_opening_stocks = instance.opening_stocks.exists()
+
+        if has_balances or has_ledger or has_purchases or has_adjustments or has_opening_stocks:
+            instance.is_active = False
+            instance.save(update_fields=["is_active"])
+            _audit(self.request, "warehouse_archived", "Warehouse", instance.pk)
+            return Response(
+                {"status": "archived", "detail": f"Warehouse '{instance.name}' was deactivated because it has historical transactions."},
+                status=status.HTTP_200_OK,
+            )
+        _audit(self.request, "warehouse_deleted", "Warehouse", instance.pk)
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class StockLedgerListCreateView(generics.ListAPIView):
@@ -978,4 +1035,228 @@ class StockAdjustmentNextNumberView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response({"next_number": peek_next_adjustment_number(target)})
+
+
+def _opening_stock_request_hash(request):
+    raw = json.dumps(request.data or {}, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+class OpeningStockListCreateView(generics.ListCreateAPIView):
+    """List opening stock records (Staff/Admin).
+    Create opening stock record (Admin only) with Idempotency-Key support."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return OpeningStockCreateSerializer
+        return OpeningStockSerializer
+
+    def get_queryset(self):
+        queryset = (
+            OpeningStock.objects.select_related(
+                "product", "warehouse", "created_by"
+            )
+            .all()
+            .order_by("-created_at")
+        )
+        params = self.request.query_params or {}
+
+        product = (params.get("product") or "").strip()
+        if product:
+            if not product.isdigit():
+                raise ValidationError({"product": ["Product must be a numeric id."]})
+            queryset = queryset.filter(product_id=int(product))
+
+        warehouse = (params.get("warehouse") or "").strip()
+        if warehouse:
+            if not warehouse.isdigit():
+                raise ValidationError({"warehouse": ["Warehouse must be a numeric id."]})
+            queryset = queryset.filter(warehouse_id=int(warehouse))
+
+        reason = (params.get("reason") or "").strip()
+        if reason:
+            queryset = queryset.filter(reason=reason)
+
+        from_date = (params.get("from") or "").strip()
+        to_date = (params.get("to") or "").strip()
+        for name, raw in (("from", from_date), ("to", to_date)):
+            if raw:
+                try:
+                    date.fromisoformat(raw)
+                except ValueError:
+                    raise ValidationError({name: ["Dates must use YYYY-MM-DD format."]})
+        if from_date:
+            queryset = queryset.filter(effective_date__gte=from_date)
+        if to_date:
+            queryset = queryset.filter(effective_date__lte=to_date)
+
+        search = (params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(opening_stock_number__icontains=search)
+                | Q(product__name__icontains=search)
+                | Q(product__sku__icontains=search)
+                | Q(reason__icontains=search)
+                | Q(note__icontains=search)
+            )
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        idempotency_key = request.headers.get("Idempotency-Key")
+        request_hash = _opening_stock_request_hash(request)
+
+        if idempotency_key:
+            existing = (
+                OpeningStockIdempotencyKey.objects.select_related(
+                    "opening_stock", "opening_stock__product", "opening_stock__warehouse", "opening_stock__created_by"
+                )
+                .filter(key=idempotency_key)
+                .first()
+            )
+            if existing:
+                if existing.request_hash != request_hash:
+                    return Response(
+                        {"detail": "Idempotency-Key was already used with a different request."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                return Response(
+                    OpeningStockSerializer(existing.opening_stock).data,
+                    status=status.HTTP_200_OK,
+                )
+
+        serializer_context = {
+            "request": request,
+            "idempotency_key": idempotency_key,
+            "request_hash": request_hash,
+        }
+        try:
+            serializer = self.get_serializer(data=request.data, context=serializer_context)
+            serializer.is_valid(raise_exception=True)
+            opening_stock = serializer.save()
+            return Response(
+                OpeningStockSerializer(opening_stock).data,
+                status=status.HTTP_201_CREATED,
+            )
+        except IntegrityError:
+            existing = (
+                OpeningStockIdempotencyKey.objects.select_related(
+                    "opening_stock", "opening_stock__product", "opening_stock__warehouse", "opening_stock__created_by"
+                )
+                .filter(key=idempotency_key)
+                .first()
+            )
+            if existing is None:
+                raise
+            if existing.request_hash != request_hash:
+                return Response(
+                    {"detail": "Idempotency-Key was already used with a different request."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            return Response(
+                OpeningStockSerializer(existing.opening_stock).data,
+                status=status.HTTP_200_OK,
+            )
+
+
+class OpeningStockDetailView(generics.RetrieveAPIView):
+    """Retrieve a single opening stock record (read-only, immutable)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = OpeningStock.objects.select_related(
+        "product", "warehouse", "created_by"
+    ).all()
+    serializer_class = OpeningStockSerializer
+
+
+class OpeningStockNextNumberView(APIView):
+    """Preview next opening stock number for the UI hint."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        from .opening_stock_numbering import peek_next_opening_stock_number
+
+        for_date = request.query_params.get("date")
+        try:
+            target = date.fromisoformat(for_date) if for_date else None
+        except ValueError:
+            return Response(
+                {"date": "Dates must use YYYY-MM-DD format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"next_number": peek_next_opening_stock_number(target)})
+
+
+class OpeningStockPreviewView(APIView):
+    """Backend-authoritative preview of base quantity and opening value."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from .opening_stock_services import validate_opening_stock_payload
+        from .services import get_default_warehouse
+
+        data = request.data or {}
+        product_id = data.get("product")
+        warehouse_id = data.get("warehouse")
+        quantity = data.get("quantity")
+        unit = data.get("unit") or OpeningStock.UNIT_PIECE
+        conversion_factor = data.get("conversion_factor")
+        cost_per_piece = data.get("cost_per_piece")
+        reason = data.get("reason") or "Preview"
+        note = data.get("note") or ""
+        effective_date = data.get("effective_date") or date.today().isoformat()
+
+        if not product_id:
+            raise ValidationError({"product": ["Product is required."]})
+        try:
+            product = Product.objects.get(pk=product_id)
+        except Product.DoesNotExist:
+            raise ValidationError({"product": ["Product not found."]})
+
+        if warehouse_id:
+            try:
+                warehouse = Warehouse.objects.get(pk=warehouse_id)
+            except Warehouse.DoesNotExist:
+                raise ValidationError({"warehouse": ["Warehouse not found."]})
+        else:
+            warehouse = get_default_warehouse()
+
+        if quantity is None:
+            raise ValidationError({"quantity": ["Quantity is required."]})
+        if cost_per_piece is None:
+            raise ValidationError({"cost_per_piece": ["Cost per piece is required."]})
+
+        try:
+            qty_dec = Decimal(str(quantity))
+            cost_dec = Decimal(str(cost_per_piece))
+            cf_dec = Decimal(str(conversion_factor)) if conversion_factor is not None else None
+            eff_dt = date.fromisoformat(str(effective_date))
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise ValidationError({"detail": f"Invalid numeric or date format: {exc}"})
+
+        validated = validate_opening_stock_payload(
+            product=product,
+            warehouse=warehouse,
+            quantity=qty_dec,
+            unit=unit,
+            conversion_factor=cf_dec,
+            cost_per_piece=cost_dec,
+            reason=reason,
+            note=note,
+            effective_date=eff_dt,
+        )
+        return Response({
+            "product_id": product.pk,
+            "product_name": product.name,
+            "warehouse_id": warehouse.pk,
+            "warehouse_name": warehouse.name,
+            "base_quantity": str(validated["base_quantity"]),
+            "cost_per_piece": str(validated["cost_per_piece"]),
+            "opening_value": str(validated["opening_value"]),
+            "conversion_factor": str(validated["conversion_factor"]),
+            "unit": validated["unit"],
+        })
 

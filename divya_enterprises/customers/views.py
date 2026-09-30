@@ -1,16 +1,17 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsAdminOrReadOnly
 from billing.models import AuditLog, CreditNote, Payment
-from .models import Customer
-from .serializers import CustomerSerializer
+from inventory.models import Product
+from .models import Customer, CustomerMRPPricing
+from .serializers import CustomerMRPPricingSerializer, CustomerSerializer
 
 
 class CustomerListCreateView(generics.ListCreateAPIView):
@@ -226,5 +227,135 @@ class CustomerReportView(APIView):
                 "payments": payment_rows,
                 "statement": statement,
                 "statement_closing_balance": statement[-1]["balance"] if statement else Decimal("0.00"),
+            }
+        )
+
+
+class CustomerMRPPricingListCreateView(APIView):
+    """List customer MRP pricing slabs with active catalogue MRPs, or create/update a slab."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def get(self, request, pk):
+        customer = get_object_or_404(Customer, pk=pk)
+        pricings = customer.mrp_pricings.all().order_by("mrp")
+
+        # Distinct MRPs from active products in catalogue
+        catalogue_mrps = list(
+            Product.objects.filter(is_active=True, mrp__isnull=False)
+            .values_list("mrp", flat=True)
+            .distinct()
+            .order_by("mrp")
+        )
+
+        return Response(
+            {
+                "customer_id": customer.id,
+                "customer_name": customer.name,
+                "pricing": CustomerMRPPricingSerializer(pricings, many=True).data,
+                "available_mrps": [str(m) for m in catalogue_mrps],
+            }
+        )
+
+    def post(self, request, pk):
+        customer = get_object_or_404(Customer, pk=pk)
+        data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data or {})
+        data["customer"] = customer.id
+
+        mrp = data.get("mrp")
+        rate_per_piece = data.get("rate_per_piece")
+        is_active = data.get("is_active", True)
+
+        if mrp is None:
+            raise ValidationError({"mrp": ["MRP is required."]})
+        if rate_per_piece is None:
+            raise ValidationError({"rate_per_piece": ["Rate per piece is required."]})
+
+        # If existing record for (customer, mrp), update it; otherwise create
+        existing = customer.mrp_pricings.filter(mrp=Decimal(str(mrp))).first()
+        if existing:
+            serializer = CustomerMRPPricingSerializer(
+                existing, data=data, partial=True
+            )
+            serializer.is_valid(raise_exception=True)
+            instance = serializer.save()
+            AuditLog.objects.create(
+                user=request.user,
+                action="customer_mrp_pricing_updated",
+                entity_type="CustomerMRPPricing",
+                entity_id=instance.pk,
+            )
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = CustomerMRPPricingSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        AuditLog.objects.create(
+            user=request.user,
+            action="customer_mrp_pricing_created",
+            entity_type="CustomerMRPPricing",
+            entity_id=instance.pk,
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class CustomerMRPPricingDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update, or remove a specific customer MRP pricing record."""
+
+    queryset = CustomerMRPPricing.objects.all()
+    serializer_class = CustomerMRPPricingSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        AuditLog.objects.create(
+            user=self.request.user,
+            action="customer_mrp_pricing_updated",
+            entity_type="CustomerMRPPricing",
+            entity_id=instance.pk,
+        )
+
+    def perform_destroy(self, instance):
+        AuditLog.objects.create(
+            user=self.request.user,
+            action="customer_mrp_pricing_deleted",
+            entity_type="CustomerMRPPricing",
+            entity_id=instance.pk,
+        )
+        instance.delete()
+
+
+class CustomerMRPPricingLookupView(APIView):
+    """Quick lookup of a customer's configured selling rate for an MRP."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        customer = get_object_or_404(Customer, pk=pk)
+        mrp_raw = request.query_params.get("mrp")
+        if not mrp_raw:
+            return Response(
+                {"configured": False, "mrp": None, "rate_per_piece": None},
+                status=status.HTTP_200_OK,
+            )
+        try:
+            mrp_dec = Decimal(str(mrp_raw))
+        except (ValueError, TypeError, InvalidOperation):
+            raise ValidationError({"mrp": ["Invalid MRP decimal format."]})
+
+        pricing = customer.mrp_pricings.filter(mrp=mrp_dec, is_active=True).first()
+        if pricing:
+            return Response(
+                {
+                    "configured": True,
+                    "mrp": str(pricing.mrp),
+                    "rate_per_piece": str(pricing.rate_per_piece),
+                }
+            )
+        return Response(
+            {
+                "configured": False,
+                "mrp": str(mrp_dec),
+                "rate_per_piece": None,
             }
         )

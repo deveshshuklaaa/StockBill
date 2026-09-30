@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiErrorMessage, apiForbiddenMessage } from '../api/client'
-import { fetchCustomer, fetchCustomerReport, recordPayment, reversePayment } from '../api/customers'
+import {
+  fetchCustomer,
+  fetchCustomerReport,
+  fetchCustomerMRPPricing,
+  saveCustomerMRPPricing,
+  deleteCustomerMRPPricing,
+  recordPayment,
+  reversePayment,
+} from '../api/customers'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 
@@ -56,6 +64,16 @@ export default function CustomerDetailPage() {
   const [reversalAmount, setReversalAmount] = useState('')
   const [reversalReason, setReversalReason] = useState('')
 
+  // Customer MRP Pricing State
+  const [pricingData, setPricingData] = useState({ pricing: [], available_mrps: [] })
+  const [pricingDrafts, setPricingDrafts] = useState({})
+  const [pricingSaving, setPricingSaving] = useState({})
+  const [pricingMsg, setPricingMsg] = useState('')
+  const [pricingError, setPricingError] = useState('')
+  const [showAddCustomSlab, setShowAddCustomSlab] = useState(false)
+  const [customMrp, setCustomMrp] = useState('')
+  const [customRate, setCustomRate] = useState('')
+
   useEffect(() => {
     let cancelled = false
     setCustomer(null); setReport(null); setError(''); setShowPaymentForm(false)
@@ -65,8 +83,88 @@ export default function CustomerDetailPage() {
     fetchCustomerReport(id)
       .then((data) => { if (!cancelled) setReport(data) })
       .catch((err) => { if (!cancelled) setError(apiErrorMessage(err)) })
+
+    fetchCustomerMRPPricing(id)
+      .then((data) => {
+        if (cancelled) return
+        setPricingData(data)
+        const drafts = {}
+        data.pricing.forEach((p) => {
+          drafts[String(p.mrp)] = p.rate_per_piece
+        })
+        setPricingDrafts(drafts)
+      })
+      .catch(() => {})
+
     return () => { cancelled = true }
   }, [id])
+
+  async function refreshPricing() {
+    try {
+      const data = await fetchCustomerMRPPricing(id)
+      setPricingData(data)
+      const drafts = {}
+      data.pricing.forEach((p) => {
+        drafts[String(p.mrp)] = p.rate_per_piece
+      })
+      setPricingDrafts(drafts)
+    } catch (err) {
+      setPricingError(apiErrorMessage(err))
+    }
+  }
+
+  async function savePricingSlab(mrp, rateValue) {
+    if (rateValue === undefined || rateValue === '' || Number(rateValue) < 0) {
+      setPricingError(`Please enter a valid non-negative rate for MRP ₹${mrp}.`)
+      return
+    }
+    setPricingSaving((prev) => ({ ...prev, [mrp]: true }))
+    setPricingError('')
+    setPricingMsg('')
+    try {
+      await saveCustomerMRPPricing(id, {
+        mrp: Number(mrp),
+        rate_per_piece: Number(rateValue),
+      })
+      setPricingMsg(`Saved rate ₹${rateValue}/pc for MRP ₹${mrp}.`)
+      await refreshPricing()
+    } catch (err) {
+      setPricingError(apiErrorMessage(err))
+    } finally {
+      setPricingSaving((prev) => ({ ...prev, [mrp]: false }))
+    }
+  }
+
+  async function removePricingSlab(pricingId, mrp) {
+    setPricingSaving((prev) => ({ ...prev, [mrp]: true }))
+    setPricingError('')
+    setPricingMsg('')
+    try {
+      await deleteCustomerMRPPricing(id, pricingId)
+      setPricingMsg(`Removed pricing for MRP ₹${mrp}.`)
+      await refreshPricing()
+    } catch (err) {
+      setPricingError(apiErrorMessage(err))
+    } finally {
+      setPricingSaving((prev) => ({ ...prev, [mrp]: false }))
+    }
+  }
+
+  async function addCustomSlab(e) {
+    e.preventDefault()
+    if (!customMrp || Number(customMrp) <= 0) {
+      setPricingError('Enter a valid MRP greater than 0.')
+      return
+    }
+    if (!customRate || Number(customRate) < 0) {
+      setPricingError('Enter a valid selling rate per piece.')
+      return
+    }
+    await savePricingSlab(customMrp, customRate)
+    setCustomMrp('')
+    setCustomRate('')
+    setShowAddCustomSlab(false)
+  }
 
   async function refreshReport() {
     try {
@@ -194,6 +292,248 @@ export default function CustomerDetailPage() {
           <span>Outstanding <b className={Number(outstanding) > 0 ? 'balance due' : ''}>{money(outstanding)}</b></span>
           <span>Available {Number(customer.credit_limit) > 0 ? money(availableCredit) : '—'}</span>
         </div>
+      </div>
+
+      {/* Customer-wise MRP Pricing Section */}
+      <div className="customer-pricing-section" style={{ margin: '28px 0 16px' }} id="customer-pricing">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <div>
+            <p className="eyebrow" style={{ margin: 0 }}>Selling Rates</p>
+            <h2 style={{ fontSize: '1.25rem', margin: '4px 0 0' }}>Customer MRP Pricing</h2>
+          </div>
+          {isAdmin && (
+            <button
+              type="button"
+              className="quiet-button"
+              onClick={() => setShowAddCustomSlab((v) => !v)}
+              id="btn-add-custom-mrp"
+            >
+              {showAddCustomSlab ? 'Cancel' : '+ Add Custom MRP'}
+            </button>
+          )}
+        </div>
+
+        <p style={{ fontSize: '0.875rem', color: '#4b5563', margin: '0 0 12px' }}>
+          Fixed selling rate per MRP slab for this customer. <strong>Rate is per piece/base unit.</strong> All products with the matching MRP will automatically receive this rate on new invoices.
+        </p>
+
+        {pricingMsg && (
+          <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#f0fdf4', color: '#166534', borderRadius: '4px', fontSize: '0.85rem', marginBottom: '10px' }}>
+            {pricingMsg}
+          </div>
+        )}
+        {pricingError && (
+          <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#fef2f2', color: '#b91c1c', borderRadius: '4px', fontSize: '0.85rem', marginBottom: '10px' }}>
+            {pricingError}
+          </div>
+        )}
+
+        {showAddCustomSlab && isAdmin && (
+          <form
+            onSubmit={addCustomSlab}
+            style={{
+              display: 'flex',
+              gap: '10px',
+              alignItems: 'center',
+              padding: '12px',
+              backgroundColor: '#f9fafb',
+              borderRadius: '6px',
+              marginBottom: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              MRP (₹):
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="e.g. 25.00"
+                value={customMrp}
+                onChange={(e) => setCustomMrp(e.target.value)}
+                style={{ width: '100px' }}
+                required
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              Rate / Piece (₹):
+              <input
+                type="number"
+                step="0.01"
+                min="0.00"
+                placeholder="e.g. 18.00"
+                value={customRate}
+                onChange={(e) => setCustomRate(e.target.value)}
+                style={{ width: '100px' }}
+                required
+              />
+            </label>
+            <button type="submit" className="primary-button" style={{ padding: '0.4rem 0.8rem' }}>
+              Add Slab
+            </button>
+          </form>
+        )}
+
+        {/* Pricing Slabs Table */}
+        {(() => {
+          // Merge available MRPs from catalogue with any existing configured MRPs
+          const configuredMap = new Map()
+          pricingData.pricing.forEach((p) => {
+            configuredMap.set(Number(p.mrp).toFixed(2), p)
+          })
+
+          const allMrpSet = new Set(
+            (pricingData.available_mrps || []).map((m) => Number(m).toFixed(2))
+          )
+          pricingData.pricing.forEach((p) => {
+            allMrpSet.add(Number(p.mrp).toFixed(2))
+          })
+
+          const sortedMrps = Array.from(allMrpSet).sort((a, b) => Number(a) - Number(b))
+
+          if (sortedMrps.length === 0) {
+            return (
+              <div className="empty-state" style={{ padding: '1.5rem' }}>
+                No active MRP slabs found in catalogue.
+              </div>
+            )
+          }
+
+          return (
+            <div className="table-scroll" style={{ border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: '140px' }}>MRP</th>
+                    <th style={{ width: '220px' }}>Rate / Piece (₹)</th>
+                    <th style={{ width: '130px' }}>Status</th>
+                    {isAdmin && <th style={{ textAlign: 'right' }}>Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedMrps.map((mrpStr) => {
+                    const existing = configuredMap.get(mrpStr)
+                    const draftRate =
+                      pricingDrafts[mrpStr] !== undefined
+                        ? pricingDrafts[mrpStr]
+                        : existing?.rate_per_piece || ''
+                    const isSaving = Boolean(pricingSaving[mrpStr])
+                    const isConfigured = Boolean(existing && existing.is_active)
+
+                    return (
+                      <tr key={mrpStr}>
+                        <td>
+                          <strong>₹{Number(mrpStr).toFixed(2)}</strong>
+                        </td>
+                        <td>
+                          {isAdmin ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>₹</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.00"
+                                value={draftRate}
+                                onChange={(e) =>
+                                  setPricingDrafts((prev) => ({
+                                    ...prev,
+                                    [mrpStr]: e.target.value,
+                                  }))
+                                }
+                                placeholder="e.g. 7.00"
+                                style={{ width: '120px' }}
+                                aria-label={`Rate for MRP ₹${mrpStr}`}
+                              />
+                              <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>/ pc</span>
+                            </div>
+                          ) : (
+                            <span>
+                              {isConfigured ? (
+                                <strong>₹{Number(existing.rate_per_piece).toFixed(2)} / pc</strong>
+                              ) : (
+                                <span style={{ color: '#9ca3af' }}>Not configured</span>
+                              )}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {isConfigured ? (
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: '#ecfdf5',
+                                color: '#065f46',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                              }}
+                            >
+                              Configured
+                            </span>
+                          ) : existing && !existing.is_active ? (
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: '#fef2f2',
+                                color: '#991b1b',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                              }}
+                            >
+                              Inactive
+                            </span>
+                          ) : (
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: '#f3f4f6',
+                                color: '#6b7280',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                              }}
+                            >
+                              Not Set
+                            </span>
+                          )}
+                        </td>
+                        {isAdmin && (
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                              <button
+                                type="button"
+                                className="text-button"
+                                disabled={isSaving}
+                                onClick={() => savePricingSlab(mrpStr, draftRate)}
+                                id={`btn-save-pricing-${mrpStr}`}
+                              >
+                                {isSaving ? 'Saving...' : existing ? 'Update' : 'Save'}
+                              </button>
+                              {existing && (
+                                <button
+                                  type="button"
+                                  className="text-button danger"
+                                  disabled={isSaving}
+                                  onClick={() => removePricingSlab(existing.id, mrpStr)}
+                                  id={`btn-remove-pricing-${mrpStr}`}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
       </div>
 
       <p className="eyebrow" style={{ margin: '26px 0 12px' }}>Invoices</p>

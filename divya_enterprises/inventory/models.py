@@ -219,6 +219,14 @@ class Warehouse(models.Model):
     name = models.CharField(max_length=255)
     code = models.CharField(max_length=50, unique=True)
     address = models.TextField(blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    state_code = models.CharField(max_length=10, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
 
     def __str__(self):
         return self.name
@@ -801,3 +809,120 @@ class StockAdjustmentIdempotencyKey(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("Stock adjustment idempotency keys cannot be deleted.")
+
+
+class OpeningStock(models.Model):
+    """Authoritative record for initial opening stock before StockBill tracking."""
+
+    UNIT_PIECE = "piece"
+    UNIT_MASTER_BOX = "master box"
+    UNIT_CHOICES = [
+        (UNIT_PIECE, "Piece"),
+        (UNIT_MASTER_BOX, "Master Box"),
+    ]
+
+    REASON_INVENTORY_INITIALIZATION = "Inventory Initialization"
+    REASON_PHYSICAL_COUNT = "Physical Count"
+    REASON_PRE_EXISTING_STOCK = "Pre-existing Stock"
+    REASON_OTHER = "Other"
+
+    REASON_CHOICES = [
+        (REASON_INVENTORY_INITIALIZATION, "Inventory Initialization"),
+        (REASON_PHYSICAL_COUNT, "Physical Count"),
+        (REASON_PRE_EXISTING_STOCK, "Pre-existing Stock"),
+        (REASON_OTHER, "Other"),
+    ]
+
+    opening_stock_number = models.CharField(max_length=50, unique=True)
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="opening_stocks"
+    )
+    warehouse = models.ForeignKey(
+        Warehouse, on_delete=models.PROTECT, related_name="opening_stocks"
+    )
+    quantity = models.DecimalField(
+        max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))]
+    )
+    unit = models.CharField(max_length=50, choices=UNIT_CHOICES, default=UNIT_PIECE)
+    conversion_factor = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        default=1,
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+    base_quantity = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+    cost_per_piece = models.DecimalField(
+        max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))]
+    )
+    opening_value = models.DecimalField(
+        max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))]
+    )
+    reason = models.CharField(max_length=100)
+    note = models.TextField(blank=True)
+    effective_date = models.DateField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_opening_stocks",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "warehouse"],
+                name="unique_product_warehouse_opening_stock",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["product", "warehouse", "-effective_date"]),
+            models.Index(fields=["-effective_date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.opening_stock_number}: {self.product.name} @ {self.warehouse.code} ({self.base_quantity} pcs)"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError(
+                "Opening stock records are append-only historical records and cannot be edited."
+            )
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Opening stock records cannot be deleted.")
+
+
+class OpeningStockNumberCounter(models.Model):
+    """One row per financial year; serializes OpeningStock number assignment."""
+
+    fy_code = models.CharField(max_length=10, unique=True)
+    last_serial = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Opening stock number counters cannot be deleted.")
+
+
+class OpeningStockIdempotencyKey(models.Model):
+    key = models.CharField(max_length=255, unique=True)
+    request_hash = models.CharField(max_length=64, default="")
+    opening_stock = models.OneToOneField(
+        OpeningStock, on_delete=models.PROTECT, related_name="idempotency_record"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Opening stock idempotency keys are append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Opening stock idempotency keys cannot be deleted.")

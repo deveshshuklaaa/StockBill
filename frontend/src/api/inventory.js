@@ -27,3 +27,11 @@ export async function fetchProductInventory(productId) {
   const { data } = await api.get('/inventory-balances/', { params: { product: productId } })
   return rows(data)
 }
+
+export async function fetchProducts({ page = 1, page_size = 200, is_active, search } = {}) {
+  const params = { page, page_size }
+  if (is_active !== undefined) params.is_active = is_active
+  if (search) params.search = search
+  const { data } = await api.get('/products/', { params })
+  return data
+}

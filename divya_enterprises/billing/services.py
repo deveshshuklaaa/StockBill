@@ -46,7 +46,7 @@ def _master_box_size(product):
     return value
 
 
-def _validate_invoice_lines(line_items):
+def _validate_invoice_lines(line_items, customer=None):
     """Resolve each line's entered unit into an authoritative base quantity.
 
     Mirrors the purchase workflow exactly: the entered unit must be one of
@@ -69,7 +69,23 @@ def _validate_invoice_lines(line_items):
         if not product.is_active:
             raise serializers.ValidationError({"line_items": f"{product.name} is inactive and cannot be sold."})
         quantity = Decimal(item["quantity"])
-        rate = Decimal(item["rate_charged"])
+        rate_raw = item.get("rate_charged")
+        if rate_raw is None or str(rate_raw).strip() == "":
+            from customers.models import CustomerMRPPricing
+            pricing = None
+            if customer and product.mrp:
+                pricing = CustomerMRPPricing.objects.filter(
+                    customer=customer, mrp=product.mrp, is_active=True
+                ).first()
+            if pricing:
+                rate = pricing.rate_per_piece
+                item["rate_charged"] = rate
+            else:
+                raise serializers.ValidationError(
+                    {"line_items": f"Rate charged is required for {product.name} (no MRP ₹{product.mrp} pricing configured for customer)."}
+                )
+        else:
+            rate = Decimal(str(rate_raw))
         tax_rate = item.get("tax_rate")
         if quantity <= 0:
             raise serializers.ValidationError({"line_items": "Quantity must be greater than zero."})
@@ -186,8 +202,21 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
             elif conversion_factor <= 0:
                 raise serializers.ValidationError({"line_items": "Conversion factor must be positive."})
             item["base_quantity"] = _quantity(quantity * conversion_factor)
+            rate_raw = item.get("rate_charged")
+            if rate_raw is None or str(rate_raw).strip() == "":
+                from customers.models import CustomerMRPPricing
+                pricing = None
+                product_obj = products[item["product"].pk]
+                if customer and product_obj.mrp:
+                    pricing = CustomerMRPPricing.objects.filter(
+                        customer=customer, mrp=product_obj.mrp, is_active=True
+                    ).first()
+                if pricing:
+                    item["rate_charged"] = pricing.rate_per_piece
+                else:
+                    item["rate_charged"] = Decimal("0.00")
     else:
-        products, balances = _validate_invoice_lines(line_items)
+        products, balances = _validate_invoice_lines(line_items, customer=customer)
 
     calculated_lines_input = []
     for item in line_items:
@@ -324,7 +353,8 @@ def post_invoice(*, invoice_id, posted_by):
                 "conversion_factor": line.conversion_factor,
             }
             for line in line_items
-        ]
+        ],
+        customer=invoice.customer,
     )
     if (
         invoice.payment_type == Invoice.PAYMENT_TYPE_CREDIT

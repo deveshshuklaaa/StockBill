@@ -44,6 +44,9 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
 class InvoiceLineItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
+    rate_charged = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True
+    )
     tax_rate = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     sales_unit_name = serializers.ChoiceField(choices=["piece", "master box"], default="piece")
     conversion_factor = serializers.DecimalField(

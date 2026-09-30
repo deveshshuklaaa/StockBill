@@ -36,6 +36,9 @@ import InventoryReportPage from './pages/reports/InventoryReportPage'
 import StockAdjustmentsPage from './pages/StockAdjustmentsPage'
 import NewStockAdjustmentPage from './pages/NewStockAdjustmentPage'
 import StockAdjustmentDetailPage from './pages/StockAdjustmentDetailPage'
+import OpeningStockListPage from './pages/OpeningStockListPage'
+import NewOpeningStockPage from './pages/NewOpeningStockPage'
+import OpeningStockDetailPage from './pages/OpeningStockDetailPage'
 import './App.css'
 
 function App() {
@@ -63,6 +66,9 @@ function App() {
       <Route path="/inventory/adjustments" element={<StockAdjustmentsPage />} />
       <Route path="/inventory/adjustments/new" element={<NewStockAdjustmentPage />} />
       <Route path="/inventory/adjustments/:id" element={<StockAdjustmentDetailPage />} />
+      <Route path="/inventory/opening-stock" element={<OpeningStockListPage />} />
+      <Route path="/inventory/opening-stock/new" element={<NewOpeningStockPage />} />
+      <Route path="/inventory/opening-stock/:id" element={<OpeningStockDetailPage />} />
       <Route path="/stock-ledger" element={<StockLedgerPage />} />
       <Route path="/purchases" element={<PurchasesPage />} />
       <Route path="/purchases/new" element={<NewPurchasePage />} />

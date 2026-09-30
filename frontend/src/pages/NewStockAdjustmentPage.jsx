@@ -47,7 +47,7 @@ export default function NewStockAdjustmentPage() {
 
   // Load initial warehouses & preview next number
   useEffect(() => {
-    fetchWarehouses()
+    fetchWarehouses({ is_active: 'true' })
       .then((data) => {
         setWarehouses(data || [])
         if (data?.length > 0) {

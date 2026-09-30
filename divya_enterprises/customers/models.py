@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import Sum
 
@@ -51,3 +52,36 @@ class Customer(models.Model):
     @property
     def available_credit(self):
         return self.credit_limit - self.outstanding_balance
+
+
+class CustomerMRPPricing(models.Model):
+    """Customer-specific selling rate fixed per MRP slab."""
+
+    customer = models.ForeignKey(
+        Customer, on_delete=models.CASCADE, related_name="mrp_pricings"
+    )
+    mrp = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    rate_per_piece = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.00"))],
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["mrp"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["customer", "mrp"],
+                name="unique_customer_mrp_pricing",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.customer.name} - MRP ₹{self.mrp}: ₹{self.rate_per_piece}/pc"

@@ -11,6 +11,10 @@ from .views import (
     CategoryListCreateView,
     CategorySchemaView,
     InventoryBalanceListView,
+    OpeningStockDetailView,
+    OpeningStockListCreateView,
+    OpeningStockNextNumberView,
+    OpeningStockPreviewView,
     ProductDetailView,
     ProductListCreateView,
     PurchaseInvoiceCancelView,
@@ -158,5 +162,45 @@ urlpatterns = [
         "adjustments/<int:pk>/",
         StockAdjustmentDetailView.as_view(),
         name="adjustment-detail-alias",
+    ),
+    path(
+        "inventory/opening-stock/",
+        OpeningStockListCreateView.as_view(),
+        name="opening-stock-list-create",
+    ),
+    path(
+        "inventory/opening-stock/next-number/",
+        OpeningStockNextNumberView.as_view(),
+        name="opening-stock-next-number",
+    ),
+    path(
+        "inventory/opening-stock/preview/",
+        OpeningStockPreviewView.as_view(),
+        name="opening-stock-preview",
+    ),
+    path(
+        "inventory/opening-stock/<int:pk>/",
+        OpeningStockDetailView.as_view(),
+        name="opening-stock-detail",
+    ),
+    path(
+        "opening-stock/",
+        OpeningStockListCreateView.as_view(),
+        name="opening-stock-list-create-alias",
+    ),
+    path(
+        "opening-stock/next-number/",
+        OpeningStockNextNumberView.as_view(),
+        name="opening-stock-next-number-alias",
+    ),
+    path(
+        "opening-stock/preview/",
+        OpeningStockPreviewView.as_view(),
+        name="opening-stock-preview-alias",
+    ),
+    path(
+        "opening-stock/<int:pk>/",
+        OpeningStockDetailView.as_view(),
+        name="opening-stock-detail-alias",
     ),
 ]

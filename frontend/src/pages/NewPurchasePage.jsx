@@ -66,7 +66,7 @@ export default function NewPurchasePage() {
   const [posting, setPosting] = useState(false)
 
   useEffect(() => {
-    fetchWarehouses()
+    fetchWarehouses({ is_active: 'true' })
       .then((warehouseRows) => {
         setWarehouses(warehouseRows)
         if (warehouseRows.length === 1) setWarehouseId(String(warehouseRows[0].id))

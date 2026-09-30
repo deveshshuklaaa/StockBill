@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
+import { fetchCustomerMRPPricing } from '../api/customers'
 import { amendInvoice, fetchInvoice, updateDraftInvoice } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatQuantityWithUnit, formatStockWithBoxes, masterBoxSize } from '../utils/format'
@@ -70,6 +71,7 @@ export default function NewInvoicePage() {
   const [notes, setNotes] = useState('')
 
   const [balance, setBalance] = useState(null)
+  const [customerPricingMap, setCustomerPricingMap] = useState({})
   const [lines, setLines] = useState([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -162,6 +164,7 @@ export default function NewInvoicePage() {
   useEffect(() => {
     if (!customer.id) {
       setBalance(null)
+      setCustomerPricingMap({})
       setPaymentType('cash')
       if (!isEditMode && !isAmendMode) setPlaceOfSupply('')
       return
@@ -170,6 +173,40 @@ export default function NewInvoicePage() {
     api.get(`/customers/${customer.id}/report/`)
       .then(({ data }) => setBalance(data.outstanding_balance))
       .catch((err) => setError(apiErrorMessage(err)))
+
+    fetchCustomerMRPPricing(customer.id)
+      .then((data) => {
+        const map = {}
+        ;(data?.pricing || []).forEach((p) => {
+          if (p.is_active) {
+            map[Number(p.mrp).toFixed(2)] = Number(p.rate_per_piece)
+          }
+        })
+        setCustomerPricingMap(map)
+        // Refresh rates for lines that haven't been manually overridden
+        setLines((currentLines) =>
+          currentLines.map((line) => {
+            if (line.isManualRate) return line
+            const mrpKey =
+              line.productData?.mrp != null
+                ? Number(line.productData.mrp).toFixed(2)
+                : null
+            if (mrpKey && map[mrpKey] !== undefined) {
+              return {
+                ...line,
+                rate_charged: map[mrpKey],
+                hasCustomerPrice: true,
+              }
+            }
+            return {
+              ...line,
+              rate_charged: '',
+              hasCustomerPrice: false,
+            }
+          })
+        )
+      })
+      .catch(() => setCustomerPricingMap({}))
   }, [customer]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredCustomers = customers.slice(0, 8)
@@ -196,36 +233,53 @@ export default function NewInvoicePage() {
     if (existing) {
       updateLine(existing.key, 'quantity', Number(existing.quantity || 0) + 1)
     } else {
-      setLines([...lines, {
-        key: product.id,
-        product: product.id,
-        productData: product,
-        quantity: 1,
-        salesUnit: 'piece',
-        conversionFactor: 1,
-        rate_charged: product.mrp != null ? Number(product.mrp) : '',
-        discount_amount: 0,
-        tax_rate: Number(product.tax_rate) || 0,
-      }])
+      const mrpKey = product.mrp != null ? Number(product.mrp).toFixed(2) : null
+      const customerRate =
+        customer?.id && mrpKey && customerPricingMap[mrpKey] !== undefined
+          ? customerPricingMap[mrpKey]
+          : null
+      const hasCustomerPrice = customerRate !== null
+
+      setLines([
+        ...lines,
+        {
+          key: product.id,
+          product: product.id,
+          productData: product,
+          quantity: 1,
+          salesUnit: 'piece',
+          conversionFactor: 1,
+          rate_charged: hasCustomerPrice ? customerRate : '',
+          hasCustomerPrice,
+          isManualRate: false,
+          discount_amount: 0,
+          tax_rate: Number(product.tax_rate) || 0,
+        },
+      ])
     }
     setProductSearch('')
   }
 
   function updateLine(key, field, value) {
-    setLines(lines.map((line) => {
-      if (line.key !== key) return line
-      const next = { ...line, [field]: value }
-      if (field === 'salesUnit') {
-        const box = masterBoxSize(line.productData)
-        if (value === 'master box' && box) {
-          next.conversionFactor = box
-          next.quantity = 1
-        } else {
-          next.conversionFactor = 1
+    setLines(
+      lines.map((line) => {
+        if (line.key !== key) return line
+        const next = { ...line, [field]: value }
+        if (field === 'rate_charged') {
+          next.isManualRate = true
         }
-      }
-      return next
-    }))
+        if (field === 'salesUnit') {
+          const box = masterBoxSize(line.productData)
+          if (value === 'master box' && box) {
+            next.conversionFactor = box
+            next.quantity = 1
+          } else {
+            next.conversionFactor = 1
+          }
+        }
+        return next
+      })
+    )
   }
 
   function removeLine(key) {
@@ -484,7 +538,35 @@ export default function NewInvoicePage() {
                         </select>
                       </label>
                       <label>Qty<input type="number" min="0.001" step={fixedUnit ? '1' : '0.001'} value={line.quantity} onChange={(event) => updateLine(line.key, 'quantity', event.target.value)} className={overStock ? 'input-warning' : ''} /></label>
-                      <label>Rate / Piece<input type="number" min="0" step="0.01" value={line.rate_charged} onChange={(event) => updateLine(line.key, 'rate_charged', event.target.value)} placeholder="₹ / piece" aria-label={`Selling rate per piece for ${line.productData.name}`} /></label>
+                      <label>
+                        Rate / Piece
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={line.rate_charged}
+                          onChange={(event) =>
+                            updateLine(line.key, 'rate_charged', event.target.value)
+                          }
+                          placeholder="₹ / piece"
+                          aria-label={`Selling rate per piece for ${line.productData.name}`}
+                        />
+                        {line.hasCustomerPrice && !line.isManualRate && (
+                          <span style={{ fontSize: '0.75rem', color: '#047857', display: 'block' }}>
+                            ✓ Customer MRP rate (₹{Number(line.rate_charged).toFixed(2)}/pc)
+                          </span>
+                        )}
+                        {!line.hasCustomerPrice && (
+                          <span style={{ fontSize: '0.75rem', color: '#b45309', display: 'block' }}>
+                            No MRP ₹{Number(line.productData.mrp || 0).toFixed(2)} rate configured
+                          </span>
+                        )}
+                        {line.isManualRate && (
+                          <span style={{ fontSize: '0.75rem', color: '#6b7280', display: 'block' }}>
+                            (manual override)
+                          </span>
+                        )}
+                      </label>
                       <label>Disc<input type="number" min="0" step="0.01" value={line.discount_amount} onChange={(event) => updateLine(line.key, 'discount_amount', event.target.value)} /></label>
                       <div className="line-tax">{line.tax_rate}%</div>
                       <div className="line-total">{money(calculated.total)}</div>
