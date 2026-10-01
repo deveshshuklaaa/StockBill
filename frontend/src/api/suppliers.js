@@ -49,3 +49,38 @@ export async function fetchSupplierPurchases({ supplier, page = 1 } = {}) {
   const { data } = await api.get('/purchase-invoices/', { params: { supplier, page } })
   return data
 }
+
+export async function fetchSupplierPricing(supplierId, { search = '', isActive = '' } = {}) {
+  const params = {}
+  if (search) params.search = search
+  if (isActive) params.is_active = isActive
+  const { data } = await api.get(`/suppliers/${supplierId}/pricing/`, { params })
+  return data
+}
+
+export async function saveSupplierPricing(supplierId, pricingData) {
+  const { data } = await api.post(`/suppliers/${supplierId}/pricing/`, pricingData)
+  return data
+}
+
+export async function updateSupplierPricing(supplierId, pricingId, pricingData) {
+  const { data } = await api.patch(
+    `/suppliers/${supplierId}/pricing/${pricingId}/`,
+    pricingData
+  )
+  return data
+}
+
+export async function deleteSupplierPricing(supplierId, pricingId) {
+  const { data } = await api.delete(
+    `/suppliers/${supplierId}/pricing/${pricingId}/`
+  )
+  return data
+}
+
+export async function lookupSupplierPricing(supplierId, mrp) {
+  const { data } = await api.get(`/suppliers/${supplierId}/pricing/lookup/`, {
+    params: { mrp },
+  })
+  return data
+}

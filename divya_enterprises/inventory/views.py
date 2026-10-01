@@ -29,6 +29,7 @@ from .models import (
     StockAdjustmentIdempotencyKey,
     StockLedger,
     Supplier,
+    SupplierPurchasePricing,
     TaxRate,
     Warehouse,
     WarehouseTransfer,
@@ -53,6 +54,7 @@ from .serializers import (
     StockAdjustmentCreateSerializer,
     StockAdjustmentSerializer,
     StockLedgerSerializer,
+    SupplierPurchasePricingSerializer,
     SupplierSerializer,
     TaxRateSerializer,
     WarehouseSerializer,
@@ -515,6 +517,162 @@ class SupplierDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.is_active = False
         instance.save(update_fields=["is_active"])
         _audit(self.request, "supplier_archived", "Supplier", instance.pk)
+
+
+class SupplierPurchasePricingListCreateView(APIView):
+    """List supplier purchase pricing slabs with active catalogue MRPs, or create/update a slab."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def get(self, request, pk):
+        from django.shortcuts import get_object_or_404
+        supplier = get_object_or_404(Supplier, pk=pk)
+        pricings = supplier.purchase_pricings.all().order_by("mrp")
+
+        catalogue_mrps = list(
+            Product.objects.filter(is_active=True, mrp__isnull=False)
+            .values_list("mrp", flat=True)
+            .distinct()
+            .order_by("mrp")
+        )
+
+        return Response(
+            {
+                "supplier_id": supplier.id,
+                "supplier_name": supplier.name,
+                "is_active": supplier.is_active,
+                "pricing": SupplierPurchasePricingSerializer(pricings, many=True).data,
+                "available_mrps": [str(m) for m in catalogue_mrps],
+            }
+        )
+
+    def post(self, request, pk):
+        from django.shortcuts import get_object_or_404
+        supplier = get_object_or_404(Supplier, pk=pk)
+        if not supplier.is_active:
+            raise ValidationError({"supplier": ["Cannot configure pricing for an inactive supplier."]})
+
+        data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data or {})
+        data["supplier"] = supplier.id
+
+        mrp = data.get("mrp")
+        rate_per_piece = data.get("rate_per_piece")
+        if mrp is None:
+            raise ValidationError({"mrp": ["MRP is required."]})
+        if rate_per_piece is None:
+            raise ValidationError({"rate_per_piece": ["Rate per piece is required."]})
+
+        try:
+            mrp_dec = Decimal(str(mrp))
+        except (ValueError, TypeError, InvalidOperation):
+            raise ValidationError({"mrp": ["Invalid MRP decimal format."]})
+
+        existing = supplier.purchase_pricings.filter(mrp=mrp_dec).first()
+        if existing:
+            serializer = SupplierPurchasePricingSerializer(
+                existing, data=data, partial=True
+            )
+            serializer.is_valid(raise_exception=True)
+            instance = serializer.save()
+            _audit(
+                request,
+                "supplier_purchase_pricing_updated",
+                "SupplierPurchasePricing",
+                instance.pk,
+            )
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = SupplierPurchasePricingSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        _audit(
+            request,
+            "supplier_purchase_pricing_created",
+            "SupplierPurchasePricing",
+            instance.pk,
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class SupplierPurchasePricingDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update, or remove a specific supplier purchase pricing record."""
+
+    queryset = SupplierPurchasePricing.objects.all()
+    serializer_class = SupplierPurchasePricingSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def get_object(self):
+        from django.shortcuts import get_object_or_404
+        if "supplier_pk" in self.kwargs:
+            return get_object_or_404(
+                SupplierPurchasePricing,
+                pk=self.kwargs["pk"],
+                supplier_id=self.kwargs["supplier_pk"],
+            )
+        return super().get_object()
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        _audit(
+            self.request,
+            "supplier_purchase_pricing_updated",
+            "SupplierPurchasePricing",
+            instance.pk,
+        )
+
+    def perform_destroy(self, instance):
+        _audit(
+            self.request,
+            "supplier_purchase_pricing_deleted",
+            "SupplierPurchasePricing",
+            instance.pk,
+        )
+        instance.delete()
+
+
+class SupplierPurchasePricingLookupView(APIView):
+    """Quick lookup of a supplier's configured purchase rate for an MRP."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from django.shortcuts import get_object_or_404
+        supplier = get_object_or_404(Supplier, pk=pk)
+        if not supplier.is_active:
+            return Response(
+                {"configured": False, "mrp": None, "rate_per_piece": None, "supplier_active": False},
+                status=status.HTTP_200_OK,
+            )
+
+        mrp_raw = request.query_params.get("mrp")
+        if not mrp_raw:
+            return Response(
+                {"configured": False, "mrp": None, "rate_per_piece": None},
+                status=status.HTTP_200_OK,
+            )
+        try:
+            mrp_dec = Decimal(str(mrp_raw))
+        except (ValueError, TypeError, InvalidOperation):
+            raise ValidationError({"mrp": ["Invalid MRP decimal format."]})
+
+        pricing = supplier.purchase_pricings.filter(
+            mrp=mrp_dec, is_active=True
+        ).first()
+        if pricing:
+            return Response(
+                {
+                    "configured": True,
+                    "mrp": str(pricing.mrp),
+                    "rate_per_piece": str(pricing.rate_per_piece),
+                }
+            )
+        return Response(
+            {
+                "configured": False,
+                "mrp": str(mrp_dec),
+                "rate_per_piece": None,
+            }
+        )
 
 
 class WarehouseListCreateView(generics.ListCreateAPIView):

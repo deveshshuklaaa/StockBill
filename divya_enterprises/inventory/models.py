@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -329,6 +330,48 @@ class Product(models.Model):
         instance = super().from_db(db, field_names, values)
         instance._loaded_current_stock = instance.current_stock
         return instance
+
+
+class SupplierPurchasePricing(models.Model):
+    """Supplier-specific purchase rate fixed per MRP slab."""
+
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.CASCADE, related_name="purchase_pricings"
+    )
+    mrp = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    rate_per_piece = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["mrp"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["supplier", "mrp"],
+                name="unique_supplier_mrp_purchase_pricing",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.mrp is not None and self.mrp <= Decimal("0.00"):
+            raise ValidationError({"mrp": "MRP must be greater than 0."})
+        if self.rate_per_piece is not None and self.rate_per_piece <= Decimal("0.00"):
+            raise ValidationError({"rate_per_piece": "Rate per piece must be greater than 0."})
+        if self.supplier_id and not self.supplier.is_active:
+            raise ValidationError({"supplier": "Cannot configure pricing for an inactive supplier."})
+
+    def __str__(self):
+        return f"{self.supplier.name} - MRP ₹{self.mrp}: ₹{self.rate_per_piece}/pc"
 
 
 class StockLedger(models.Model):

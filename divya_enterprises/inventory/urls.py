@@ -29,6 +29,9 @@ from .views import (
     StockLedgerListCreateView,
     SupplierDetailView,
     SupplierListCreateView,
+    SupplierPurchasePricingDetailView,
+    SupplierPurchasePricingListCreateView,
+    SupplierPurchasePricingLookupView,
     TaxRateAdminDetailView,
     TaxRateAdminListCreateView,
     TaxRateListView,
@@ -43,6 +46,26 @@ from .views import (
 urlpatterns = [
     path("suppliers/", SupplierListCreateView.as_view(), name="supplier-list-create"),
     path("suppliers/<int:pk>/", SupplierDetailView.as_view(), name="supplier-detail"),
+    path(
+        "suppliers/<int:pk>/pricing/",
+        SupplierPurchasePricingListCreateView.as_view(),
+        name="supplier-purchase-pricing-list-create",
+    ),
+    path(
+        "suppliers/<int:supplier_pk>/pricing/<int:pk>/",
+        SupplierPurchasePricingDetailView.as_view(),
+        name="supplier-purchase-pricing-detail-scoped",
+    ),
+    path(
+        "suppliers/pricing/<int:pk>/",
+        SupplierPurchasePricingDetailView.as_view(),
+        name="supplier-purchase-pricing-detail",
+    ),
+    path(
+        "suppliers/<int:pk>/pricing/lookup/",
+        SupplierPurchasePricingLookupView.as_view(),
+        name="supplier-purchase-pricing-lookup",
+    ),
     path(
         "warehouses/", WarehouseListCreateView.as_view(), name="warehouse-list-create"
     ),

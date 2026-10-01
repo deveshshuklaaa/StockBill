@@ -202,6 +202,7 @@ describe('SupplierDetailPage', () => {
   it('renders supplier identity, GSTIN, address, contact, state, and status', async () => {
     vi.spyOn(suppliersApi, 'fetchSupplier').mockResolvedValue(DETAIL)
     vi.spyOn(suppliersApi, 'fetchSupplierPurchases').mockResolvedValue(PURCHASES)
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
 
     mountPage('detail', { route: '/suppliers/41' })
 
@@ -209,13 +210,14 @@ describe('SupplierDetailPage', () => {
     expect(screen.getByText('27AAACA1234A1Z5')).toBeInTheDocument()
     expect(screen.getByText('12, Wholesale Market, Mumbai')).toBeInTheDocument()
     expect(screen.getByText('9820011122')).toBeInTheDocument()
-    expect(screen.getByText('Maharashtra (27)')).toBeInTheDocument()
+    expect(screen.getByText('Maharashtra (Code: 27)')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
   })
 
   it('fetches purchase history scoped to the supplier server-side', async () => {
     const historySpy = vi.spyOn(suppliersApi, 'fetchSupplierPurchases').mockResolvedValue(PURCHASES)
     vi.spyOn(suppliersApi, 'fetchSupplier').mockResolvedValue(DETAIL)
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
 
     mountPage('detail', { route: '/suppliers/41' })
     await screen.findByText('PI/26-27/000001')
@@ -226,6 +228,7 @@ describe('SupplierDetailPage', () => {
   it('links View Purchase to the existing purchase detail route', async () => {
     vi.spyOn(suppliersApi, 'fetchSupplier').mockResolvedValue(DETAIL)
     vi.spyOn(suppliersApi, 'fetchSupplierPurchases').mockResolvedValue(PURCHASES)
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
 
     mountPage('detail', { route: '/suppliers/41' })
     await screen.findByText('PI/26-27/000001')
@@ -239,6 +242,7 @@ describe('SupplierDetailPage', () => {
     vi.spyOn(suppliersApi, 'fetchSupplierPurchases').mockResolvedValue({
       count: 0, next: null, previous: null, results: [],
     })
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
 
     mountPage('detail', { route: '/suppliers/41' })
     await screen.findByText('No purchases from this supplier yet.')
@@ -247,7 +251,9 @@ describe('SupplierDetailPage', () => {
   it('archives through the backend delete endpoint and refreshes state', async () => {
     const user = userEvent.setup()
     window.confirm = vi.fn(() => true)
-    const archiveSpy = vi.spyOn(suppliersApi, 'archiveSupplier').mockResolvedValue()
+    const archiveSpy = vi.spyOn(suppliersApi, 'archiveSupplier')
+      .mockResolvedValue({ ...DETAIL, is_active: false })
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
     vi.spyOn(suppliersApi, 'fetchSupplier')
       .mockResolvedValueOnce(DETAIL)
       .mockResolvedValueOnce({ ...DETAIL, is_active: false })
@@ -272,6 +278,7 @@ describe('SupplierDetailPage', () => {
       .mockResolvedValue({ ...DETAIL, is_active: true })
     vi.spyOn(suppliersApi, 'fetchSupplier').mockResolvedValue({ ...DETAIL, is_active: false })
     vi.spyOn(suppliersApi, 'fetchSupplierPurchases').mockResolvedValue(PURCHASES)
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
 
     mountPage('detail', { route: '/suppliers/41' })
     await screen.findByText('Alpha Traders Pvt. Ltd.')
@@ -290,6 +297,7 @@ describe('SupplierDetailPage', () => {
     vi.spyOn(suppliersApi, 'fetchSupplierPurchases').mockRejectedValue({
       response: { status: 403, data: { detail: 'Only admin users can access this endpoint.' } },
     })
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
 
     mountPage('detail', { role: 'staff', route: '/suppliers/41' })
     await screen.findByText('Alpha Traders Pvt. Ltd.')
@@ -306,15 +314,16 @@ describe('SupplierDetailPage', () => {
       .mockResolvedValue({ ...DETAIL, contact_info: '9899999999' })
     vi.spyOn(suppliersApi, 'fetchSupplier').mockResolvedValue(DETAIL)
     vi.spyOn(suppliersApi, 'fetchSupplierPurchases').mockResolvedValue(PURCHASES)
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
 
     mountPage('detail', { route: '/suppliers/41' })
     await screen.findByText('Alpha Traders Pvt. Ltd.')
 
     await user.click(screen.getByRole('button', { name: 'Edit supplier' }))
-    const phoneInput = screen.getByLabelText(/Phone \/ contact/i)
+    const phoneInput = screen.getByLabelText(/Contact info/i)
     await user.clear(phoneInput)
     await user.type(phoneInput, '9899999999')
-    await user.click(screen.getByRole('button', { name: 'Update supplier' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
     await waitFor(() => {
       expect(updateSpy).toHaveBeenCalledWith('41', expect.objectContaining({ contact_info: '9899999999' }))
@@ -331,6 +340,7 @@ describe('SupplierDetailPage', () => {
     vi.spyOn(suppliersApi, 'fetchSupplierPurchases').mockResolvedValue({
       count: 0, next: null, previous: null, results: [],
     })
+    vi.spyOn(suppliersApi, 'fetchSupplierPricing').mockResolvedValue({ pricing: [], available_mrps: [] })
     vi.spyOn(client, 'apiErrorMessage').mockImplementation((err) => err.response.data.detail)
 
     mountPage('detail', { route: '/suppliers/999' })

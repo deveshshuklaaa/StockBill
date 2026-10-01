@@ -110,7 +110,19 @@ def _resolve_lines(*, line_items, supplier, tax_mode):
             raise serializers.ValidationError(
                 {"line_items": f"Quantity for {product.name} must be positive."}
             )
-        rate = Decimal(str(item.get("rate", 0) or 0))
+        rate_val = item.get("rate")
+        if rate_val is None or str(rate_val).strip() == "":
+            pricing = None
+            if product.mrp is not None:
+                pricing = supplier.purchase_pricings.filter(mrp=product.mrp, is_active=True).first()
+            if pricing:
+                rate = pricing.rate_per_piece
+            else:
+                raise serializers.ValidationError(
+                    {"line_items": f"Purchase rate is required for {product.name}."}
+                )
+        else:
+            rate = Decimal(str(rate_val))
         if rate < 0:
             raise serializers.ValidationError(
                 {"line_items": f"Rate for {product.name} cannot be negative."}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { fetchNextPurchaseNumber, fetchWarehouses, searchPurchaseProducts } from '../api/purchases'
-import { fetchActiveSuppliers } from '../api/suppliers'
+import { fetchActiveSuppliers, fetchSupplierPricing } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 
@@ -49,6 +49,7 @@ export default function NewPurchasePage() {
   const [supplierSearch, setSupplierSearch] = useState('')
   const [supplierResults, setSupplierResults] = useState([])
   const [supplierBusy, setSupplierBusy] = useState(false)
+  const [supplierPricingMap, setSupplierPricingMap] = useState({})
   const [invoiceDate, setInvoiceDate] = useState(today())
   const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('')
   const [warehouseId, setWarehouseId] = useState('')
@@ -91,6 +92,52 @@ export default function NewPurchasePage() {
     return () => { cancelled = true; clearTimeout(timer); setSupplierBusy(false) }
   }, [supplierSearch, supplier])
 
+  // Fetch supplier-wise purchase rates whenever supplier changes.
+  // Auto-fills configured rates for products that have not been manually overridden.
+  useEffect(() => {
+    if (!supplier?.id) {
+      setSupplierPricingMap({})
+      return undefined
+    }
+    let cancelled = false
+    fetchSupplierPricing(supplier.id, { isActive: 'true' })
+      .then((data) => {
+        if (cancelled) return
+        const map = {}
+        ;(data?.pricing || []).forEach((p) => {
+          if (p.is_active && p.mrp != null) {
+            map[Number(p.mrp).toFixed(2)] = Number(p.rate_per_piece)
+          }
+        })
+        setSupplierPricingMap(map)
+        // Refresh rates for lines that haven't been manually overridden
+        setLines((currentLines) =>
+          currentLines.map((line) => {
+            if (line.isManualRate) return line
+            const lineMrp = line.productData?.mrp != null ? Number(line.productData.mrp).toFixed(2) : null
+            if (lineMrp && map[lineMrp] !== undefined) {
+              return {
+                ...line,
+                rate: map[lineMrp],
+                hasSupplierPrice: true,
+              }
+            }
+            return {
+              ...line,
+              rate: '',
+              hasSupplierPrice: false,
+            }
+          })
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setSupplierPricingMap({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [supplier])
+
   useEffect(() => {
     let cancelled = false
     fetchNextPurchaseNumber(invoiceDate)
@@ -128,6 +175,13 @@ export default function NewPurchasePage() {
     if (existing) {
       updateLine(existing.key, 'quantity', Number(existing.quantity || 0) + 1)
     } else {
+      const productMrp = product.mrp != null ? Number(product.mrp).toFixed(2) : null
+      const supplierRate =
+        supplier?.id && productMrp && supplierPricingMap[productMrp] !== undefined
+          ? supplierPricingMap[productMrp]
+          : null
+      const hasSupplierPrice = supplierRate !== null
+
       setLines((current) => [...current, {
         key: product.id,
         product: product.id,
@@ -135,7 +189,9 @@ export default function NewPurchasePage() {
         quantity: 1,
         purchaseUnit: 'piece',
         conversionFactor: 1,
-        rate: '',
+        rate: hasSupplierPrice ? supplierRate : '',
+        hasSupplierPrice,
+        isManualRate: false,
         discountAmount: '',
         taxRate: Number(product.tax_rate) || 0,
       }])
@@ -147,6 +203,9 @@ export default function NewPurchasePage() {
     setLines((current) => current.map((line) => {
       if (line.key !== key) return line
       const next = { ...line, [field]: value }
+      if (field === 'rate') {
+        next.isManualRate = true
+      }
       if (field === 'purchaseUnit') {
         const box = masterBoxSize(line.productData)
         if (value === 'master box' && box) {
@@ -308,7 +367,28 @@ export default function NewPurchasePage() {
                   {box && <option value="master box">Master Box ({box} pcs)</option>}
                 </select></label>
                 <label>{isMasterBox ? 'Master Boxes' : 'Pieces'}<input type="number" min="0.001" step={isMasterBox ? '1' : '0.001'} value={line.quantity} onChange={(e) => updateLine(line.key, 'quantity', e.target.value)} placeholder={isMasterBox ? 'Boxes' : 'Pieces'} aria-label={`Quantity in ${isMasterBox ? 'master boxes' : 'pieces'} for ${line.productData.name}`} /></label>
-                <label>Purchase Rate (per Piece)<input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => updateLine(line.key, 'rate', e.target.value)} placeholder="₹ / piece" aria-label={`Purchase rate per piece for ${line.productData.name}`} /></label>
+                <label>
+                  Purchase Rate (per Piece)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={line.rate}
+                    onChange={(e) => updateLine(line.key, 'rate', e.target.value)}
+                    placeholder="₹ / piece"
+                    aria-label={`Purchase rate per piece for ${line.productData.name}`}
+                  />
+                  {line.hasSupplierPrice && !line.isManualRate && (
+                    <span style={{ fontSize: '0.72rem', color: '#047857', display: 'block', marginTop: 2, fontWeight: 500 }}>
+                      Supplier rate{line.productData?.mrp != null ? ` (MRP ₹${Number(line.productData.mrp).toFixed(2)})` : ''}: ₹{Number(line.rate).toFixed(2)}/pc
+                    </span>
+                  )}
+                  {line.isManualRate && line.hasSupplierPrice && (
+                    <span style={{ fontSize: '0.72rem', color: '#d97706', display: 'block', marginTop: 2, fontWeight: 500 }}>
+                      Manually overridden
+                    </span>
+                  )}
+                </label>
                 <label>Disc (₹)<input type="number" min="0" step="0.01" value={line.discountAmount} onChange={(e) => updateLine(line.key, 'discountAmount', e.target.value)} placeholder="0.00" aria-label={`Discount amount for ${line.productData.name}`} /></label>
                 <div className="line-tax" style={{ minWidth: 65, textAlign: 'center' }}>
                   <span>{calculated.taxRate}%</span>

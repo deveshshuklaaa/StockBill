@@ -20,6 +20,7 @@ from .models import (
     StockAdjustment,
     StockLedger,
     Supplier,
+    SupplierPurchasePricing,
     TaxRate,
     Warehouse,
     WarehouseTransfer,
@@ -189,6 +190,63 @@ class SupplierSerializer(serializers.ModelSerializer):
                 "State code must be numeric, e.g. 27 for Maharashtra."
             )
         return value
+
+
+class SupplierPurchasePricingSerializer(serializers.ModelSerializer):
+    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+
+    class Meta:
+        model = SupplierPurchasePricing
+        fields = [
+            "id",
+            "supplier",
+            "supplier_name",
+            "mrp",
+            "rate_per_piece",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "supplier_name",
+            "created_at",
+            "updated_at",
+        ]
+        extra_kwargs = {
+            "supplier": {"required": False},
+            "mrp": {"required": False},
+        }
+
+    def validate_mrp(self, value):
+        if value is None or Decimal(str(value)) <= Decimal("0.00"):
+            raise serializers.ValidationError("MRP must be greater than 0.")
+        return value
+
+    def validate_rate_per_piece(self, value):
+        if value is None or Decimal(str(value)) <= Decimal("0.00"):
+            raise serializers.ValidationError("Rate per piece must be greater than 0.")
+        return value
+
+    def validate_supplier(self, value):
+        if value and not value.is_active:
+            raise serializers.ValidationError("Cannot configure pricing for an inactive supplier.")
+        return value
+
+    def validate(self, attrs):
+        supplier = attrs.get("supplier") or getattr(self.instance, "supplier", None)
+        mrp = attrs.get("mrp") or getattr(self.instance, "mrp", None)
+        if supplier and not supplier.is_active:
+            raise serializers.ValidationError({"supplier": ["Cannot configure pricing for an inactive supplier."]})
+        if supplier and mrp is not None:
+            qs = SupplierPurchasePricing.objects.filter(supplier=supplier, mrp=mrp)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {"mrp": [f"Pricing for MRP ₹{mrp} already exists for this supplier."]}
+                )
+        return attrs
 
 
 class WarehouseSerializer(serializers.ModelSerializer):
@@ -594,7 +652,9 @@ class PurchaseLineInputSerializer(serializers.Serializer):
     conversion_factor = serializers.DecimalField(
         max_digits=12, decimal_places=3, min_value=Decimal("0.001"), default=1
     )
-    rate = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    rate = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal("0"), required=False, allow_null=True
+    )
     discount_amount = serializers.DecimalField(
         max_digits=12, decimal_places=2, min_value=Decimal("0"), required=False, default=0
     )

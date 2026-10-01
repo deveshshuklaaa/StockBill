@@ -3,9 +3,12 @@ import { Link, useParams } from 'react-router-dom'
 import { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import {
   archiveSupplier,
+  deleteSupplierPricing,
   fetchSupplier,
+  fetchSupplierPricing,
   fetchSupplierPurchases,
   reactivateSupplier,
+  saveSupplierPricing,
   updateSupplier,
 } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
@@ -41,14 +44,103 @@ export default function SupplierDetailPage() {
     name: '', contact_info: '', gstin: '', address: '', state: '', state_code: '',
   })
 
+  // Supplier MRP Purchase Pricing state
+  const [pricingData, setPricingData] = useState(null)
+  const [pricingLoading, setPricingLoading] = useState(true)
+  const [pricingDrafts, setPricingDrafts] = useState({})
+  const [pricingSaving, setPricingSaving] = useState({})
+  const [pricingMsg, setPricingMsg] = useState('')
+  const [pricingError, setPricingError] = useState('')
+  const [showAddCustomSlab, setShowAddCustomSlab] = useState(false)
+  const [customMrp, setCustomMrp] = useState('')
+  const [customRate, setCustomRate] = useState('')
+
+  async function loadPricing() {
+    setPricingLoading(true)
+    try {
+      const data = await fetchSupplierPricing(id)
+      setPricingData(data)
+      const drafts = {}
+      ;(data?.pricing || []).forEach((p) => {
+        drafts[Number(p.mrp).toFixed(2)] = String(p.rate_per_piece)
+      })
+      setPricingDrafts(drafts)
+    } catch (err) {
+      setPricingError(apiErrorMessage(err))
+    } finally {
+      setPricingLoading(false)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
     setSupplier(null); setError(''); setShowForm(false); setPurchasePage(1)
     fetchSupplier(id)
-      .then((data) => { if (!cancelled) setSupplier(data) })
+      .then((data) => {
+        if (!cancelled) {
+          setSupplier(data)
+          loadPricing()
+        }
+      })
       .catch((err) => { if (!cancelled) setError(apiErrorMessage(err)) })
     return () => { cancelled = true }
   }, [id])
+
+  async function savePricingSlab(mrp, rateValue) {
+    const rateNum = Number(rateValue)
+    if (!rateNum || rateNum <= 0) {
+      setPricingError(`Please enter a valid rate greater than 0 for MRP ₹${Number(mrp).toFixed(2)}.`)
+      return
+    }
+    const mrpStr = Number(mrp).toFixed(2)
+    setPricingSaving((prev) => ({ ...prev, [mrpStr]: true }))
+    setPricingError('')
+    setPricingMsg('')
+    try {
+      await saveSupplierPricing(id, {
+        mrp: Number(mrp),
+        rate_per_piece: rateNum,
+      })
+      setPricingMsg(`Saved rate ₹${rateNum.toFixed(2)}/pc for MRP ₹${mrpStr}.`)
+      await loadPricing()
+    } catch (err) {
+      setPricingError(apiErrorMessage(err))
+    } finally {
+      setPricingSaving((prev) => ({ ...prev, [mrpStr]: false }))
+    }
+  }
+
+  async function removePricingSlab(pricingId, mrp) {
+    const mrpStr = Number(mrp).toFixed(2)
+    setPricingSaving((prev) => ({ ...prev, [mrpStr]: true }))
+    setPricingError('')
+    setPricingMsg('')
+    try {
+      await deleteSupplierPricing(id, pricingId)
+      setPricingMsg(`Removed pricing for MRP ₹${mrpStr}.`)
+      await loadPricing()
+    } catch (err) {
+      setPricingError(apiErrorMessage(err))
+    } finally {
+      setPricingSaving((prev) => ({ ...prev, [mrpStr]: false }))
+    }
+  }
+
+  async function addCustomSlab(e) {
+    e.preventDefault()
+    if (!customMrp || Number(customMrp) <= 0) {
+      setPricingError('Enter a valid MRP greater than 0.')
+      return
+    }
+    if (!customRate || Number(customRate) <= 0) {
+      setPricingError('Enter a valid purchase rate per piece greater than 0.')
+      return
+    }
+    await savePricingSlab(customMrp, customRate)
+    setCustomMrp('')
+    setCustomRate('')
+    setShowAddCustomSlab(false)
+  }
 
   // Purchase history is fetched server-scoped: ?supplier=<id> on the
   // existing purchase list endpoint, never filtered client-side.
@@ -70,10 +162,12 @@ export default function SupplierDetailPage() {
         if (err?.response?.status === 403) return
         setError(apiErrorMessage(err))
       })
-      .finally(() => { if (requestId === latestHistoryLoad.current) setPurchasesBusy(false) })
+      .finally(() => {
+        if (requestId === latestHistoryLoad.current) setPurchasesBusy(false)
+      })
   }, [id, purchasePage])
 
-  function beginEdit() {
+  function openEditForm() {
     setForm({
       name: supplier.name || '',
       contact_info: supplier.contact_info || '',
@@ -85,102 +179,421 @@ export default function SupplierDetailPage() {
     setShowForm(true)
   }
 
-  function change(event) {
-    const { name, value } = event.target
-    setForm((current) => ({ ...current, [name]: value }))
-  }
-
-  async function save(event) {
-    event.preventDefault(); setBusy(true); setError('')
+  async function submitUpdate(event) {
+    event.preventDefault()
+    if (!form.name.trim()) { setError('Supplier name is required.'); return }
+    setBusy(true); setError('')
     try {
       const updated = await updateSupplier(id, form)
-      setSupplier(updated); setShowForm(false)
-    } catch (err) { setError(apiErrorMessage(err)) }
-    finally { setBusy(false) }
+      setSupplier(updated)
+      setShowForm(false)
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    } finally { setBusy(false) }
   }
 
-  async function archive() {
-    if (!window.confirm(`Archive ${supplier.name}? Their purchase history is preserved and stays visible.`)) return
+  async function handleArchiveToggle() {
+    const actionLabel = supplier.is_active ? 'archive' : 'reactivate'
+    if (!window.confirm(`Are you sure you want to ${actionLabel} ${supplier.name}?`)) return
     setBusy(true); setError('')
     try {
-      await archiveSupplier(id)
-      const refreshed = await fetchSupplier(id)
-      setSupplier(refreshed)
-    } catch (err) { setError(apiForbiddenMessage(err, 'archive suppliers', 'archiving supplier')) }
-    finally { setBusy(false) }
-  }
-
-  async function reactivate() {
-    setBusy(true); setError('')
-    try {
-      const refreshed = await reactivateSupplier(id)
-      setSupplier(refreshed)
-    } catch (err) { setError(apiForbiddenMessage(err, 'reactivate suppliers', 'reactivating supplier')) }
-    finally { setBusy(false) }
+      const updated = supplier.is_active
+        ? await archiveSupplier(id)
+        : await reactivateSupplier(id)
+      setSupplier(updated)
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    } finally { setBusy(false) }
   }
 
   if (error && !supplier) return <section className="page-section"><StatusMessage>{error}</StatusMessage><Link className="quiet-button" to="/suppliers">Back to suppliers</Link></section>
   if (!supplier) return <section className="page-section"><div className="empty-state">Loading supplier...</div></section>
 
-  const purchaseTotalPages = Math.max(1, Math.ceil(purchaseTotal / 25))
+  const purchasePageSize = 25
+  const purchaseTotalPages = Math.max(1, Math.ceil(purchaseTotal / purchasePageSize))
 
   return <section className="page-section invoice-detail-page">
     <header className="detail-toolbar">
       <Link className="quiet-button" to="/suppliers">← Suppliers</Link>
-      {isAdmin && <div className="detail-actions">
-        {!supplier.is_active
-          ? <button className="primary-button" onClick={reactivate} disabled={busy}>{busy ? 'Reactivating...' : 'Reactivate supplier'}</button>
-          : <button className="quiet-button" style={{ color: 'var(--red)' }} onClick={archive} disabled={busy}>Archive supplier</button>}
-      </div>}
+      <div className="detail-actions">
+        {isAdmin && supplier.is_active && !showForm && (
+          <button className="secondary-button" onClick={openEditForm} disabled={busy}>Edit supplier</button>
+        )}
+        {isAdmin && (
+          <button className="quiet-button danger" onClick={handleArchiveToggle} disabled={busy}>
+            {supplier.is_active ? 'Archive supplier' : 'Reactivate supplier'}
+          </button>
+        )}
+      </div>
     </header>
+
     <StatusMessage>{error}</StatusMessage>
 
-    {showForm && isAdmin && <form className="record-form" onSubmit={save}>
-      <div className="form-heading"><div><p className="eyebrow">Edit record</p><h2>Update {supplier.name}</h2></div><button type="button" className="quiet-button" onClick={() => setShowForm(false)}>Close</button></div>
-      <div className="form-grid">
-        <label>Supplier name<input name="name" value={form.name} onChange={change} required aria-required="true" /></label>
-        <label>Phone / contact<input name="contact_info" value={form.contact_info} onChange={change} /></label>
-        <label>GSTIN<input name="gstin" value={form.gstin} onChange={change} placeholder="15-character GSTIN (optional)" /></label>
-        <label>State<input name="state" value={form.state} onChange={change} /></label>
-        <label>State code<input name="state_code" value={form.state_code} onChange={change} placeholder="e.g. 27" /></label>
-        <label className="full-width">Address<textarea name="address" value={form.address} onChange={change} rows={2} /></label>
-      </div>
-      <div className="form-actions">
-        <button type="button" className="quiet-button" onClick={() => setShowForm(false)}>Cancel</button>
-        <button className="primary-button" disabled={busy}>{busy ? 'Saving...' : 'Update supplier'}</button>
-      </div>
-    </form>}
+    {showForm && (
+      <form className="record-form" onSubmit={submitUpdate}>
+        <div className="form-heading">
+          <div>
+            <p className="eyebrow">Supplier Master</p>
+            <h2>Edit {supplier.name}</h2>
+          </div>
+        </div>
+        <div className="form-grid">
+          <label>
+            Supplier name
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+            />
+          </label>
+          <label>
+            Contact info
+            <input
+              value={form.contact_info}
+              onChange={(e) => setForm({ ...form, contact_info: e.target.value })}
+              placeholder="Phone, email, or contact person"
+            />
+          </label>
+          <label>
+            GSTIN
+            <input
+              value={form.gstin}
+              onChange={(e) => setForm({ ...form, gstin: e.target.value.toUpperCase() })}
+              placeholder="15-character GSTIN"
+              maxLength={15}
+            />
+          </label>
+          <label>
+            State
+            <input
+              value={form.state}
+              onChange={(e) => setForm({ ...form, state: e.target.value })}
+              placeholder="e.g. Maharashtra"
+            />
+          </label>
+          <label>
+            State code
+            <input
+              value={form.state_code}
+              onChange={(e) => setForm({ ...form, state_code: e.target.value })}
+              placeholder="2-digit code, e.g. 27"
+              maxLength={2}
+            />
+          </label>
+        </div>
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <label className="full-width">
+            Address
+            <textarea
+              rows={2}
+              value={form.address}
+              onChange={(e) => setForm({ ...form, address: e.target.value })}
+              placeholder="Registered business address"
+            />
+          </label>
+        </div>
+        <div className="form-actions">
+          <button type="button" className="quiet-button" onClick={() => setShowForm(false)} disabled={busy}>Cancel</button>
+          <button className="primary-button" disabled={busy}>{busy ? 'Saving...' : 'Save changes'}</button>
+        </div>
+      </form>
+    )}
 
-    <div className="print-sheet">
-      <div className="invoice-detail-head">
+    <div className="detail-card">
+      <div className="detail-header">
         <div>
-          <p className="eyebrow">Divya Enterprises / Supplier</p>
-          <h1>{supplier.name}</h1>
-          <p>Master record{supplier.created_at ? ` · added ${String(supplier.created_at).slice(0, 10)}` : ''}</p>
-        </div>
-        <div className="detail-status">
-          <span className={supplier.is_active ? 'tax-chip' : 'state-cancelled'}>{supplier.is_active ? 'Active' : 'Archived'}</span>
-          {isAdmin && <button className="text-button" style={{ marginTop: 8 }} onClick={beginEdit}>Edit supplier</button>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <h1 style={{ margin: 0 }}>{supplier.name}</h1>
+            <span className={supplier.is_active ? 'tax-chip' : 'type-chip'}>
+              {supplier.is_active ? 'Active' : 'Archived'}
+            </span>
+          </div>
+          <p className="field-help" style={{ margin: '6px 0 0' }}>
+            {supplier.state ? `${supplier.state}${supplier.state_code ? ` (Code: ${supplier.state_code})` : ''}` : 'No state specified'}
+          </p>
         </div>
       </div>
 
-      <div className="detail-parties">
+      <div className="detail-meta-grid">
+        <div>
+          <span>GSTIN</span>
+          <strong>{supplier.gstin ? <code>{supplier.gstin}</code> : 'Unregistered'}</strong>
+        </div>
         <div>
           <span>Contact</span>
           <strong>{supplier.contact_info || '—'}</strong>
         </div>
         <div>
-          <span>GSTIN</span>
-          <strong>{supplier.gstin || 'Unregistered'}</strong>
-        </div>
-        <div>
-          <span>State</span>
-          <strong>{supplier.state || '—'}{supplier.state_code ? ` (${supplier.state_code})` : ''}</strong>
+          <span>Total purchases</span>
+          <strong>{purchaseTotal}</strong>
         </div>
         <div>
           <span>Registered address</span>
           <strong className="address-cell">{supplier.address || '—'}</strong>
         </div>
+      </div>
+
+      {/* Supplier Purchase Pricing Section (MRP-based) */}
+      <div className="supplier-pricing-section" style={{ marginTop: '28px', borderTop: '1px solid #e5e7eb', paddingTop: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+          <div>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>Supplier Purchase Rates</h2>
+            <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.875rem' }}>
+              Configure default purchase rates per piece by MRP slab. Products sharing the same MRP automatically receive that rate on purchase entry.
+            </p>
+          </div>
+          {isAdmin && supplier.is_active && (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setShowAddCustomSlab((prev) => !prev)}
+              id="btn-toggle-add-pricing"
+            >
+              {showAddCustomSlab ? 'Close Custom Slab' : '+ Add Custom MRP Slab'}
+            </button>
+          )}
+        </div>
+
+        {pricingMsg && (
+          <div style={{ backgroundColor: '#ecfdf5', color: '#065f46', padding: '0.6rem 1rem', borderRadius: '6px', marginBottom: '12px', fontSize: '0.875rem' }}>
+            {pricingMsg}
+          </div>
+        )}
+        {pricingError && (
+          <div style={{ backgroundColor: '#fef2f2', color: '#991b1b', padding: '0.6rem 1rem', borderRadius: '6px', marginBottom: '12px', fontSize: '0.875rem' }}>
+            {pricingError}
+          </div>
+        )}
+
+        {/* Custom MRP Slab Form (Admin only) */}
+        {showAddCustomSlab && isAdmin && supplier.is_active && (
+          <form
+            onSubmit={addCustomSlab}
+            style={{
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'center',
+              padding: '14px',
+              backgroundColor: '#f9fafb',
+              border: '1px solid #e5e7eb',
+              borderRadius: '8px',
+              marginBottom: '16px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}>
+              MRP (₹):
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="e.g. 5.00"
+                value={customMrp}
+                onChange={(e) => setCustomMrp(e.target.value)}
+                style={{ width: '110px' }}
+                required
+                aria-label="Custom MRP"
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}>
+              Rate / Piece (₹):
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="e.g. 3.20"
+                value={customRate}
+                onChange={(e) => setCustomRate(e.target.value)}
+                style={{ width: '110px' }}
+                required
+                aria-label="Custom rate per piece"
+              />
+            </label>
+            <button
+              type="submit"
+              className="primary-button"
+              style={{ padding: '0.4rem 0.9rem' }}
+              id="btn-save-custom-slab"
+            >
+              Add Slab
+            </button>
+            <button
+              type="button"
+              className="quiet-button"
+              onClick={() => {
+                setShowAddCustomSlab(false)
+                setCustomMrp('')
+                setCustomRate('')
+              }}
+            >
+              Cancel
+            </button>
+          </form>
+        )}
+
+        {/* Pricing Table */}
+        {pricingLoading ? (
+          <div className="empty-state" style={{ padding: '1.5rem' }}>Loading supplier rates...</div>
+        ) : !pricingData ? null : (() => {
+          const configuredMap = new Map()
+          ;(pricingData.pricing || []).forEach((p) => {
+            configuredMap.set(Number(p.mrp).toFixed(2), p)
+          })
+
+          const allMrpSet = new Set(
+            (pricingData.available_mrps || []).map((m) => Number(m).toFixed(2))
+          )
+          ;(pricingData.pricing || []).forEach((p) => {
+            allMrpSet.add(Number(p.mrp).toFixed(2))
+          })
+
+          const sortedMrps = Array.from(allMrpSet).sort((a, b) => Number(a) - Number(b))
+
+          if (sortedMrps.length === 0) {
+            return (
+              <div className="empty-state" style={{ padding: '1.5rem' }}>
+                No active MRP slabs found in catalogue.
+              </div>
+            )
+          }
+
+          return (
+            <div className="table-scroll" style={{ border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: '140px' }}>MRP</th>
+                    <th style={{ width: '220px' }}>Rate / Piece (₹)</th>
+                    <th style={{ width: '130px' }}>Status</th>
+                    {isAdmin && <th style={{ textAlign: 'right', width: '180px' }}>Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedMrps.map((mrpStr) => {
+                    const existing = configuredMap.get(mrpStr)
+                    const draftRate =
+                      pricingDrafts[mrpStr] !== undefined
+                        ? pricingDrafts[mrpStr]
+                        : existing?.rate_per_piece || ''
+                    const isSaving = Boolean(pricingSaving[mrpStr])
+                    const isConfigured = Boolean(existing && existing.is_active)
+
+                    return (
+                      <tr key={mrpStr}>
+                        <td>
+                          <strong>₹{mrpStr}</strong>
+                        </td>
+                        <td>
+                          {isAdmin && supplier.is_active ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>₹</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                value={draftRate}
+                                onChange={(e) =>
+                                  setPricingDrafts((prev) => ({
+                                    ...prev,
+                                    [mrpStr]: e.target.value,
+                                  }))
+                                }
+                                placeholder="e.g. 3.20"
+                                style={{ width: '120px' }}
+                                aria-label={`Rate for MRP ₹${mrpStr}`}
+                              />
+                              <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>/ pc</span>
+                            </div>
+                          ) : (
+                            <span>
+                              {isConfigured ? (
+                                <strong>₹{Number(existing.rate_per_piece).toFixed(2)} / pc</strong>
+                              ) : (
+                                <span style={{ color: '#9ca3af' }}>Not configured</span>
+                              )}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {isConfigured ? (
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: '#ecfdf5',
+                                color: '#065f46',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                              }}
+                            >
+                              Configured
+                            </span>
+                          ) : existing && !existing.is_active ? (
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: '#fef2f2',
+                                color: '#991b1b',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                              }}
+                            >
+                              Inactive
+                            </span>
+                          ) : (
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: '#f3f4f6',
+                                color: '#6b7280',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                              }}
+                            >
+                              Not Set
+                            </span>
+                          )}
+                        </td>
+                        {isAdmin && (
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                              {supplier.is_active && (
+                                <button
+                                  type="button"
+                                  className="text-button"
+                                  disabled={isSaving}
+                                  onClick={() => savePricingSlab(mrpStr, draftRate)}
+                                  id={`btn-save-pricing-${mrpStr}`}
+                                >
+                                  {isSaving ? 'Saving...' : existing ? 'Update' : 'Save'}
+                                </button>
+                              )}
+                              {supplier.is_active && existing && (
+                                <button
+                                  type="button"
+                                  className="text-button danger"
+                                  disabled={isSaving}
+                                  onClick={() => removePricingSlab(existing.id, mrpStr)}
+                                  id={`btn-remove-pricing-${mrpStr}`}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
       </div>
 
       <p className="eyebrow" style={{ margin: '26px 0 12px' }}>Purchase history</p>
