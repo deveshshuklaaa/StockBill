@@ -85,6 +85,7 @@ from django.db.models import (
     When,
 )
 from django.db.models.functions import Coalesce
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -100,7 +101,8 @@ from inventory.models import (
     Supplier,
 )
 
-from .models import CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
+from .models import BusinessProfile, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
+from .tax_engine import round_inr
 
 MONEY_FIELD = DecimalField(max_digits=18, decimal_places=2)
 QUANTITY_FIELD = DecimalField(max_digits=18, decimal_places=3)
@@ -1043,3 +1045,324 @@ class DashboardReportView(APIView):
                 "top_products": list(top_products),
             }
         )
+
+
+def get_sales_gst_report_data(from_date, to_date):
+    """Authoritative invoice-level Sales GST Report data for POSTED invoices."""
+    invoices = (
+        Invoice.objects.filter(
+            state=Invoice.STATE_POSTED,
+            invoice_date__gte=from_date,
+            invoice_date__lte=to_date,
+        )
+        .annotate(
+            taxable_sum=Coalesce(
+                Sum("line_items__taxable_value_snapshot"),
+                Value(ZERO_MONEY),
+                output_field=MONEY_FIELD,
+            ),
+            tax_sum=Coalesce(
+                Sum("line_items__tax_amount"),
+                Value(ZERO_MONEY),
+                output_field=MONEY_FIELD,
+            ),
+        )
+        .order_by("invoice_date", "invoice_number")
+    )
+
+    ZERO = Decimal("0.00")
+    rows = []
+    tot_bill_amt = ZERO
+    tot_taxable = ZERO
+    tot_tax = ZERO
+    tot_r_off = ZERO
+
+    for inv in invoices:
+        display_bill_amt = round_inr(inv.total_amount).quantize(Decimal("0.01"))
+        taxable = (inv.taxable_sum or ZERO).quantize(Decimal("0.01"))
+        tax = (inv.tax_sum or ZERO).quantize(Decimal("0.01"))
+        sur = ZERO
+        tax_free = ZERO
+        exempted = ZERO
+        r_off = (display_bill_amt - (taxable + tax)).quantize(Decimal("0.01"))
+
+        tot_bill_amt += display_bill_amt
+        tot_taxable += taxable
+        tot_tax += tax
+        tot_r_off += r_off
+
+        rows.append({
+            "date": inv.invoice_date.strftime("%d-%m-%Y"),
+            "bill_no": inv.invoice_number,
+            "party_name": inv.customer_name_snapshot or "Walk-in customer",
+            "bill_amt": f"{display_bill_amt:.2f}",
+            "taxable": f"{taxable:.2f}",
+            "tax": f"{tax:.2f}",
+            "sur": f"{sur:.2f}",
+            "tax_free": f"{tax_free:.2f}",
+            "exempted": f"{exempted:.2f}",
+            "r_off": f"{r_off:.2f}",
+        })
+
+    seller = BusinessProfile.objects.first()
+    seller_info = {
+        "business_name": seller.business_name if seller else "DIVYA ENTERPRISES",
+        "gstin": seller.gstin if seller else "",
+    }
+
+    totals = {
+        "invoice_count": len(rows),
+        "bill_amt": f"{tot_bill_amt:.2f}",
+        "taxable": f"{tot_taxable:.2f}",
+        "tax": f"{tot_tax:.2f}",
+        "sur": "0.00",
+        "tax_free": "0.00",
+        "exempted": "0.00",
+        "r_off": f"{tot_r_off:.2f}",
+    }
+
+    return {
+        "from": from_date.isoformat(),
+        "to": to_date.isoformat(),
+        "seller": seller_info,
+        "columns": [
+            "DATE",
+            "BILL NO.",
+            "PARTY NAME",
+            "BILL AMT.",
+            "TAXABLE",
+            "TAX",
+            "SUR.",
+            "TAX FREE",
+            "EXEMPTED",
+            "R.OFF",
+        ],
+        "rows": rows,
+        "totals": totals,
+    }
+
+
+def build_sales_gst_report_xlsx(report_data):
+    """Generate professional Excel workbook (.xlsx) for Sales GST Report."""
+    import io
+    from datetime import datetime
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sales GST Report"
+
+    title_font = Font(name="Calibri", size=14, bold=True, color="1E382B")
+    subtitle_font = Font(name="Calibri", size=11, bold=True, color="2C4D3B")
+    meta_font = Font(name="Calibri", size=10, italic=True, color="55695E")
+    header_font = Font(name="Calibri", size=10, bold=True, color="1E382B")
+    header_fill = PatternFill(start_color="E6EFE9", end_color="E6EFE9", fill_type="solid")
+    data_font = Font(name="Calibri", size=10)
+    total_font = Font(name="Calibri", size=10, bold=True, color="1E382B")
+    total_fill = PatternFill(start_color="F2F6F3", end_color="F2F6F3", fill_type="solid")
+
+    thin_border = Border(
+        left=Side(style="thin", color="D4DED6"),
+        right=Side(style="thin", color="D4DED6"),
+        top=Side(style="thin", color="D4DED6"),
+        bottom=Side(style="thin", color="D4DED6"),
+    )
+    header_border = Border(
+        left=Side(style="thin", color="B0C4B8"),
+        right=Side(style="thin", color="B0C4B8"),
+        top=Side(style="medium", color="2C4D3B"),
+        bottom=Side(style="medium", color="2C4D3B"),
+    )
+    total_border = Border(
+        left=Side(style="thin", color="D4DED6"),
+        right=Side(style="thin", color="D4DED6"),
+        top=Side(style="thin", color="2C4D3B"),
+        bottom=Side(style="double", color="2C4D3B"),
+    )
+
+    seller = report_data.get("seller", {})
+    business_name = seller.get("business_name") or "DIVYA ENTERPRISES"
+    ws["A1"] = business_name
+    ws["A1"].font = title_font
+
+    ws["A2"] = "SALES GST REPORT"
+    ws["A2"].font = subtitle_font
+
+    from_iso = report_data.get("from", "")
+    to_iso = report_data.get("to", "")
+    from_fmt = ""
+    to_fmt = ""
+    try:
+        from_fmt = datetime.fromisoformat(from_iso).strftime("%d-%m-%Y")
+    except Exception:
+        from_fmt = from_iso
+    try:
+        to_fmt = datetime.fromisoformat(to_iso).strftime("%d-%m-%Y")
+    except Exception:
+        to_fmt = to_iso
+
+    ws["A3"] = f"Period: {from_fmt} to {to_fmt}"
+    ws["A3"].font = meta_font
+
+    headers = [
+        "DATE",
+        "BILL NO.",
+        "PARTY NAME",
+        "BILL AMT.",
+        "TAXABLE",
+        "TAX",
+        "SUR.",
+        "TAX FREE",
+        "EXEMPTED",
+        "R.OFF",
+    ]
+    header_row = 5
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=header_row, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = header_border
+        align = "right" if col_idx >= 4 else ("center" if col_idx in (1, 2) else "left")
+        cell.alignment = Alignment(horizontal=align, vertical="center", wrap_text=True)
+
+    rows = report_data.get("rows", [])
+    current_row = 6
+    num_fmt = "#,##0.00"
+
+    for r in rows:
+        c1 = ws.cell(row=current_row, column=1)
+        try:
+            d_val = datetime.strptime(r["date"], "%d-%m-%Y").date()
+            c1.value = d_val
+            c1.number_format = "DD-MM-YYYY"
+        except Exception:
+            c1.value = r.get("date", "")
+        c1.font = data_font
+        c1.border = thin_border
+        c1.alignment = Alignment(horizontal="center", vertical="center")
+
+        c2 = ws.cell(row=current_row, column=2, value=r.get("bill_no", ""))
+        c2.font = data_font
+        c2.border = thin_border
+        c2.alignment = Alignment(horizontal="center", vertical="center")
+
+        c3 = ws.cell(row=current_row, column=3, value=r.get("party_name", ""))
+        c3.font = data_font
+        c3.border = thin_border
+        c3.alignment = Alignment(horizontal="left", vertical="center")
+
+        num_keys = ["bill_amt", "taxable", "tax", "sur", "tax_free", "exempted", "r_off"]
+        for idx, key in enumerate(num_keys, 4):
+            val_str = r.get(key, "0.00")
+            c = ws.cell(row=current_row, column=idx, value=float(Decimal(str(val_str))))
+            c.font = data_font
+            c.border = thin_border
+            c.number_format = num_fmt
+            c.alignment = Alignment(horizontal="right", vertical="center")
+
+        current_row += 1
+
+    total_row = current_row
+    c_tot_label = ws.cell(row=total_row, column=1, value="TOTAL")
+    c_tot_label.font = total_font
+    c_tot_label.fill = total_fill
+    c_tot_label.border = total_border
+    c_tot_label.alignment = Alignment(horizontal="left", vertical="center")
+
+    for col_idx in (2, 3):
+        c = ws.cell(row=total_row, column=col_idx, value="")
+        c.font = total_font
+        c.fill = total_fill
+        c.border = total_border
+
+    totals = report_data.get("totals", {})
+    last_data_row = current_row - 1
+    num_cols = [
+        (4, "bill_amt"),
+        (5, "taxable"),
+        (6, "tax"),
+        (7, "sur"),
+        (8, "tax_free"),
+        (9, "exempted"),
+        (10, "r_off"),
+    ]
+
+    for col_idx, key in num_cols:
+        col_letter = get_column_letter(col_idx)
+        c = ws.cell(row=total_row, column=col_idx)
+        if len(rows) > 0:
+            c.value = f"=SUM({col_letter}6:{col_letter}{last_data_row})"
+        else:
+            c.value = float(Decimal(str(totals.get(key, "0.00"))))
+        c.font = total_font
+        c.fill = total_fill
+        c.border = total_border
+        c.number_format = num_fmt
+        c.alignment = Alignment(horizontal="right", vertical="center")
+
+    ws.freeze_panes = "A6"
+    if len(rows) > 0:
+        ws.auto_filter.ref = f"A5:J{last_data_row}"
+
+    col_widths = {
+        "A": 13,
+        "B": 16,
+        "C": 34,
+        "D": 15,
+        "E": 15,
+        "F": 13,
+        "G": 11,
+        "H": 11,
+        "I": 13,
+        "J": 11,
+    }
+    for col_letter, width in col_widths.items():
+        ws.column_dimensions[col_letter].width = width
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+class SalesGstReportView(APIView):
+    """Invoice-level Sales GST Report for POSTED invoices."""
+
+    permission_classes = [IsStaffUser]
+
+    def get(self, request):
+        try:
+            from_date, to_date = _date_range(request, required=True)
+        except ValueError as error:
+            return _bad_request(str(error))
+
+        data = get_sales_gst_report_data(from_date, to_date)
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class SalesGstReportExportView(APIView):
+    """Generate and download Excel (.xlsx) for the Sales GST Report."""
+
+    permission_classes = [IsStaffUser]
+
+    def get(self, request):
+        try:
+            from_date, to_date = _date_range(request, required=True)
+        except ValueError as error:
+            return _bad_request(str(error))
+
+        data = get_sales_gst_report_data(from_date, to_date)
+        xlsx_bytes = build_sales_gst_report_xlsx(data)
+
+        from_str = from_date.strftime("%Y%m%d")
+        to_str = to_date.strftime("%Y%m%d")
+        filename = f"sales-gst-report-{from_str}-{to_str}.xlsx"
+
+        response = HttpResponse(
+            xlsx_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

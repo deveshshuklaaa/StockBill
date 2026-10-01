@@ -24,6 +24,7 @@ import PurchasesPage from './pages/PurchasesPage'
 import PurchaseReportPage from './pages/reports/PurchaseReportPage'
 import CustomerSalesReportPage from './pages/reports/CustomerSalesReportPage'
 import SalesReportPage from './pages/reports/SalesReportPage'
+import SalesGstReportPage from './pages/reports/SalesGstReportPage'
 import StockLedgerPage from './pages/StockLedgerPage'
 import StockMovementReportPage from './pages/reports/StockMovementReportPage'
 import SupplierDetailPage from './pages/SupplierDetailPage'
@@ -51,6 +52,7 @@ function App() {
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/reports/sales" element={<SalesReportPage />} />
+      <Route path="/reports/sales-gst" element={<SalesGstReportPage />} />
       <Route path="/reports/purchases" element={<PurchaseReportPage />} />
       <Route path="/reports/inventory" element={<InventoryReportPage />} />
       <Route path="/reports/stock-movement" element={<StockMovementReportPage />} />

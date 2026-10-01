@@ -74,3 +74,29 @@ export async function fetchDashboard({ from, to } = {}) {
   const { data } = await api.get('/reports/dashboard/', { params })
   return data
 }
+
+export async function fetchSalesGstReport({ from, to }) {
+  const { data } = await api.get('/reports/sales-gst/', { params: { from, to } })
+  return data
+}
+
+export async function exportSalesGstReportXlsx({ from, to }) {
+  const response = await api.get('/reports/sales-gst/export/', {
+    params: { from, to },
+    responseType: 'blob',
+  })
+  const blob = new Blob([response.data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  const fromClean = (from || '').replace(/-/g, '')
+  const toClean = (to || '').replace(/-/g, '')
+  link.download = `sales-gst-report-${fromClean}-${toClean}.xlsx`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+  return blob
+}
