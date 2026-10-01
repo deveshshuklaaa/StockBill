@@ -70,6 +70,7 @@ All endpoints are read-only GET with IsAuthenticated; financial reports
 require admin via IsAdminUser, matching existing report policy.
 """
 
+from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -1066,6 +1067,21 @@ def get_sales_gst_report_data(from_date, to_date):
                 Value(ZERO_MONEY),
                 output_field=MONEY_FIELD,
             ),
+            sgst_sum=Coalesce(
+                Sum("line_items__sgst_amount"),
+                Value(ZERO_MONEY),
+                output_field=MONEY_FIELD,
+            ),
+            cgst_sum=Coalesce(
+                Sum("line_items__cgst_amount"),
+                Value(ZERO_MONEY),
+                output_field=MONEY_FIELD,
+            ),
+            igst_sum=Coalesce(
+                Sum("line_items__igst_amount"),
+                Value(ZERO_MONEY),
+                output_field=MONEY_FIELD,
+            ),
         )
         .order_by("invoice_date", "invoice_number")
     )
@@ -1075,12 +1091,35 @@ def get_sales_gst_report_data(from_date, to_date):
     tot_bill_amt = ZERO
     tot_taxable = ZERO
     tot_tax = ZERO
+    tot_sgst = ZERO
+    tot_cgst = ZERO
+    tot_igst = ZERO
+    tot_total_gst = ZERO
     tot_r_off = ZERO
+
+    # Pre-fetch authoritative line HSN snapshots
+    invoice_ids = [inv.id for inv in invoices]
+    hsn_map = defaultdict(list)
+    if invoice_ids:
+        line_hsns = (
+            InvoiceLineItem.objects.filter(invoice_id__in=invoice_ids)
+            .exclude(hsn_sac_snapshot="")
+            .values_list("invoice_id", "hsn_sac_snapshot")
+            .distinct()
+        )
+        for inv_id, hsn_val in line_hsns:
+            cleaned = str(hsn_val).strip()
+            if cleaned:
+                hsn_map[inv_id].append(cleaned)
 
     for inv in invoices:
         display_bill_amt = round_inr(inv.total_amount).quantize(Decimal("0.01"))
         taxable = (inv.taxable_sum or ZERO).quantize(Decimal("0.01"))
         tax = (inv.tax_sum or ZERO).quantize(Decimal("0.01"))
+        sgst = (inv.sgst_sum or ZERO).quantize(Decimal("0.01"))
+        cgst = (inv.cgst_sum or ZERO).quantize(Decimal("0.01"))
+        igst = (inv.igst_sum or ZERO).quantize(Decimal("0.01"))
+        total_gst = (sgst + cgst + igst).quantize(Decimal("0.01"))
         sur = ZERO
         tax_free = ZERO
         exempted = ZERO
@@ -1089,15 +1128,29 @@ def get_sales_gst_report_data(from_date, to_date):
         tot_bill_amt += display_bill_amt
         tot_taxable += taxable
         tot_tax += tax
+        tot_sgst += sgst
+        tot_cgst += cgst
+        tot_igst += igst
+        tot_total_gst += total_gst
         tot_r_off += r_off
+
+        raw_hsns = hsn_map.get(inv.id, [])
+        unique_hsns = sorted(set(raw_hsns))
+        hsn_str = ", ".join(unique_hsns)
 
         rows.append({
             "date": inv.invoice_date.strftime("%d-%m-%Y"),
             "bill_no": inv.invoice_number,
             "party_name": inv.customer_name_snapshot or "Walk-in customer",
+            "gstin": inv.customer_gstin_snapshot or "",
+            "hsn": hsn_str,
             "bill_amt": f"{display_bill_amt:.2f}",
             "taxable": f"{taxable:.2f}",
             "tax": f"{tax:.2f}",
+            "sgst": f"{sgst:.2f}",
+            "cgst": f"{cgst:.2f}",
+            "igst": f"{igst:.2f}",
+            "total_gst": f"{total_gst:.2f}",
             "sur": f"{sur:.2f}",
             "tax_free": f"{tax_free:.2f}",
             "exempted": f"{exempted:.2f}",
@@ -1115,6 +1168,10 @@ def get_sales_gst_report_data(from_date, to_date):
         "bill_amt": f"{tot_bill_amt:.2f}",
         "taxable": f"{tot_taxable:.2f}",
         "tax": f"{tot_tax:.2f}",
+        "sgst": f"{tot_sgst:.2f}",
+        "cgst": f"{tot_cgst:.2f}",
+        "igst": f"{tot_igst:.2f}",
+        "total_gst": f"{tot_total_gst:.2f}",
         "sur": "0.00",
         "tax_free": "0.00",
         "exempted": "0.00",
@@ -1129,9 +1186,15 @@ def get_sales_gst_report_data(from_date, to_date):
             "DATE",
             "BILL NO.",
             "PARTY NAME",
+            "GSTIN",
+            "HSN",
             "BILL AMT.",
             "TAXABLE",
             "TAX",
+            "SGST",
+            "CGST",
+            "IGST",
+            "TOTAL GST",
             "SUR.",
             "TAX FREE",
             "EXEMPTED",
@@ -1210,22 +1273,28 @@ def build_sales_gst_report_xlsx(report_data):
         "DATE",
         "BILL NO.",
         "PARTY NAME",
+        "GSTIN",
+        "HSN",
         "BILL AMT.",
         "TAXABLE",
         "TAX",
+        "SGST",
+        "CGST",
+        "IGST",
+        "TOTAL GST",
         "SUR.",
         "TAX FREE",
         "EXEMPTED",
         "R.OFF",
     ]
     header_row = 5
+    ws.row_dimensions[header_row].height = 24
     for col_idx, h in enumerate(headers, 1):
         cell = ws.cell(row=header_row, column=col_idx, value=h)
         cell.font = header_font
         cell.fill = header_fill
         cell.border = header_border
-        align = "right" if col_idx >= 4 else ("center" if col_idx in (1, 2) else "left")
-        cell.alignment = Alignment(horizontal=align, vertical="center", wrap_text=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=False)
 
     rows = report_data.get("rows", [])
     current_row = 6
@@ -1253,8 +1322,30 @@ def build_sales_gst_report_xlsx(report_data):
         c3.border = thin_border
         c3.alignment = Alignment(horizontal="left", vertical="center")
 
-        num_keys = ["bill_amt", "taxable", "tax", "sur", "tax_free", "exempted", "r_off"]
-        for idx, key in enumerate(num_keys, 4):
+        c4 = ws.cell(row=current_row, column=4, value=r.get("gstin", ""))
+        c4.font = data_font
+        c4.border = thin_border
+        c4.alignment = Alignment(horizontal="center", vertical="center")
+
+        c5 = ws.cell(row=current_row, column=5, value=r.get("hsn", ""))
+        c5.font = data_font
+        c5.border = thin_border
+        c5.alignment = Alignment(horizontal="center", vertical="center")
+
+        num_keys = [
+            "bill_amt",
+            "taxable",
+            "tax",
+            "sgst",
+            "cgst",
+            "igst",
+            "total_gst",
+            "sur",
+            "tax_free",
+            "exempted",
+            "r_off",
+        ]
+        for idx, key in enumerate(num_keys, 6):
             val_str = r.get(key, "0.00")
             c = ws.cell(row=current_row, column=idx, value=float(Decimal(str(val_str))))
             c.font = data_font
@@ -1271,7 +1362,7 @@ def build_sales_gst_report_xlsx(report_data):
     c_tot_label.border = total_border
     c_tot_label.alignment = Alignment(horizontal="left", vertical="center")
 
-    for col_idx in (2, 3):
+    for col_idx in range(2, 6):
         c = ws.cell(row=total_row, column=col_idx, value="")
         c.font = total_font
         c.fill = total_fill
@@ -1280,13 +1371,17 @@ def build_sales_gst_report_xlsx(report_data):
     totals = report_data.get("totals", {})
     last_data_row = current_row - 1
     num_cols = [
-        (4, "bill_amt"),
-        (5, "taxable"),
-        (6, "tax"),
-        (7, "sur"),
-        (8, "tax_free"),
-        (9, "exempted"),
-        (10, "r_off"),
+        (6, "bill_amt"),
+        (7, "taxable"),
+        (8, "tax"),
+        (9, "sgst"),
+        (10, "cgst"),
+        (11, "igst"),
+        (12, "total_gst"),
+        (13, "sur"),
+        (14, "tax_free"),
+        (15, "exempted"),
+        (16, "r_off"),
     ]
 
     for col_idx, key in num_cols:
@@ -1304,19 +1399,25 @@ def build_sales_gst_report_xlsx(report_data):
 
     ws.freeze_panes = "A6"
     if len(rows) > 0:
-        ws.auto_filter.ref = f"A5:J{last_data_row}"
+        ws.auto_filter.ref = f"A5:P{last_data_row}"
 
     col_widths = {
-        "A": 13,
-        "B": 16,
-        "C": 34,
-        "D": 15,
-        "E": 15,
-        "F": 13,
-        "G": 11,
-        "H": 11,
-        "I": 13,
-        "J": 11,
+        "A": 13,  # DATE
+        "B": 15,  # BILL NO.
+        "C": 32,  # PARTY NAME
+        "D": 18,  # GSTIN
+        "E": 14,  # HSN
+        "F": 14,  # BILL AMT.
+        "G": 14,  # TAXABLE
+        "H": 12,  # TAX
+        "I": 12,  # SGST
+        "J": 12,  # CGST
+        "K": 12,  # IGST
+        "L": 14,  # TOTAL GST
+        "M": 11,  # SUR.
+        "N": 12,  # TAX FREE
+        "O": 13,  # EXEMPTED
+        "P": 11,  # R.OFF
     }
     for col_letter, width in col_widths.items():
         ws.column_dimensions[col_letter].width = width

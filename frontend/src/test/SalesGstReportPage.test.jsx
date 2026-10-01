@@ -21,9 +21,15 @@ const SAMPLE_REPORT = {
     'DATE',
     'BILL NO.',
     'PARTY NAME',
+    'GSTIN',
+    'HSN',
     'BILL AMT.',
     'TAXABLE',
     'TAX',
+    'SGST',
+    'CGST',
+    'IGST',
+    'TOTAL GST',
     'SUR.',
     'TAX FREE',
     'EXEMPTED',
@@ -34,9 +40,15 @@ const SAMPLE_REPORT = {
       date: '10-08-2026',
       bill_no: 'A000001',
       party_name: 'NEW SAGAR STATIONERS',
+      gstin: '27AAAAA1111A1Z1',
+      hsn: '21069099',
       bill_amt: '2601.00',
       taxable: '2203.80',
       tax: '396.70',
+      sgst: '198.35',
+      cgst: '198.35',
+      igst: '0.00',
+      total_gst: '396.70',
       sur: '0.00',
       tax_free: '0.00',
       exempted: '0.00',
@@ -46,9 +58,15 @@ const SAMPLE_REPORT = {
       date: '12-08-2026',
       bill_no: 'A000002',
       party_name: 'HEMANT MADICAL',
+      gstin: '27BBBBB2222B1Z2',
+      hsn: '30049099',
       bill_amt: '625.00',
       taxable: '583.00',
       tax: '42.12',
+      sgst: '21.06',
+      cgst: '21.06',
+      igst: '0.00',
+      total_gst: '42.12',
       sur: '0.00',
       tax_free: '0.00',
       exempted: '0.00',
@@ -60,6 +78,10 @@ const SAMPLE_REPORT = {
     bill_amt: '3226.00',
     taxable: '2786.80',
     tax: '438.82',
+    sgst: '219.41',
+    cgst: '219.41',
+    igst: '0.00',
+    total_gst: '438.82',
     sur: '0.00',
     tax_free: '0.00',
     exempted: '0.00',
@@ -75,9 +97,15 @@ const EMPTY_REPORT = {
     'DATE',
     'BILL NO.',
     'PARTY NAME',
+    'GSTIN',
+    'HSN',
     'BILL AMT.',
     'TAXABLE',
     'TAX',
+    'SGST',
+    'CGST',
+    'IGST',
+    'TOTAL GST',
     'SUR.',
     'TAX FREE',
     'EXEMPTED',
@@ -89,6 +117,10 @@ const EMPTY_REPORT = {
     bill_amt: '0.00',
     taxable: '0.00',
     tax: '0.00',
+    sgst: '0.00',
+    cgst: '0.00',
+    igst: '0.00',
+    total_gst: '0.00',
     sur: '0.00',
     tax_free: '0.00',
     exempted: '0.00',
@@ -141,36 +173,47 @@ describe('SalesGstReportPage', () => {
     })
   })
 
-  it('3. renders correct 10-column table and exact row values', async () => {
+  it('3. renders correct 16-column table and exact row values', async () => {
     vi.spyOn(reportsApi, 'fetchSalesGstReport').mockResolvedValue(SAMPLE_REPORT)
     mount()
 
     // Wait for data to arrive
     await screen.findAllByText('NEW SAGAR STATIONERS')
 
-    // Verify all 10 headers exist
+    // Verify all 16 headers exist
     expect(screen.getAllByText('DATE').length).toBeGreaterThan(0)
     expect(screen.getAllByText('BILL NO.').length).toBeGreaterThan(0)
     expect(screen.getAllByText('PARTY NAME').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('GSTIN').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('HSN').length).toBeGreaterThan(0)
     expect(screen.getAllByText('BILL AMT.').length).toBeGreaterThan(0)
     expect(screen.getAllByText('TAXABLE').length).toBeGreaterThan(0)
     expect(screen.getAllByText('TAX').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('SGST').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('CGST').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('IGST').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('TOTAL GST').length).toBeGreaterThan(0)
     expect(screen.getAllByText('SUR.').length).toBeGreaterThan(0)
     expect(screen.getAllByText('TAX FREE').length).toBeGreaterThan(0)
     expect(screen.getAllByText('EXEMPTED').length).toBeGreaterThan(0)
     expect(screen.getAllByText('R.OFF').length).toBeGreaterThan(0)
 
-    // Verify row 1 values
+    // Verify row 1 values including new GST fields
     expect(screen.getAllByText('A000001').length).toBeGreaterThan(0)
     expect(screen.getAllByText('10-08-2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('27AAAAA1111A1Z1').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('21069099').length).toBeGreaterThan(0)
     expect(screen.getAllByText('₹2,601.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('₹2,203.80').length).toBeGreaterThan(0)
     expect(screen.getAllByText('₹396.70').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('₹198.35').length).toBeGreaterThan(0)
     expect(screen.getAllByText('+0.50').length).toBeGreaterThan(0)
 
     // Verify row 2 values
     expect(screen.getAllByText('HEMANT MADICAL').length).toBeGreaterThan(0)
     expect(screen.getAllByText('A000002').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('27BBBBB2222B1Z2').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('30049099').length).toBeGreaterThan(0)
     expect(screen.getAllByText('12-08-2026').length).toBeGreaterThan(0)
     expect(screen.getAllByText('₹625.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('-0.12').length).toBeGreaterThan(0)
@@ -184,6 +227,7 @@ describe('SalesGstReportPage', () => {
     expect(screen.getAllByText('₹3,226.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('₹2,786.80').length).toBeGreaterThan(0)
     expect(screen.getAllByText('₹438.82').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('₹219.41').length).toBeGreaterThan(0)
     expect(screen.getAllByText('+0.38').length).toBeGreaterThan(0)
   })
 

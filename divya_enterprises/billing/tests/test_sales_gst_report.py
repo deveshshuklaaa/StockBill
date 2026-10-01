@@ -102,13 +102,14 @@ class SalesGstReportTests(APITestCase):
             current_stock=1000,
         )
 
-    def _create_direct_invoice(self, *, number, date_str, customer, state, total_amt, lines, customer_snapshot=None):
+    def _create_direct_invoice(self, *, number, date_str, customer, state, total_amt, lines, customer_snapshot=None, customer_gstin_snapshot=None):
         """Helper to create an invoice directly with exact line snapshots for deterministic testing."""
         inv_date = datetime.date.fromisoformat(date_str)
         inv = Invoice.objects.create(
             invoice_number=number,
             customer=customer,
             customer_name_snapshot=customer_snapshot if customer_snapshot is not None else (customer.name if customer else "Walk-in customer"),
+            customer_gstin_snapshot=customer_gstin_snapshot if customer_gstin_snapshot is not None else ((customer.gstin or "") if customer else ""),
             state=state,
             total_amount=Decimal(str(total_amt)),
             seller_business_name_snapshot=self.seller.business_name,
@@ -117,6 +118,9 @@ class SalesGstReportTests(APITestCase):
         Invoice.objects.filter(pk=inv.pk).update(invoice_date=inv_date)
         inv.refresh_from_db()
         for line in lines:
+            tax_val = Decimal(str(line.get("tax", "0.00")))
+            cgst_default = (tax_val / Decimal("2")).quantize(Decimal("0.01"))
+            sgst_default = tax_val - cgst_default
             InvoiceLineItem.objects.create(
                 invoice=inv,
                 product=line["product"],
@@ -125,15 +129,16 @@ class SalesGstReportTests(APITestCase):
                 taxable_value_snapshot=Decimal(str(line["taxable"])),
                 tax_rate=Decimal(str(line.get("tax_rate", 5.00))),
                 cgst_rate=Decimal(str(line.get("cgst_rate", 2.50))),
-                cgst_amount=Decimal(str(line.get("cgst", 0.00))),
+                cgst_amount=Decimal(str(line.get("cgst", cgst_default))),
                 sgst_rate=Decimal(str(line.get("sgst_rate", 2.50))),
-                sgst_amount=Decimal(str(line.get("sgst", 0.00))),
-                igst_rate=Decimal("0.00"),
-                igst_amount=Decimal("0.00"),
-                tax_amount=Decimal(str(line["tax"])),
+                sgst_amount=Decimal(str(line.get("sgst", sgst_default))),
+                igst_rate=Decimal(str(line.get("igst_rate", 0.00))),
+                igst_amount=Decimal(str(line.get("igst", 0.00))),
+                tax_amount=tax_val,
                 line_total=Decimal(str(line["line_total"])),
                 rate_charged=Decimal(str(line["taxable"])),
                 product_name_snapshot=line["product"].name,
+                hsn_sac_snapshot=line.get("hsn", "21069099"),
             )
         return inv
 
@@ -154,6 +159,7 @@ class SalesGstReportTests(APITestCase):
                     "cgst": "198.35",
                     "sgst": "198.35",
                     "line_total": "2600.50",
+                    "hsn": "21069099",
                 }
             ],
         )
@@ -164,13 +170,23 @@ class SalesGstReportTests(APITestCase):
         self.assertEqual(row["date"], "10-08-2026")
         self.assertEqual(row["bill_no"], "A000001")
         self.assertEqual(row["party_name"], "ALPHA ENTERPRISES")
+        self.assertEqual(row["gstin"], "27AAAAA1111A1Z1")
+        self.assertEqual(row["hsn"], "21069099")
         self.assertEqual(row["bill_amt"], "2601.00")
         self.assertEqual(row["taxable"], "2203.80")
         self.assertEqual(row["tax"], "396.70")
+        self.assertEqual(row["sgst"], "198.35")
+        self.assertEqual(row["cgst"], "198.35")
+        self.assertEqual(row["igst"], "0.00")
+        self.assertEqual(row["total_gst"], "396.70")
         self.assertEqual(row["sur"], "0.00")
         self.assertEqual(row["tax_free"], "0.00")
         self.assertEqual(row["exempted"], "0.00")
         self.assertEqual(row["r_off"], "0.50")
+        self.assertEqual(data["totals"]["sgst"], "198.35")
+        self.assertEqual(data["totals"]["cgst"], "198.35")
+        self.assertEqual(data["totals"]["igst"], "0.00")
+        self.assertEqual(data["totals"]["total_gst"], "396.70")
 
     def test_02_multiple_posted_invoices_and_granularity(self):
         """2 & 5. Multiple posted invoices produce exactly one row per invoice, sorted by date then bill number."""
@@ -553,30 +569,62 @@ class SalesGstReportTests(APITestCase):
         self.assertEqual(ws["A2"].value, "SALES GST REPORT")
         self.assertEqual(ws["A3"].value, "Period: 01-08-2026 to 31-08-2026")
 
-        # Check Row 5 headers
+        # Check Row 5 headers (16 columns, centered)
         expected_headers = [
-            "DATE", "BILL NO.", "PARTY NAME", "BILL AMT.", "TAXABLE", "TAX", "SUR.", "TAX FREE", "EXEMPTED", "R.OFF"
+            "DATE",
+            "BILL NO.",
+            "PARTY NAME",
+            "GSTIN",
+            "HSN",
+            "BILL AMT.",
+            "TAXABLE",
+            "TAX",
+            "SGST",
+            "CGST",
+            "IGST",
+            "TOTAL GST",
+            "SUR.",
+            "TAX FREE",
+            "EXEMPTED",
+            "R.OFF",
         ]
-        actual_headers = [ws.cell(row=5, column=col).value for col in range(1, 11)]
+        actual_headers = [ws.cell(row=5, column=col).value for col in range(1, 17)]
         self.assertEqual(actual_headers, expected_headers)
+
+        # Check header alignment (all centered horizontally & vertically)
+        for col in range(1, 17):
+            align = ws.cell(row=5, column=col).alignment
+            self.assertEqual(align.horizontal, "center")
+            self.assertEqual(align.vertical, "center")
 
         # Check Data Row 6
         self.assertEqual(ws.cell(row=6, column=2).value, "XL-001")
         self.assertEqual(ws.cell(row=6, column=3).value, "ALPHA ENTERPRISES")
-        self.assertEqual(ws.cell(row=6, column=4).value, 2601.00)
-        self.assertEqual(ws.cell(row=6, column=5).value, 2203.80)
-        self.assertEqual(ws.cell(row=6, column=6).value, 396.70)
-        self.assertEqual(ws.cell(row=6, column=10).value, 0.50)
+        self.assertEqual(ws.cell(row=6, column=4).value, "27AAAAA1111A1Z1")
+        self.assertEqual(ws.cell(row=6, column=5).value, "21069099")
+        self.assertEqual(ws.cell(row=6, column=6).value, 2601.00)
+        self.assertEqual(ws.cell(row=6, column=7).value, 2203.80)
+        self.assertEqual(ws.cell(row=6, column=8).value, 396.70)
+        self.assertEqual(ws.cell(row=6, column=9).value, 198.35)
+        self.assertEqual(ws.cell(row=6, column=10).value, 198.35)
+        self.assertEqual(ws.cell(row=6, column=11).value, 0.00)
+        self.assertEqual(ws.cell(row=6, column=12).value, 396.70)
+        self.assertEqual(ws.cell(row=6, column=16).value, 0.50)
 
-        # Check formatting of numbers
-        self.assertEqual(ws.cell(row=6, column=4).number_format, "#,##0.00")
+        # Check formatting of numbers (right-aligned, currency format)
+        self.assertEqual(ws.cell(row=6, column=6).number_format, "#,##0.00")
+        self.assertEqual(ws.cell(row=6, column=6).alignment.horizontal, "right")
 
         # Check Total Row (Row 7)
         self.assertEqual(ws.cell(row=7, column=1).value, "TOTAL")
-        self.assertEqual(ws.cell(row=7, column=4).value, "=SUM(D6:D6)")
-        self.assertEqual(ws.cell(row=7, column=5).value, "=SUM(E6:E6)")
         self.assertEqual(ws.cell(row=7, column=6).value, "=SUM(F6:F6)")
+        self.assertEqual(ws.cell(row=7, column=7).value, "=SUM(G6:G6)")
+        self.assertEqual(ws.cell(row=7, column=8).value, "=SUM(H6:H6)")
+        self.assertEqual(ws.cell(row=7, column=9).value, "=SUM(I6:I6)")
         self.assertEqual(ws.cell(row=7, column=10).value, "=SUM(J6:J6)")
+        self.assertEqual(ws.cell(row=7, column=11).value, "=SUM(K6:K6)")
+        self.assertEqual(ws.cell(row=7, column=12).value, "=SUM(L6:L6)")
+        self.assertEqual(ws.cell(row=7, column=16).value, "=SUM(P6:P6)")
 
     def test_33_report_and_print_data_consistency(self):
         """33. Report API data contains all required elements for browser and print rendering."""
@@ -599,7 +647,171 @@ class SalesGstReportTests(APITestCase):
         self.assertIn("seller", data)
         self.assertEqual(data["seller"]["business_name"], "DIVYA ENTERPRISES")
         self.assertEqual(data["columns"], [
-            "DATE", "BILL NO.", "PARTY NAME", "BILL AMT.", "TAXABLE", "TAX", "SUR.", "TAX FREE", "EXEMPTED", "R.OFF"
+            "DATE",
+            "BILL NO.",
+            "PARTY NAME",
+            "GSTIN",
+            "HSN",
+            "BILL AMT.",
+            "TAXABLE",
+            "TAX",
+            "SGST",
+            "CGST",
+            "IGST",
+            "TOTAL GST",
+            "SUR.",
+            "TAX FREE",
+            "EXEMPTED",
+            "R.OFF",
         ])
         self.assertEqual(len(data["rows"]), 1)
         self.assertEqual(data["totals"]["bill_amt"], "1000.00")
+
+    def test_34_gst_components_and_total_gst_math(self):
+        """34. SGST/CGST/IGST breakdown and TOTAL GST = SGST + CGST + IGST formula."""
+        # Inter-state invoice with IGST only
+        self._create_direct_invoice(
+            number="INTER-01",
+            date_str="2026-08-18",
+            customer=self.customer_alpha,
+            state=Invoice.STATE_POSTED,
+            total_amt="1180.00",
+            lines=[
+                {
+                    "product": self.product_nuts,
+                    "taxable": "1000.00",
+                    "tax": "180.00",
+                    "cgst": "0.00",
+                    "sgst": "0.00",
+                    "igst_rate": "18.00",
+                    "igst": "180.00",
+                    "line_total": "1180.00",
+                    "hsn": "20081990",
+                }
+            ],
+        )
+
+        data = get_sales_gst_report_data(datetime.date(2026, 8, 18), datetime.date(2026, 8, 18))
+        self.assertEqual(len(data["rows"]), 1)
+        row = data["rows"][0]
+        self.assertEqual(row["sgst"], "0.00")
+        self.assertEqual(row["cgst"], "0.00")
+        self.assertEqual(row["igst"], "180.00")
+        self.assertEqual(row["total_gst"], "180.00")
+        self.assertEqual(row["hsn"], "20081990")
+
+    def test_35_distinct_line_hsns_comma_separated(self):
+        """35. Multi-product invoice with distinct HSNs joins them sorted and comma-separated."""
+        self._create_direct_invoice(
+            number="MULTI-HSN",
+            date_str="2026-08-22",
+            customer=self.customer_alpha,
+            state=Invoice.STATE_POSTED,
+            total_amt="2000.00",
+            lines=[
+                {"product": self.product_chips, "taxable": "900.00", "tax": "100.00", "line_total": "1000.00", "hsn": "21069099"},
+                {"product": self.product_nuts, "taxable": "900.00", "tax": "100.00", "line_total": "1000.00", "hsn": "08013200"},
+            ],
+        )
+
+        data = get_sales_gst_report_data(datetime.date(2026, 8, 22), datetime.date(2026, 8, 22))
+        self.assertEqual(len(data["rows"]), 1)
+        row = data["rows"][0]
+        self.assertEqual(row["hsn"], "08013200, 21069099")
+
+    def test_36_historical_snapshot_immutability(self):
+        """36. Report values use snapshots; customer GSTIN edits do not mutate historical reports."""
+        self._create_direct_invoice(
+            number="HIST-01",
+            date_str="2026-08-24",
+            customer=self.customer_alpha,
+            customer_snapshot="ALPHA ORIGINAL NAME",
+            customer_gstin_snapshot="27ORIGINALGSTIN1Z",
+            state=Invoice.STATE_POSTED,
+            total_amt="500.00",
+            lines=[{"product": self.product_chips, "taxable": "476.19", "tax": "23.81", "line_total": "500.00", "hsn": "21069099"}],
+        )
+
+        # Mutate customer master record
+        self.customer_alpha.name = "ALPHA MODIFIED NAME"
+        self.customer_alpha.gstin = "27MODIFIEDGST1Z"
+        self.customer_alpha.save()
+
+        data = get_sales_gst_report_data(datetime.date(2026, 8, 24), datetime.date(2026, 8, 24))
+        self.assertEqual(len(data["rows"]), 1)
+        row = data["rows"][0]
+        self.assertEqual(row["party_name"], "ALPHA ORIGINAL NAME")
+        self.assertEqual(row["gstin"], "27ORIGINALGSTIN1Z")
+
+    def test_37_item_summary_excel_alignment_and_formatting(self):
+        """37. Item-wise summary Excel export has horizontally/vertically centered headers and proper widths."""
+        from billing.services import build_item_summary_xlsx
+
+        summary_data = {
+            "selected_invoice_numbers": ["INV-001", "INV-002"],
+            "total_products": 2,
+            "total_base_quantity": "50.000",
+            "items": [
+                {
+                    "product_id": 1,
+                    "product_name": "Yellow Banana Chips 200g",
+                    "sku": "YBC-200",
+                    "variant_summary": "Standard",
+                    "mrp": "50.00",
+                    "total_base_quantity": "30.000",
+                    "base_unit": "piece",
+                    "invoice_count": 2,
+                },
+                {
+                    "product_id": 2,
+                    "product_name": "Salted Peanuts 100g",
+                    "sku": "SPN-100",
+                    "variant_summary": "Standard",
+                    "mrp": "20.00",
+                    "total_base_quantity": "20.000",
+                    "base_unit": "piece",
+                    "invoice_count": 1,
+                },
+            ],
+        }
+
+        xlsx_bytes = build_item_summary_xlsx(summary_data)
+        wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+        self.assertIn("Item-wise Summary", wb.sheetnames)
+        ws = wb["Item-wise Summary"]
+
+        # Check headers (row 6)
+        expected_headers = [
+            "Product",
+            "SKU",
+            "Variant/Pack",
+            "MRP",
+            "Total Quantity",
+            "Base Unit",
+            "Invoice Count",
+        ]
+        actual_headers = [ws.cell(row=6, column=col).value for col in range(1, 8)]
+        self.assertEqual(actual_headers, expected_headers)
+
+        # All headers must be horizontally AND vertically centered
+        for col in range(1, 8):
+            align = ws.cell(row=6, column=col).alignment
+            self.assertEqual(align.horizontal, "center")
+            self.assertEqual(align.vertical, "center")
+            self.assertFalse(align.wrap_text)
+
+        # Check data row alignments and number formatting
+        row7_mrp = ws.cell(row=7, column=4)
+        self.assertEqual(row7_mrp.alignment.horizontal, "right")
+        self.assertEqual(row7_mrp.number_format, "#,##0.00")
+
+        row7_qty = ws.cell(row=7, column=5)
+        self.assertEqual(row7_qty.alignment.horizontal, "right")
+
+        row7_inv_count = ws.cell(row=7, column=7)
+        self.assertEqual(row7_inv_count.alignment.horizontal, "right")
+
+        # Check column dimensions
+        self.assertGreaterEqual(ws.column_dimensions["A"].width, 30)
+        self.assertGreaterEqual(ws.column_dimensions["E"].width, 16)
+        self.assertGreaterEqual(ws.column_dimensions["G"].width, 14)

@@ -1014,15 +1014,16 @@ def build_item_summary_xlsx(summary_data):
         "Invoice Count",
     ]
     header_row = 6
+    ws.row_dimensions[header_row].height = 24
     for col_idx, h in enumerate(headers, 1):
         cell = ws.cell(row=header_row, column=col_idx, value=h)
         cell.font = header_font
         cell.fill = header_fill
         cell.border = header_border
         cell.alignment = Alignment(
-            horizontal="right" if h in {"MRP", "Total Quantity", "Invoice Count"} else ("center" if h == "Base Unit" else "left"),
+            horizontal="center",
             vertical="center",
-            wrap_text=True,
+            wrap_text=False,
         )
 
     # 3. Data rows
@@ -1132,13 +1133,13 @@ def build_item_summary_xlsx(summary_data):
 
     # 7. Column Widths
     col_widths = {
-        "A": 32,
+        "A": 34,
         "B": 16,
-        "C": 30,
-        "D": 12,
+        "C": 24,
+        "D": 14,
         "E": 18,
-        "F": 12,
-        "G": 14,
+        "F": 14,
+        "G": 16,
     }
     for col_letter, width in col_widths.items():
         ws.column_dimensions[col_letter].width = width
