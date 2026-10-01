@@ -29,3 +29,23 @@ Thumbs.db
 
 # Runtime state store
 data/state_store.db/
+
+# Local backups and reference data
+divya_enterprises/pre_cleanup_backup.json
+divya_enterprises/pre_cleanup_products_snapshot.json
+divya_enterprises_sales_book_august_2026.csv
+
+# One-off data import, cleanup, and migration commands & data
+divya_enterprises/customers/management/commands/customer_master_data.py
+divya_enterprises/customers/management/commands/import_customer_master.py
+divya_enterprises/inventory/management/commands/clean_demo_business_data.py
+divya_enterprises/inventory/management/commands/import_chheda_purchases.py
+divya_enterprises/inventory/management/commands/set_all_products_brand_chheda.py
+divya_enterprises/inventory/management/commands/set_all_products_gst_5.py
+
+# One-off command test scripts
+divya_enterprises/customers/test_import_customer_master.py
+divya_enterprises/inventory/test_clean_demo_data.py
+divya_enterprises/inventory/test_import_chheda_purchases.py
+divya_enterprises/inventory/test_set_all_products_brand.py
+divya_enterprises/inventory/test_set_all_products_gst.py
