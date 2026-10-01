@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -261,9 +261,10 @@ describe('Item-wise Summary Frontend Feature', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
-    expect(screen.getByText('Item-wise Summary')).toBeInTheDocument()
-    expect(screen.getByText('INV-001, INV-002')).toBeInTheDocument()
-    expect(screen.getByText('Authoritative aggregation across all selected posted invoices. Quantities reflect base inventory units.')).toBeInTheDocument()
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('Item-wise Summary')).toBeInTheDocument()
+    expect(within(dialog).getByText('INV-001, INV-002')).toBeInTheDocument()
+    expect(within(dialog).getByText('Authoritative aggregation across all selected posted invoices. Quantities reflect base inventory units.')).toBeInTheDocument()
   })
 
   it('8. aggregates and renders product rows correctly with quantities and invoice counts', async () => {
@@ -278,19 +279,21 @@ describe('Item-wise Summary Frontend Feature', () => {
     await user.click(screen.getByRole('button', { name: /item-wise summary/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Yellow Banana Chips')).toBeInTheDocument()
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('Classic Salted')).toBeInTheDocument()
-    expect(screen.getByText('Manglori Mix')).toBeInTheDocument()
-    expect(screen.getByText('Tasty Nuts')).toBeInTheDocument()
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('Yellow Banana Chips')).toBeInTheDocument()
+    expect(within(dialog).getByText('Classic Salted')).toBeInTheDocument()
+    expect(within(dialog).getByText('Manglori Mix')).toBeInTheDocument()
+    expect(within(dialog).getByText('Tasty Nuts')).toBeInTheDocument()
 
     // 16 pcs for Yellow Banana Chips
-    expect(screen.getByText('16 pcs')).toBeInTheDocument()
+    expect(within(dialog).getByText('16 pcs')).toBeInTheDocument()
     // 38 pcs for Classic Salted
-    expect(screen.getByText('38 pcs')).toBeInTheDocument()
+    expect(within(dialog).getByText('38 pcs')).toBeInTheDocument()
     // 73 pcs total base quantity
-    expect(screen.getByText('73 pcs')).toBeInTheDocument()
+    expect(within(dialog).getByText('73 pcs')).toBeInTheDocument()
   })
 
   it('9. handles empty result and error state gracefully in modal', async () => {
@@ -398,12 +401,13 @@ describe('Item-wise Summary Frontend Feature', () => {
       expect(screen.getByRole('heading', { name: /Item-wise Summary/i })).toBeInTheDocument()
     })
 
-    expect(screen.getByText('DIVYA ENTERPRISES')).toBeInTheDocument()
-    expect(screen.getByText('INV-001, INV-002')).toBeInTheDocument()
-    expect(screen.getByText('Yellow Banana Chips')).toBeInTheDocument()
-    expect(screen.getByText('73 pcs')).toBeInTheDocument()
+    const printDoc = screen.getByTestId('item-summary-print-doc')
+    expect(within(printDoc).getByText('DIVYA ENTERPRISES')).toBeInTheDocument()
+    expect(within(printDoc).getByText('INV-001, INV-002')).toBeInTheDocument()
+    expect(within(printDoc).getByText('Yellow Banana Chips')).toBeInTheDocument()
+    expect(within(printDoc).getByText('73 pcs')).toBeInTheDocument()
     expect(
-      screen.getByText(/Authoritative aggregation across all selected posted invoices/i)
+      within(printDoc).getByText(/Authoritative aggregation across all selected posted invoices/i)
     ).toBeInTheDocument()
 
     const printBtn = screen.getByRole('button', { name: /Print item-wise summary/i })
@@ -441,5 +445,87 @@ describe('Item-wise Summary Frontend Feature', () => {
     await waitFor(() => {
       expect(exportSpy).toHaveBeenCalledWith([101, 102])
     })
+  })
+
+  it('14. multi-page print layout renders all 17+ products sequentially without repetition or controls', async () => {
+    const SEVENTEEN_PRODUCTS = Array.from({ length: 17 }, (_, i) => ({
+      product_id: 200 + i,
+      product_name: `Product Batch Item ${i + 1}`,
+      name: `Product Batch Item ${i + 1}`,
+      sku: `SKU-P${200 + i}`,
+      mrp: (15 + i * 2).toFixed(2),
+      base_unit: 'piece',
+      unit_type: 'piece',
+      total_base_quantity: `${(i + 1) * 10}.000`,
+      invoice_count: (i % 3) + 1,
+      variant_summary: `${100 + i * 10} g · MRP ₹${(15 + i * 2).toFixed(2)}`,
+      attributes: {},
+    }))
+
+    const MULTI_PAGE_SUMMARY = {
+      invoice_count: 5,
+      invoice_numbers: ['INV-001', 'INV-002', 'INV-003', 'INV-004', 'INV-005'],
+      total_products: 17,
+      total_base_quantity: '1530.000',
+      items: SEVENTEEN_PRODUCTS,
+    }
+
+    vi.spyOn(invoicesApi, 'fetchInvoiceItemSummary').mockResolvedValue(MULTI_PAGE_SUMMARY)
+
+    render(
+      <InvoiceItemSummaryModal
+        isOpen={true}
+        onClose={() => {}}
+        selectedIds={[101, 102, 103, 104, 105]}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('item-summary-print-doc')).toBeInTheDocument()
+    })
+
+    const printDoc = screen.getByTestId('item-summary-print-doc')
+
+    // 1. All 17 products appear exactly once in the printable document
+    SEVENTEEN_PRODUCTS.forEach((p) => {
+      const occurrences = within(printDoc).getAllByText(p.product_name)
+      expect(occurrences).toHaveLength(1)
+    })
+
+    // 2. Table rows remain in exact order with row numbers 1 to 17
+    const rows = printDoc.querySelectorAll('tbody tr')
+    expect(rows).toHaveLength(17)
+    rows.forEach((row, idx) => {
+      expect(row.cells[0].textContent.trim()).toBe(String(idx + 1))
+      expect(row.cells[1].textContent).toContain(SEVENTEEN_PRODUCTS[idx].product_name)
+      expect(row.cells[2].textContent).toBe(SEVENTEEN_PRODUCTS[idx].sku)
+      expect(row.cells[4].textContent).toBe(`₹${Number(SEVENTEEN_PRODUCTS[idx].mrp).toFixed(2)}`)
+    })
+
+    // 3. Totals appear exactly once in the footer
+    const footer = printDoc.querySelector('footer')
+    expect(within(footer).getByText('Total Products:')).toBeInTheDocument()
+    expect(within(footer).getByText('17')).toBeInTheDocument()
+    expect(within(footer).getByText('1,530 pcs')).toBeInTheDocument()
+
+    // 4. Header elements appear exactly once
+    expect(within(printDoc).getAllByText('DIVYA ENTERPRISES')).toHaveLength(1)
+    expect(within(printDoc).getAllByText('ITEM-WISE SUMMARY')).toHaveLength(1)
+
+    // 5. The print table uses table-header-group in styles for natural repeating
+    const table = printDoc.querySelector('table')
+    expect(table).toHaveClass('print-table')
+    expect(printDoc.querySelector('thead')).toBeInTheDocument()
+
+    // 6. No scrollbars or overflow styling on the print container or table
+    expect(printDoc.style.overflow).not.toBe('auto')
+    expect(printDoc.style.overflowY).not.toBe('auto')
+    expect(printDoc.style.maxHeight).toBe('')
+
+    // 7. No interactive modal controls or buttons exist inside the printable document
+    expect(printDoc.querySelectorAll('button')).toHaveLength(0)
+
+    // 8. Signature verification placeholder is present
+    expect(within(printDoc).getByText(/Verified By \/ Signature/i)).toBeInTheDocument()
   })
 })

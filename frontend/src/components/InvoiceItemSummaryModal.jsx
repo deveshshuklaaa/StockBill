@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiErrorMessage } from '../api/client'
 import { exportInvoiceItemSummaryXlsx, fetchInvoiceItemSummary } from '../api/invoices'
 import StatusMessage from './StatusMessage'
+import ItemSummaryPrintDocument from './ItemSummaryPrintDocument'
 import { formatQuantityWithUnit, formatStockWithBoxes } from '../utils/format'
 
 export default function InvoiceItemSummaryModal({ isOpen, onClose, selectedIds = [] }) {
@@ -70,54 +71,85 @@ export default function InvoiceItemSummaryModal({ isOpen, onClose, selectedIds =
   return (
     <>
       <style>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          .summary-printable-area, .summary-printable-area * {
-            visibility: visible;
-          }
-          .summary-printable-area {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 24px !important;
-            background: #ffffff !important;
-            box-shadow: none !important;
-            border: none !important;
-            display: block !important;
-          }
-          .no-print {
+        @media screen {
+          .printable-summary {
             display: none !important;
           }
-          .print-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 16px;
+        }
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 12mm;
           }
-          .print-table th, .print-table td {
-            border: 1px solid #c8d3cc;
-            padding: 8px 10px;
-            font-size: 12px;
+          html, body, #root, .app-shell, .main-content, .page-section {
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            display: block !important;
+            position: static !important;
           }
-          .print-table th {
+          .no-print,
+          .modal-backdrop,
+          .sidebar,
+          .page-header,
+          .table-frame,
+          .table-meta,
+          .filter-row,
+          .pager,
+          .detail-toolbar,
+          button {
+            display: none !important;
+          }
+          .printable-summary {
+            display: block !important;
+            width: 100% !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            position: static !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #111827 !important;
+          }
+          .printable-summary table {
+            width: 100% !important;
+            height: auto !important;
+            overflow: visible !important;
+            border-collapse: collapse !important;
+          }
+          .printable-summary thead {
+            display: table-header-group !important;
+          }
+          .printable-summary tbody {
+            display: table-row-group !important;
+          }
+          .printable-summary tr {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .printable-summary th,
+          .printable-summary td {
+            border: 1px solid #cbd5cd !important;
+            padding: 6px 8px !important;
+            font-size: 10pt !important;
+          }
+          .printable-summary th {
             background-color: #f2f6f3 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          .print-table thead {
-            display: table-header-group;
-          }
-          .print-table tr {
-            page-break-inside: avoid;
+            font-weight: 700 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
         }
       `}</style>
 
       <div
-        className="modal-backdrop"
+        className="modal-backdrop no-print"
         style={{
           position: 'fixed',
           inset: 0,
@@ -133,7 +165,7 @@ export default function InvoiceItemSummaryModal({ isOpen, onClose, selectedIds =
         aria-labelledby="summary-modal-title"
       >
         <div
-          className="modal-content summary-printable-area"
+          className="modal-content"
           style={{
             backgroundColor: '#fff',
             borderRadius: '8px',
@@ -153,10 +185,10 @@ export default function InvoiceItemSummaryModal({ isOpen, onClose, selectedIds =
           >
             <div>
               <p
-                className="company-print-title eyebrow"
-                style={{ margin: 0, color: '#274b38', fontWeight: 700, fontSize: '13px', letterSpacing: '0.05em' }}
+                className="eyebrow"
+                style={{ margin: 0, color: '#688073' }}
               >
-                DIVYA ENTERPRISES
+                Billing / Report
               </p>
               <h2
                 id="summary-modal-title"
@@ -350,6 +382,16 @@ export default function InvoiceItemSummaryModal({ isOpen, onClose, selectedIds =
           )}
         </div>
       </div>
+
+      {data && (
+        <ItemSummaryPrintDocument
+          items={items}
+          invoiceNumbers={invoiceNumbers}
+          invoiceCount={invoiceCount}
+          totalBaseQty={totalBaseQty}
+          generatedAt={generatedAt}
+        />
+      )}
     </>
   )
 }
