@@ -19,15 +19,24 @@ def get_default_warehouse():
 
 def ensure_inventory_balance(*, product, warehouse=None, created_by=None):
     warehouse = warehouse or get_default_warehouse()
+    balance = InventoryBalance.objects.filter(product=product, warehouse=warehouse).first()
+    if balance is not None:
+        return balance
+
+    is_default = (warehouse.code == DEFAULT_WAREHOUSE_CODE)
+    has_any_balance = InventoryBalance.objects.filter(product=product).exists()
+    bootstrap_stock = bool(is_default and not has_any_balance and product.current_stock)
+
+    defaults = {
+        "quantity_on_hand": (product.current_stock or Decimal("0.000")) if bootstrap_stock else Decimal("0.000"),
+        "average_cost": (product.cost_price or Decimal("0.00")) if bootstrap_stock else Decimal("0.00"),
+    }
     balance, created = InventoryBalance.objects.get_or_create(
         product=product,
         warehouse=warehouse,
-        defaults={
-            "quantity_on_hand": product.current_stock or Decimal("0.000"),
-            "average_cost": product.cost_price or Decimal("0.00"),
-        },
+        defaults=defaults,
     )
-    if created and product.current_stock:
+    if created and bootstrap_stock:
         StockLedger.objects.create(
             product=product,
             warehouse=warehouse,

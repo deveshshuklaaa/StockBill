@@ -807,3 +807,343 @@ def create_payment(*, customer, invoice, amount, actor, notes="", payment_method
     )
     AuditLog.objects.create(user=actor, action="payment_received", entity_type="Payment", entity_id=payment.pk)
     return payment
+
+
+def build_selected_invoices_item_summary(invoice_ids):
+    """Authoritative item-wise quantity summary of selected POSTED invoices.
+
+    Validates that invoice_ids is a non-empty list of integers.
+    Filters exclusively Invoice.STATE_POSTED invoices.
+    Aggregates base_quantity (base units/pieces) grouped by Product.id in ORM.
+    """
+    if not invoice_ids or not isinstance(invoice_ids, (list, tuple)):
+        raise serializers.ValidationError({"invoice_ids": ["A non-empty list of invoice IDs is required."]})
+
+    clean_ids = []
+    for item in invoice_ids:
+        try:
+            val = int(item)
+            clean_ids.append(val)
+        except (ValueError, TypeError):
+            raise serializers.ValidationError({"invoice_ids": ["All invoice IDs must be valid integers."]})
+
+    if not clean_ids:
+        raise serializers.ValidationError({"invoice_ids": ["A non-empty list of invoice IDs is required."]})
+
+    deduped_ids = list(dict.fromkeys(clean_ids))
+
+    posted_invoices = Invoice.objects.filter(
+        id__in=deduped_ids,
+        state=Invoice.STATE_POSTED,
+    ).order_by("invoice_number")
+
+    posted_ids = list(posted_invoices.values_list("id", flat=True))
+    invoice_numbers = list(posted_invoices.values_list("invoice_number", flat=True))
+
+    if not posted_ids:
+        return {
+            "selected_invoice_count": 0,
+            "invoice_count": 0,
+            "selected_invoice_numbers": [],
+            "invoice_numbers": [],
+            "total_products": 0,
+            "total_base_quantity": "0.000",
+            "items": [],
+        }
+
+    lines = InvoiceLineItem.objects.filter(
+        invoice_id__in=posted_ids,
+        invoice__state=Invoice.STATE_POSTED,
+    )
+
+    from django.db.models import Count, Max
+    from django.db.models.functions import Coalesce
+
+    rows = (
+        lines.values(
+            "product_id",
+            "product__name",
+            "product__sku",
+            "product__mrp",
+            "product__base_unit",
+            "product__unit_type",
+            "product__category",
+            "product__brand",
+        )
+        .annotate(
+            total_base_quantity=Coalesce(Sum("base_quantity"), Decimal("0.000")),
+            invoice_count=Count("invoice_id", distinct=True),
+            latest_mrp=Max("mrp_snapshot"),
+            latest_name_snapshot=Max("product_name_snapshot"),
+        )
+        .order_by("product__name", "product_id")
+    )
+
+    product_ids = [r["product_id"] for r in rows]
+    p_attrs = {}
+    for pav in (
+        ProductAttributeValue.objects.filter(product_id__in=product_ids)
+        .select_related("attribute_definition", "value_choice")
+    ):
+        if pav.product_id not in p_attrs:
+            p_attrs[pav.product_id] = {}
+        p_attrs[pav.product_id][pav.attribute_definition.code] = pav.typed_value()
+
+    items = []
+    grand_total_base = Decimal("0.000")
+    for r in rows:
+        pid = r["product_id"]
+        attrs = p_attrs.get(pid, {})
+        mrp = r["product__mrp"] if r["product__mrp"] is not None else r["latest_mrp"]
+        total_qty = r["total_base_quantity"] or Decimal("0.000")
+        grand_total_base += total_qty
+
+        variant_parts = []
+        net_weight = attrs.get("net_weight")
+        if net_weight:
+            try:
+                nw = float(net_weight)
+                if nw < 1:
+                    g = nw * 1000
+                    variant_parts.append(f"{int(g) if g.is_integer() else round(g, 1)} g")
+                else:
+                    variant_parts.append(f"{int(nw) if nw.is_integer() else round(nw, 3)} kg")
+            except (ValueError, TypeError):
+                variant_parts.append(str(net_weight))
+        if mrp is not None:
+            variant_parts.append(f"MRP ₹{Decimal(str(mrp)):.2f}")
+        if r["product__sku"]:
+            variant_parts.append(f"SKU: {r['product__sku']}")
+        if r["product__category"]:
+            variant_parts.append(r["product__category"])
+
+        prod_name = r["product__name"] or r["latest_name_snapshot"] or f"Product #{pid}"
+
+        items.append(
+            {
+                "product_id": pid,
+                "product_name": prod_name,
+                "name": prod_name,
+                "sku": r["product__sku"] or "",
+                "mrp": str(mrp) if mrp is not None else None,
+                "base_unit": r["product__base_unit"] or "piece",
+                "unit_type": r["product__unit_type"] or "piece",
+                "total_base_quantity": str(total_qty),
+                "invoice_count": r["invoice_count"],
+                "number_of_selected_invoices": r["invoice_count"],
+                "variant_summary": " · ".join(variant_parts),
+                "attributes": attrs,
+            }
+        )
+
+    return {
+        "selected_invoice_count": len(posted_ids),
+        "invoice_count": len(posted_ids),
+        "selected_invoice_numbers": invoice_numbers,
+        "invoice_numbers": invoice_numbers,
+        "total_products": len(items),
+        "total_base_quantity": str(grand_total_base),
+        "items": items,
+    }
+
+
+def build_item_summary_xlsx(summary_data):
+    """Generate professional Excel workbook for the item-wise summary."""
+    import io
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Item-wise Summary"
+
+    title_font = Font(name="Calibri", size=14, bold=True, color="1E382B")
+    subtitle_font = Font(name="Calibri", size=11, bold=True, color="2C4D3B")
+    meta_label_font = Font(name="Calibri", size=10, bold=True, color="55695E")
+    meta_val_font = Font(name="Calibri", size=10, bold=False, color="1E382B")
+    header_font = Font(name="Calibri", size=11, bold=True, color="1E382B")
+    header_fill = PatternFill(start_color="E6EFE9", end_color="E6EFE9", fill_type="solid")
+    data_font = Font(name="Calibri", size=10)
+    total_font = Font(name="Calibri", size=11, bold=True, color="1E382B")
+    total_fill = PatternFill(start_color="F2F6F3", end_color="F2F6F3", fill_type="solid")
+    note_font = Font(name="Calibri", size=9, italic=True, color="687E71")
+
+    thin_border = Border(
+        left=Side(style="thin", color="D4DED6"),
+        right=Side(style="thin", color="D4DED6"),
+        top=Side(style="thin", color="D4DED6"),
+        bottom=Side(style="thin", color="D4DED6"),
+    )
+    header_border = Border(
+        left=Side(style="thin", color="B0C4B8"),
+        right=Side(style="thin", color="B0C4B8"),
+        top=Side(style="medium", color="2C4D3B"),
+        bottom=Side(style="medium", color="2C4D3B"),
+    )
+    total_border = Border(
+        top=Side(style="thin", color="2C4D3B"),
+        bottom=Side(style="double", color="2C4D3B"),
+    )
+
+    # 1. Header block
+    ws["A1"] = "DIVYA ENTERPRISES"
+    ws["A1"].font = title_font
+
+    ws["A2"] = "ITEM-WISE SUMMARY OF SELECTED INVOICES"
+    ws["A2"].font = subtitle_font
+
+    inv_nums = summary_data.get("selected_invoice_numbers") or summary_data.get("invoice_numbers") or []
+    ws["A3"] = "Selected Invoices:"
+    ws["A3"].font = meta_label_font
+    ws["B3"] = ", ".join(inv_nums) if inv_nums else "None"
+    ws["B3"].font = meta_val_font
+
+    ws["A4"] = "Generated At:"
+    ws["A4"].font = meta_label_font
+    ws["B4"] = timezone.localtime().strftime("%Y-%m-%d %H:%M:%S")
+    ws["B4"].font = meta_val_font
+
+    # 2. Table Headers (Row 6)
+    headers = [
+        "Product",
+        "SKU",
+        "Variant/Pack",
+        "MRP",
+        "Total Quantity",
+        "Base Unit",
+        "Invoice Count",
+    ]
+    header_row = 6
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=header_row, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = header_border
+        cell.alignment = Alignment(
+            horizontal="right" if h in {"MRP", "Total Quantity", "Invoice Count"} else ("center" if h == "Base Unit" else "left"),
+            vertical="center",
+            wrap_text=True,
+        )
+
+    # 3. Data rows
+    items = summary_data.get("items", [])
+    current_row = header_row + 1
+    for item in items:
+        # Product
+        c1 = ws.cell(row=current_row, column=1, value=item.get("product_name") or item.get("name", ""))
+        c1.font = data_font
+        c1.border = thin_border
+        c1.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        # SKU
+        c2 = ws.cell(row=current_row, column=2, value=item.get("sku", ""))
+        c2.font = data_font
+        c2.border = thin_border
+        c2.alignment = Alignment(horizontal="left", vertical="center")
+
+        # Variant/Pack
+        c3 = ws.cell(row=current_row, column=3, value=item.get("variant_summary", ""))
+        c3.font = data_font
+        c3.border = thin_border
+        c3.alignment = Alignment(horizontal="left", vertical="center")
+
+        # MRP
+        mrp_raw = item.get("mrp")
+        mrp_val = float(mrp_raw) if mrp_raw is not None else None
+        c4 = ws.cell(row=current_row, column=4, value=mrp_val)
+        c4.font = data_font
+        c4.border = thin_border
+        c4.alignment = Alignment(horizontal="right", vertical="center")
+        if mrp_val is not None:
+            c4.number_format = "#,##0.00"
+
+        # Total Quantity (numeric)
+        qty_raw = item.get("total_base_quantity", "0")
+        qty_val = float(Decimal(str(qty_raw)))
+        c5 = ws.cell(row=current_row, column=5, value=qty_val)
+        c5.font = data_font
+        c5.border = thin_border
+        c5.alignment = Alignment(horizontal="right", vertical="center")
+        c5.number_format = "#,##0.000" if (qty_val % 1 != 0) else "#,##0"
+
+        # Base Unit
+        c6 = ws.cell(row=current_row, column=6, value=item.get("base_unit", "piece"))
+        c6.font = data_font
+        c6.border = thin_border
+        c6.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Invoice Count
+        inv_count_val = int(item.get("invoice_count", 0))
+        c7 = ws.cell(row=current_row, column=7, value=inv_count_val)
+        c7.font = data_font
+        c7.border = thin_border
+        c7.alignment = Alignment(horizontal="right", vertical="center")
+        c7.number_format = "#,##0"
+
+        current_row += 1
+
+    # 4. Totals Row
+    tot_row = current_row
+    ws.cell(row=tot_row, column=1, value="Total Products:").font = total_font
+    ws.cell(row=tot_row, column=1).alignment = Alignment(horizontal="left", vertical="center")
+    ws.cell(row=tot_row, column=1).fill = total_fill
+    ws.cell(row=tot_row, column=1).border = total_border
+
+    ws.cell(row=tot_row, column=2, value=int(summary_data.get("total_products", len(items)))).font = total_font
+    ws.cell(row=tot_row, column=2).alignment = Alignment(horizontal="left", vertical="center")
+    ws.cell(row=tot_row, column=2).fill = total_fill
+    ws.cell(row=tot_row, column=2).border = total_border
+
+    ws.cell(row=tot_row, column=3, value="Total Base Quantity:").font = total_font
+    ws.cell(row=tot_row, column=3).alignment = Alignment(horizontal="right", vertical="center")
+    ws.cell(row=tot_row, column=3).fill = total_fill
+    ws.cell(row=tot_row, column=3).border = total_border
+
+    ws.cell(row=tot_row, column=4, value="").fill = total_fill
+    ws.cell(row=tot_row, column=4).border = total_border
+
+    tot_qty_val = float(Decimal(str(summary_data.get("total_base_quantity", "0"))))
+    tot_qty_cell = ws.cell(row=tot_row, column=5, value=tot_qty_val)
+    tot_qty_cell.font = total_font
+    tot_qty_cell.fill = total_fill
+    tot_qty_cell.border = total_border
+    tot_qty_cell.alignment = Alignment(horizontal="right", vertical="center")
+    tot_qty_cell.number_format = "#,##0.000" if (tot_qty_val % 1 != 0) else "#,##0"
+
+    ws.cell(row=tot_row, column=6, value="piece").fill = total_fill
+    ws.cell(row=tot_row, column=6).border = total_border
+    ws.cell(row=tot_row, column=6).font = total_font
+    ws.cell(row=tot_row, column=6).alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.cell(row=tot_row, column=7, value="").fill = total_fill
+    ws.cell(row=tot_row, column=7).border = total_border
+
+    # 5. Footnote
+    note_cell = ws.cell(
+        row=tot_row + 2,
+        column=1,
+        value="Quantities are aggregated in base units across the selected posted invoices.",
+    )
+    note_cell.font = note_font
+
+    # 6. Autofilter and Freeze Panes
+    ws.auto_filter.ref = f"A{header_row}:G{max(header_row, current_row - 1)}"
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    # 7. Column Widths
+    col_widths = {
+        "A": 32,
+        "B": 16,
+        "C": 30,
+        "D": 12,
+        "E": 18,
+        "F": 12,
+        "G": 14,
+    }
+    for col_letter, width in col_widths.items():
+        ws.column_dimensions[col_letter].width = width
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()

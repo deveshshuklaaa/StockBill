@@ -6,6 +6,7 @@ from datetime import date
 from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
+from django.utils import timezone
 from django.utils.text import slugify
 from django.db import IntegrityError, transaction
 from rest_framework import generics, permissions, status
@@ -18,6 +19,8 @@ from .models import AuditLog, BusinessProfile, CreditNote, Invoice, InvoiceIdemp
 from .serializers import AuditLogSerializer, BusinessProfileSerializer, CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
 from .services import (
     amend_invoice,
+    build_item_summary_xlsx,
+    build_selected_invoices_item_summary,
     cancel_invoice,
     check_invoice_correction_eligibility,
     post_invoice,
@@ -477,137 +480,26 @@ class InvoiceItemSummaryView(APIView):
 
     def post(self, request):
         invoice_ids = request.data.get("invoice_ids")
-        if not invoice_ids or not isinstance(invoice_ids, (list, tuple)):
-            raise ValidationError({"invoice_ids": ["A non-empty list of invoice IDs is required."]})
+        summary_data = build_selected_invoices_item_summary(invoice_ids)
+        return Response(summary_data, status=status.HTTP_200_OK)
 
-        clean_ids = []
-        for item in invoice_ids:
-            try:
-                val = int(item)
-                clean_ids.append(val)
-            except (ValueError, TypeError):
-                raise ValidationError({"invoice_ids": ["All invoice IDs must be valid integers."]})
 
-        if not clean_ids:
-            raise ValidationError({"invoice_ids": ["A non-empty list of invoice IDs is required."]})
+class InvoiceItemSummaryExportView(APIView):
+    """Generate and download Excel (.xlsx) item-wise summary for selected POSTED invoices."""
 
-        deduped_ids = list(dict.fromkeys(clean_ids))
+    permission_classes = [permissions.IsAuthenticated, IsStaffUser]
 
-        posted_invoices = Invoice.objects.filter(
-            id__in=deduped_ids,
-            state=Invoice.STATE_POSTED,
-        ).order_by("invoice_number")
+    def post(self, request):
+        invoice_ids = request.data.get("invoice_ids")
+        summary_data = build_selected_invoices_item_summary(invoice_ids)
+        xlsx_bytes = build_item_summary_xlsx(summary_data)
 
-        posted_ids = list(posted_invoices.values_list("id", flat=True))
-        invoice_numbers = list(posted_invoices.values_list("invoice_number", flat=True))
+        date_str = timezone.localdate().strftime("%Y-%m-%d")
+        filename = f"StockBill_Item_Wise_Summary_{date_str}.xlsx"
 
-        if not posted_ids:
-            return Response(
-                {
-                    "selected_invoice_count": 0,
-                    "invoice_count": 0,
-                    "selected_invoice_numbers": [],
-                    "invoice_numbers": [],
-                    "total_products": 0,
-                    "total_base_quantity": "0.000",
-                    "items": [],
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        lines = InvoiceLineItem.objects.filter(
-            invoice_id__in=posted_ids,
-            invoice__state=Invoice.STATE_POSTED,
+        response = HttpResponse(
+            xlsx_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-
-        rows = (
-            lines.values(
-                "product_id",
-                "product__name",
-                "product__sku",
-                "product__mrp",
-                "product__base_unit",
-                "product__unit_type",
-                "product__category",
-                "product__brand",
-            )
-            .annotate(
-                total_base_quantity=Coalesce(Sum("base_quantity"), Decimal("0.000")),
-                invoice_count=Count("invoice_id", distinct=True),
-                latest_mrp=Max("mrp_snapshot"),
-                latest_name_snapshot=Max("product_name_snapshot"),
-            )
-            .order_by("product__name", "product_id")
-        )
-
-        from inventory.models import ProductAttributeValue
-
-        product_ids = [r["product_id"] for r in rows]
-        p_attrs = {}
-        for pav in (
-            ProductAttributeValue.objects.filter(product_id__in=product_ids)
-            .select_related("attribute_definition", "value_choice")
-        ):
-            if pav.product_id not in p_attrs:
-                p_attrs[pav.product_id] = {}
-            p_attrs[pav.product_id][pav.attribute_definition.code] = pav.typed_value()
-
-        items = []
-        grand_total_base = Decimal("0.000")
-        for r in rows:
-            pid = r["product_id"]
-            attrs = p_attrs.get(pid, {})
-            mrp = r["product__mrp"] if r["product__mrp"] is not None else r["latest_mrp"]
-            total_qty = r["total_base_quantity"] or Decimal("0.000")
-            grand_total_base += total_qty
-
-            variant_parts = []
-            net_weight = attrs.get("net_weight")
-            if net_weight:
-                try:
-                    nw = float(net_weight)
-                    if nw < 1:
-                        g = nw * 1000
-                        variant_parts.append(f"{int(g) if g.is_integer() else round(g, 1)} g")
-                    else:
-                        variant_parts.append(f"{int(nw) if nw.is_integer() else round(nw, 3)} kg")
-                except (ValueError, TypeError):
-                    variant_parts.append(str(net_weight))
-            if mrp is not None:
-                variant_parts.append(f"MRP ₹{Decimal(str(mrp)):.2f}")
-            if r["product__sku"]:
-                variant_parts.append(f"SKU: {r['product__sku']}")
-            if r["product__category"]:
-                variant_parts.append(r["product__category"])
-
-            prod_name = r["product__name"] or r["latest_name_snapshot"] or f"Product #{pid}"
-
-            items.append(
-                {
-                    "product_id": pid,
-                    "product_name": prod_name,
-                    "name": prod_name,
-                    "sku": r["product__sku"] or "",
-                    "mrp": str(mrp) if mrp is not None else None,
-                    "base_unit": r["product__base_unit"] or "piece",
-                    "unit_type": r["product__unit_type"] or "piece",
-                    "total_base_quantity": str(total_qty),
-                    "invoice_count": r["invoice_count"],
-                    "number_of_selected_invoices": r["invoice_count"],
-                    "variant_summary": " · ".join(variant_parts),
-                    "attributes": attrs,
-                }
-            )
-
-        return Response(
-            {
-                "selected_invoice_count": len(posted_ids),
-                "invoice_count": len(posted_ids),
-                "selected_invoice_numbers": invoice_numbers,
-                "invoice_numbers": invoice_numbers,
-                "total_products": len(items),
-                "total_base_quantity": str(grand_total_base),
-                "items": items,
-            },
-            status=status.HTTP_200_OK,
-        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

@@ -379,4 +379,67 @@ describe('Item-wise Summary Frontend Feature', () => {
     expect(cancelCheck).toBeDisabled()
     expect(draftCheck).toBeDisabled()
   })
+
+  it('12. renders Print button and printable report layout with authoritative data', async () => {
+    const user = userEvent.setup()
+    const printSpy = vi.spyOn(window, 'print').mockImplementation(() => {})
+    mountInvoicesPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('INV-001')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByLabelText('Select invoice INV-001'))
+    await user.click(screen.getByLabelText('Select invoice INV-002'))
+
+    await user.click(screen.getByRole('button', { name: /Item-wise Summary/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Item-wise Summary/i })).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('DIVYA ENTERPRISES')).toBeInTheDocument()
+    expect(screen.getByText('INV-001, INV-002')).toBeInTheDocument()
+    expect(screen.getByText('Yellow Banana Chips')).toBeInTheDocument()
+    expect(screen.getByText('73 pcs')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Authoritative aggregation across all selected posted invoices/i)
+    ).toBeInTheDocument()
+
+    const printBtn = screen.getByRole('button', { name: /Print item-wise summary/i })
+    expect(printBtn).toBeInTheDocument()
+    await user.click(printBtn)
+    expect(printSpy).toHaveBeenCalled()
+  })
+
+  it('13. renders Export Excel button and downloads authoritative XLSX file', async () => {
+    const user = userEvent.setup()
+    const exportSpy = vi
+      .spyOn(invoicesApi, 'exportInvoiceItemSummaryXlsx')
+      .mockResolvedValue(new Blob(['mock-xlsx']))
+
+    mountInvoicesPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('INV-001')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByLabelText('Select invoice INV-001'))
+    await user.click(screen.getByLabelText('Select invoice INV-002'))
+
+    await user.click(screen.getByRole('button', { name: /Item-wise Summary/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Item-wise Summary/i })).toBeInTheDocument()
+    })
+
+    const exportBtn = screen.getByRole('button', { name: /Export Excel/i })
+    expect(exportBtn).toBeInTheDocument()
+
+    await user.click(exportBtn)
+
+    await waitFor(() => {
+      expect(exportSpy).toHaveBeenCalledWith([101, 102])
+    })
+  })
 })

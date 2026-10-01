@@ -97,3 +97,24 @@ export async function fetchInvoiceItemSummary(invoiceIds) {
   return data
 }
 
+export async function exportInvoiceItemSummaryXlsx(invoiceIds) {
+  const response = await api.post(
+    '/invoices/item-summary/export/',
+    { invoice_ids: invoiceIds },
+    { responseType: 'blob' }
+  )
+  const blob = new Blob([response.data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  const today = new Date().toISOString().split('T')[0]
+  link.download = `StockBill_Item_Wise_Summary_${today}.xlsx`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+  return blob
+}
+

@@ -17,6 +17,7 @@ from .views import (
     PaymentReverseView,
     InvoiceDraftCreateView,
     InvoiceItemSummaryView,
+    InvoiceItemSummaryExportView,
     InvoicePostView,
 )
 from .reporting import DailySalesReportView, ProfitLossReportView, StockValuationReportView, TopProductsReportView
@@ -37,6 +38,7 @@ urlpatterns = [
     path("audit-logs/", AuditLogListView.as_view(), name="audit-log-list"),
     path("invoices/", InvoiceListCreateView.as_view(), name="invoice-list-create"),
     path("invoices/item-summary/", InvoiceItemSummaryView.as_view(), name="invoice-item-summary"),
+    path("invoices/item-summary/export/", InvoiceItemSummaryExportView.as_view(), name="invoice-item-summary-export"),
     path("invoices/drafts/", InvoiceDraftCreateView.as_view(), name="invoice-draft-create"),
     path("invoices/<int:pk>/", InvoiceDetailView.as_view(), name="invoice-detail"),
     path("invoices/<int:pk>/draft/", InvoiceDraftUpdateView.as_view(), name="invoice-draft-update"),

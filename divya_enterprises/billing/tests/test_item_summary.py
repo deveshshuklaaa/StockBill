@@ -610,3 +610,253 @@ class InvoiceItemSummaryTests(APITestCase):
             self.assertIn("variant_summary", item)
             self.assertIn("attributes", item)
 
+
+class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
+    """Authoritative tests for Selected Invoices Item-wise Summary Excel Export endpoint.
+
+    POST /api/invoices/item-summary/export/
+    """
+
+    def _open_wb(self, response_content):
+        import io
+        import openpyxl
+
+        return openpyxl.load_workbook(io.BytesIO(response_content), data_only=True)
+
+    def test_1_successful_xlsx_export(self):
+        """1. Successful XLSX export returns 200 and a readable workbook."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_2.id]},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        wb = self._open_wb(res.content)
+        self.assertIsNotNone(wb)
+
+    def test_2_correct_selected_invoice_count(self):
+        """2. Correct selected invoice count in summary and export."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_2.id]},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        invoices_str = ws["B3"].value
+        self.assertIn("INV-SUM-001", invoices_str)
+        self.assertIn("INV-SUM-002", invoices_str)
+
+    def test_3_correct_selected_invoice_numbers(self):
+        """3. Correct selected invoice numbers rendered in header cell."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id]},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        self.assertEqual(ws["B3"].value, "INV-SUM-001")
+
+    def test_4_correct_product_aggregation(self):
+        """4. Correct product aggregation across selected invoices."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_2.id]},
+            format="json",
+        )
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        # Read column A starting row 7
+        products = [ws.cell(row=r, column=1).value for r in range(7, 11)]
+        self.assertIn("Yellow Banana Chips", products)
+        self.assertIn("Classic Salted", products)
+        self.assertIn("Manglori Mix", products)
+        self.assertIn("Tasty Nuts", products)
+
+    def test_5_correct_base_quantity_aggregation(self):
+        """5. Authoritative base quantities match: Banana 16, Salted 38."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_2.id]},
+            format="json",
+        )
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        row_map = {}
+        for r in range(7, 11):
+            prod = ws.cell(row=r, column=1).value
+            qty = ws.cell(row=r, column=5).value
+            row_map[prod] = qty
+        self.assertEqual(row_map["Yellow Banana Chips"], 16.0)
+        self.assertEqual(row_map["Classic Salted"], 38.0)
+
+    def test_6_master_box_plus_piece_aggregation(self):
+        """6. Master Box + Piece aggregated into base quantity in pieces."""
+        client = self.client_as(self.staff)
+        # inv_4 has 2 master boxes of Banana (2 * 192 = 384 pcs)
+        # inv_1 has 4 pcs of Banana
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_3_box.id]},
+            format="json",
+        )
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        row_map = {}
+        for r in range(7, 12):
+            prod = ws.cell(row=r, column=1).value
+            qty = ws.cell(row=r, column=5).value
+            if prod:
+                row_map[prod] = qty
+        self.assertEqual(row_map["Yellow Banana Chips"], 388.0)
+
+    def test_7_draft_and_cancelled_exclusion(self):
+        """7. Draft and cancelled invoices excluded from export."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_draft.id, self.inv_cancelled.id]},
+            format="json",
+        )
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        invoices_str = ws["B3"].value
+        self.assertIn("INV-SUM-001", invoices_str)
+        self.assertNotIn("INV-SUM-DRAFT", invoices_str)
+        self.assertNotIn("INV-SUM-CANCELLED", invoices_str)
+
+    def test_8_unauthorized_invoice_handling(self):
+        """8. Anonymous and non-staff requests are rejected with 401/403."""
+        anon_client = self.client_as(None)
+        res = anon_client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id]},
+            format="json",
+        )
+        self.assertIn(res.status_code, {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN})
+
+        customer_client = self.client_as(self.unauthorized_user)
+        res2 = customer_client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id]},
+            format="json",
+        )
+        self.assertEqual(res2.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_9_duplicate_invoice_ids(self):
+        """9. Duplicate invoice IDs are safely deduplicated."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_1.id, self.inv_1.id]},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        self.assertEqual(ws["B3"].value, "INV-SUM-001")
+
+    def test_10_correct_invoice_count_per_product(self):
+        """10. Correct invoice count per product in column 7."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_2.id]},
+            format="json",
+        )
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        inv_counts = {}
+        for r in range(7, 11):
+            prod = ws.cell(row=r, column=1).value
+            cnt = ws.cell(row=r, column=7).value
+            inv_counts[prod] = cnt
+        self.assertEqual(inv_counts["Yellow Banana Chips"], 2)
+        self.assertEqual(inv_counts["Classic Salted"], 2)
+        self.assertEqual(inv_counts["Manglori Mix"], 1)
+        self.assertEqual(inv_counts["Tasty Nuts"], 1)
+
+    def test_11_correct_xlsx_headers(self):
+        """11. Correct XLSX table headers on row 6."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id]},
+            format="json",
+        )
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        expected = [
+            "Product",
+            "SKU",
+            "Variant/Pack",
+            "MRP",
+            "Total Quantity",
+            "Base Unit",
+            "Invoice Count",
+        ]
+        actual = [ws.cell(row=6, column=c).value for c in range(1, 8)]
+        self.assertEqual(actual, expected)
+
+    def test_12_correct_worksheet_title(self):
+        """12. Correct worksheet title is 'Item-wise Summary'."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id]},
+            format="json",
+        )
+        wb = self._open_wb(res.content)
+        self.assertIn("Item-wise Summary", wb.sheetnames)
+
+    def test_13_correct_rows_and_totals(self):
+        """13. Correct total products and total base quantity in totals row."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id, self.inv_2.id]},
+            format="json",
+        )
+        wb = self._open_wb(res.content)
+        ws = wb.active
+        # Row 11 is Totals row (4 items on rows 7, 8, 9, 10)
+        tot_row = 11
+        self.assertEqual(ws.cell(row=tot_row, column=1).value, "Total Products:")
+        self.assertEqual(ws.cell(row=tot_row, column=2).value, 4)
+        self.assertEqual(ws.cell(row=tot_row, column=3).value, "Total Base Quantity:")
+        self.assertEqual(ws.cell(row=tot_row, column=5).value, 73.0)
+
+    def test_14_content_type(self):
+        """14. Content-Type is openxmlformats sheet."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id]},
+            format="json",
+        )
+        self.assertEqual(
+            res["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def test_15_xlsx_attachment_filename(self):
+        """15. Content-Disposition has attachment filename ending in .xlsx."""
+        client = self.client_as(self.staff)
+        res = client.post(
+            "/api/invoices/item-summary/export/",
+            {"invoice_ids": [self.inv_1.id]},
+            format="json",
+        )
+        disp = res["Content-Disposition"]
+        self.assertIn("attachment; filename=", disp)
+        self.assertTrue(disp.endswith('.xlsx"'))
+        self.assertIn("StockBill_Item_Wise_Summary_", disp)
+

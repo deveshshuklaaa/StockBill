@@ -345,6 +345,8 @@ class StockLedger(models.Model):
     TRANSFER_OUT = "TRANSFER_OUT"
     STOCK_ADJUSTMENT_IN = "STOCK_ADJUSTMENT_IN"
     STOCK_ADJUSTMENT_OUT = "STOCK_ADJUSTMENT_OUT"
+    WAREHOUSE_TRANSFER_IN = "WAREHOUSE_TRANSFER_IN"
+    WAREHOUSE_TRANSFER_OUT = "WAREHOUSE_TRANSFER_OUT"
     MOVEMENT_CHOICES = [
         (value, value.replace("_", " ").title())
         for value in [
@@ -361,6 +363,8 @@ class StockLedger(models.Model):
             TRANSFER_OUT,
             STOCK_ADJUSTMENT_IN,
             STOCK_ADJUSTMENT_OUT,
+            WAREHOUSE_TRANSFER_IN,
+            WAREHOUSE_TRANSFER_OUT,
         ]
     ]
     product = models.ForeignKey(
@@ -926,3 +930,132 @@ class OpeningStockIdempotencyKey(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("Opening stock idempotency keys cannot be deleted.")
+
+
+class WarehouseTransfer(models.Model):
+    """Inter-warehouse atomic stock transfer.
+
+    Transfers stock between two active warehouses without changing the business's total inventory.
+    Records are append-only and strictly immutable once created.
+    """
+
+    UNIT_PIECE = "piece"
+    UNIT_MASTER_BOX = "master box"
+    UNIT_CHOICES = [
+        (UNIT_PIECE, "Piece"),
+        (UNIT_MASTER_BOX, "Master Box"),
+    ]
+
+    REASON_REPLENISHMENT = "Stock Replenishment"
+    REASON_INTER_BRANCH = "Inter-branch Transfer"
+    REASON_ORDER_FULFILLMENT = "Order Fulfillment"
+    REASON_REBALANCING = "Excess Stock Rebalancing"
+    REASON_OTHER = "Other"
+
+    REASON_CHOICES = [
+        (REASON_REPLENISHMENT, "Stock Replenishment"),
+        (REASON_INTER_BRANCH, "Inter-branch Transfer"),
+        (REASON_ORDER_FULFILLMENT, "Order Fulfillment"),
+        (REASON_REBALANCING, "Excess Stock Rebalancing"),
+        (REASON_OTHER, "Other"),
+    ]
+
+    transfer_number = models.CharField(max_length=50, unique=True)
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="transfers"
+    )
+    source_warehouse = models.ForeignKey(
+        Warehouse, on_delete=models.PROTECT, related_name="transfers_out"
+    )
+    destination_warehouse = models.ForeignKey(
+        Warehouse, on_delete=models.PROTECT, related_name="transfers_in"
+    )
+    quantity = models.DecimalField(
+        max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))]
+    )
+    unit = models.CharField(max_length=50, choices=UNIT_CHOICES, default=UNIT_PIECE)
+    conversion_factor = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        default=1,
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+    base_quantity = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+    unit_cost_snapshot = models.DecimalField(
+        max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))]
+    )
+    transfer_value = models.DecimalField(
+        max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))]
+    )
+    reason = models.CharField(max_length=100)
+    note = models.TextField(blank=True)
+    effective_date = models.DateField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_warehouse_transfers",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                check=~models.Q(source_warehouse=models.F("destination_warehouse")),
+                name="different_transfer_warehouses",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["product", "source_warehouse", "-effective_date"]),
+            models.Index(fields=["product", "destination_warehouse", "-effective_date"]),
+            models.Index(fields=["-effective_date"]),
+            models.Index(fields=["-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.transfer_number}: {self.product.name} ({self.base_quantity} pcs) {self.source_warehouse.code} -> {self.destination_warehouse.code}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError(
+                "Warehouse transfers are append-only historical records and cannot be edited."
+            )
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Warehouse transfers cannot be deleted.")
+
+
+class WarehouseTransferNumberCounter(models.Model):
+    """One row per financial year; serializes WarehouseTransfer number assignment."""
+
+    fy_code = models.CharField(max_length=10, unique=True)
+    last_serial = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Transfer number counters cannot be deleted.")
+
+
+class WarehouseTransferIdempotencyKey(models.Model):
+    key = models.CharField(max_length=255, unique=True)
+    request_hash = models.CharField(max_length=64, default="")
+    transfer = models.OneToOneField(
+        WarehouseTransfer, on_delete=models.PROTECT, related_name="idempotency_record"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Warehouse transfer idempotency keys are append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Warehouse transfer idempotency keys cannot be deleted.")

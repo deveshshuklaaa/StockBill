@@ -35,6 +35,9 @@ from .views import (
     WarehouseDetailView,
     WarehouseListCreateView,
     WarehouseSummaryView,
+    WarehouseTransferDetailView,
+    WarehouseTransferListCreateView,
+    WarehouseTransferNextNumberView,
 )
 
 urlpatterns = [
@@ -202,5 +205,35 @@ urlpatterns = [
         "opening-stock/<int:pk>/",
         OpeningStockDetailView.as_view(),
         name="opening-stock-detail-alias",
+    ),
+    path(
+        "inventory/transfers/",
+        WarehouseTransferListCreateView.as_view(),
+        name="warehouse-transfer-list-create",
+    ),
+    path(
+        "inventory/transfers/next-number/",
+        WarehouseTransferNextNumberView.as_view(),
+        name="warehouse-transfer-next-number",
+    ),
+    path(
+        "inventory/transfers/<int:pk>/",
+        WarehouseTransferDetailView.as_view(),
+        name="warehouse-transfer-detail",
+    ),
+    path(
+        "transfers/",
+        WarehouseTransferListCreateView.as_view(),
+        name="transfer-list-create-alias",
+    ),
+    path(
+        "transfers/next-number/",
+        WarehouseTransferNextNumberView.as_view(),
+        name="transfer-next-number-alias",
+    ),
+    path(
+        "transfers/<int:pk>/",
+        WarehouseTransferDetailView.as_view(),
+        name="transfer-detail-alias",
     ),
 ]

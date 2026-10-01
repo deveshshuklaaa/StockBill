@@ -31,6 +31,8 @@ from .models import (
     Supplier,
     TaxRate,
     Warehouse,
+    WarehouseTransfer,
+    WarehouseTransferIdempotencyKey,
 )
 from .permissions import IsAdminOrReadOnly
 from .purchase_services import cancel_purchase, delete_purchase, post_purchase
@@ -54,6 +56,8 @@ from .serializers import (
     SupplierSerializer,
     TaxRateSerializer,
     WarehouseSerializer,
+    WarehouseTransferCreateSerializer,
+    WarehouseTransferSerializer,
 )
 
 
@@ -1259,4 +1263,179 @@ class OpeningStockPreviewView(APIView):
             "conversion_factor": str(validated["conversion_factor"]),
             "unit": validated["unit"],
         })
+
+
+def _transfer_request_hash(request):
+    raw = json.dumps(request.data or {}, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+class WarehouseTransferListCreateView(generics.ListCreateAPIView):
+    """List warehouse transfers (Staff/Admin).
+    Create warehouse transfer (Admin only) with Idempotency-Key support."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return WarehouseTransferCreateSerializer
+        return WarehouseTransferSerializer
+
+    def get_queryset(self):
+        queryset = (
+            WarehouseTransfer.objects.select_related(
+                "product", "source_warehouse", "destination_warehouse", "created_by"
+            )
+            .all()
+            .order_by("-created_at")
+        )
+        params = self.request.query_params or {}
+
+        product = (params.get("product") or "").strip()
+        if product:
+            if not product.isdigit():
+                raise ValidationError({"product": ["Product must be a numeric id."]})
+            queryset = queryset.filter(product_id=int(product))
+
+        source_wh = (params.get("source_warehouse") or "").strip()
+        if source_wh:
+            if not source_wh.isdigit():
+                raise ValidationError({"source_warehouse": ["Source warehouse must be a numeric id."]})
+            queryset = queryset.filter(source_warehouse_id=int(source_wh))
+
+        dest_wh = (params.get("destination_warehouse") or "").strip()
+        if dest_wh:
+            if not dest_wh.isdigit():
+                raise ValidationError({"destination_warehouse": ["Destination warehouse must be a numeric id."]})
+            queryset = queryset.filter(destination_warehouse_id=int(dest_wh))
+
+        warehouse = (params.get("warehouse") or "").strip()
+        if warehouse:
+            if not warehouse.isdigit():
+                raise ValidationError({"warehouse": ["Warehouse must be a numeric id."]})
+            wh_id = int(warehouse)
+            queryset = queryset.filter(Q(source_warehouse_id=wh_id) | Q(destination_warehouse_id=wh_id))
+
+        reason = (params.get("reason") or "").strip()
+        if reason:
+            queryset = queryset.filter(reason=reason)
+
+        from_date = (params.get("from") or "").strip()
+        to_date = (params.get("to") or "").strip()
+        for name, raw in (("from", from_date), ("to", to_date)):
+            if raw:
+                try:
+                    date.fromisoformat(raw)
+                except ValueError:
+                    raise ValidationError({name: ["Dates must use YYYY-MM-DD format."]})
+        if from_date:
+            queryset = queryset.filter(effective_date__gte=from_date)
+        if to_date:
+            queryset = queryset.filter(effective_date__lte=to_date)
+
+        search = (params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(transfer_number__icontains=search)
+                | Q(product__name__icontains=search)
+                | Q(product__sku__icontains=search)
+                | Q(source_warehouse__name__icontains=search)
+                | Q(destination_warehouse__name__icontains=search)
+                | Q(reason__icontains=search)
+                | Q(note__icontains=search)
+            )
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        idempotency_key = request.headers.get("Idempotency-Key")
+        request_hash = _transfer_request_hash(request)
+
+        if idempotency_key:
+            existing = (
+                WarehouseTransferIdempotencyKey.objects.select_related(
+                    "transfer",
+                    "transfer__product",
+                    "transfer__source_warehouse",
+                    "transfer__destination_warehouse",
+                    "transfer__created_by",
+                )
+                .filter(key=idempotency_key)
+                .first()
+            )
+            if existing:
+                if existing.request_hash != request_hash:
+                    return Response(
+                        {"detail": "Idempotency-Key was already used with a different request."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                return Response(
+                    WarehouseTransferSerializer(existing.transfer).data,
+                    status=status.HTTP_200_OK,
+                )
+
+        serializer_context = {
+            "request": request,
+            "idempotency_key": idempotency_key,
+            "request_hash": request_hash,
+        }
+        try:
+            serializer = self.get_serializer(data=request.data, context=serializer_context)
+            serializer.is_valid(raise_exception=True)
+            transfer = serializer.save()
+            return Response(
+                WarehouseTransferSerializer(transfer).data,
+                status=status.HTTP_201_CREATED,
+            )
+        except IntegrityError:
+            existing = (
+                WarehouseTransferIdempotencyKey.objects.select_related(
+                    "transfer",
+                    "transfer__product",
+                    "transfer__source_warehouse",
+                    "transfer__destination_warehouse",
+                    "transfer__created_by",
+                )
+                .filter(key=idempotency_key)
+                .first()
+            )
+            if existing is None:
+                raise
+            if existing.request_hash != request_hash:
+                return Response(
+                    {"detail": "Idempotency-Key was already used with a different request."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            return Response(
+                WarehouseTransferSerializer(existing.transfer).data,
+                status=status.HTTP_200_OK,
+            )
+
+
+class WarehouseTransferDetailView(generics.RetrieveAPIView):
+    """Retrieve a single warehouse transfer (read-only, immutable)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = WarehouseTransfer.objects.select_related(
+        "product", "source_warehouse", "destination_warehouse", "created_by"
+    ).all()
+    serializer_class = WarehouseTransferSerializer
+
+
+class WarehouseTransferNextNumberView(APIView):
+    """Preview next transfer number for UI hint."""
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        from .transfer_numbering import peek_next_transfer_number
+
+        for_date = request.query_params.get("date")
+        try:
+            target = date.fromisoformat(for_date) if for_date else None
+        except ValueError:
+            return Response(
+                {"date": "Dates must use YYYY-MM-DD format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"next_number": peek_next_transfer_number(target)})
 

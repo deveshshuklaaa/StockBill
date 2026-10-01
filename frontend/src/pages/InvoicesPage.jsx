@@ -34,9 +34,14 @@ export default function InvoicesPage() {
   const latestLoad = useRef(0)
 
   useEffect(() => {
-    const handle = setTimeout(() => { setSearch(searchInput.trim()); setPage(1) }, 250)
+    const trimmed = searchInput.trim()
+    if (trimmed === search) return
+    const handle = setTimeout(() => {
+      setSearch(trimmed)
+      setPage(1)
+    }, 250)
     return () => clearTimeout(handle)
-  }, [searchInput])
+  }, [searchInput, search])
 
   useEffect(() => {
     const requestId = ++latestLoad.current

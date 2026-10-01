@@ -22,6 +22,7 @@ from .models import (
     Supplier,
     TaxRate,
     Warehouse,
+    WarehouseTransfer,
 )
 
 
@@ -924,6 +925,111 @@ class OpeningStockCreateSerializer(serializers.Serializer):
             unit=validated_data.get("unit", OpeningStock.UNIT_PIECE),
             conversion_factor=validated_data.get("conversion_factor"),
             cost_per_piece=validated_data["cost_per_piece"],
+            reason=validated_data["reason"],
+            note=validated_data.get("note", ""),
+            effective_date=validated_data["effective_date"],
+            created_by=user,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+
+
+class WarehouseTransferSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_sku = serializers.CharField(source="product.sku", read_only=True)
+    source_warehouse_name = serializers.CharField(source="source_warehouse.name", read_only=True)
+    source_warehouse_code = serializers.CharField(source="source_warehouse.code", read_only=True)
+    destination_warehouse_name = serializers.CharField(source="destination_warehouse.name", read_only=True)
+    destination_warehouse_code = serializers.CharField(source="destination_warehouse.code", read_only=True)
+    created_by_username = serializers.CharField(
+        source="created_by.username", read_only=True, default=""
+    )
+
+    class Meta:
+        model = WarehouseTransfer
+        fields = [
+            "id",
+            "transfer_number",
+            "product",
+            "product_name",
+            "product_sku",
+            "source_warehouse",
+            "source_warehouse_name",
+            "source_warehouse_code",
+            "destination_warehouse",
+            "destination_warehouse_name",
+            "destination_warehouse_code",
+            "quantity",
+            "unit",
+            "conversion_factor",
+            "base_quantity",
+            "unit_cost_snapshot",
+            "transfer_value",
+            "reason",
+            "note",
+            "effective_date",
+            "created_by",
+            "created_by_username",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class WarehouseTransferCreateSerializer(serializers.Serializer):
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.filter(is_active=True)
+    )
+    source_warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=Warehouse.objects.filter(is_active=True)
+    )
+    destination_warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=Warehouse.objects.filter(is_active=True)
+    )
+    quantity = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=Decimal("0.001")
+    )
+    unit = serializers.ChoiceField(
+        choices=WarehouseTransfer.UNIT_CHOICES, default=WarehouseTransfer.UNIT_PIECE
+    )
+    conversion_factor = serializers.DecimalField(
+        max_digits=12, decimal_places=3, required=False, allow_null=True
+    )
+    reason = serializers.CharField(max_length=100)
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+    effective_date = serializers.DateField()
+
+    def validate(self, attrs):
+        from .transfer_services import validate_transfer_payload
+
+        validate_transfer_payload(
+            product=attrs["product"],
+            source_warehouse=attrs["source_warehouse"],
+            destination_warehouse=attrs["destination_warehouse"],
+            quantity=attrs["quantity"],
+            unit=attrs.get("unit", WarehouseTransfer.UNIT_PIECE),
+            conversion_factor=attrs.get("conversion_factor"),
+            reason=attrs["reason"],
+            note=attrs.get("note", ""),
+            effective_date=attrs["effective_date"],
+        )
+        return attrs
+
+    def create(self, validated_data):
+        from .transfer_services import post_warehouse_transfer
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        idempotency_key = self.context.get("idempotency_key")
+        request_hash = self.context.get("request_hash", "")
+
+        return post_warehouse_transfer(
+            product=validated_data["product"],
+            source_warehouse=validated_data["source_warehouse"],
+            destination_warehouse=validated_data["destination_warehouse"],
+            quantity=validated_data["quantity"],
+            unit=validated_data.get("unit", WarehouseTransfer.UNIT_PIECE),
+            conversion_factor=validated_data.get("conversion_factor"),
             reason=validated_data["reason"],
             note=validated_data.get("note", ""),
             effective_date=validated_data["effective_date"],
