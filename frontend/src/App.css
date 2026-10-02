@@ -80,11 +80,15 @@
   min-width: 0;
 }
 .invoice-card.lines-card {
-  overflow-x: auto;
+  min-width: 0;
   max-width: 100%;
 }
 .invoice-card.lines-card .invoice-lines {
-  min-width: 630px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: 6px;
 }
 .invoice-line.new-invoice-line {
@@ -93,7 +97,7 @@
   grid-template-columns: 18px minmax(105px, 1.3fr) 68px 52px 64px 92px 58px 40px 76px 18px;
   gap: 6px;
   align-items: start;
-  min-width: 630px;
+  min-width: 660px;
   padding: 12px 0;
   border-top: 1px solid #e8ede6;
 }
@@ -272,7 +276,7 @@
   grid-template-columns: minmax(115px, 1.8fr) 72px 50px 58px 86px 46px 36px 66px 68px 22px;
   gap: 4px;
   align-items: start;
-  min-width: 630px;
+  min-width: 660px;
   padding: 12px 0;
   border-top: 1px solid #e8ede6;
 }
