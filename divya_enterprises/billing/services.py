@@ -5,6 +5,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from customers.models import Customer
 from inventory.models import InventoryBalance, Product, ProductAttributeValue, StockLedger
@@ -663,6 +664,57 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
     )
     invoice.refresh_from_db()
     return invoice
+
+
+@transaction.atomic
+def delete_draft_invoice(*, invoice_id, deleted_by):
+    """Safely and permanently delete a DRAFT invoice and its line items.
+
+    - Locks invoice with select_for_update().
+    - Validates state == DRAFT (POSTED and CANCELLED are rejected).
+    - Requires authentication.
+    - Admin can delete any draft; Staff can only delete their own draft.
+    - Records AuditLog entry before deletion with snapshot metadata.
+    - Permanently deletes the invoice (cascades to line items).
+    - Does NOT touch stock, ledger, payments, credit notes, or customer statement.
+    """
+    try:
+        invoice = Invoice.objects.select_for_update().prefetch_related("line_items").get(pk=invoice_id)
+    except Invoice.DoesNotExist:
+        raise Invoice.DoesNotExist("Invoice not found.")
+
+    if invoice.state != Invoice.STATE_DRAFT:
+        raise ValidationError({"state": "Only draft invoices can be deleted."})
+
+    if not deleted_by or not getattr(deleted_by, "is_authenticated", False):
+        raise PermissionDenied("Authentication required to delete a draft invoice.")
+
+    from accounts.models import User
+
+    is_admin = getattr(deleted_by, "normalized_role", "") == User.ROLE_ADMIN or getattr(deleted_by, "is_superuser", False)
+    if not is_admin:
+        if invoice.created_by_id != getattr(deleted_by, "pk", None):
+            raise PermissionDenied("You do not have permission to delete this draft invoice.")
+
+    metadata = {
+        "invoice_number": invoice.invoice_number,
+        "customer_id": invoice.customer_id,
+        "customer_name": invoice.customer_name_snapshot or (invoice.customer.name if invoice.customer else "Walk-in customer"),
+        "total_amount": str(invoice.total_amount),
+        "payment_type": invoice.payment_type,
+        "state": invoice.state,
+        "created_by_id": invoice.created_by_id,
+        "line_items_count": invoice.line_items.count(),
+    }
+    AuditLog.objects.create(
+        user=deleted_by,
+        action="DRAFT_INVOICE_DELETED",
+        entity_type="Invoice",
+        entity_id=invoice.pk,
+        metadata=metadata,
+    )
+
+    invoice.delete()
 
 
 def check_invoice_correction_eligibility(invoice_id):

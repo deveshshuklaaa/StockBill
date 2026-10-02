@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '../api/client'
-import { fetchInvoices, printInvoicePdf } from '../api/invoices'
+import { deleteDraftInvoice, fetchInvoices, printInvoicePdf } from '../api/invoices'
 import InvoiceItemSummaryModal from '../components/InvoiceItemSummaryModal'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
@@ -16,6 +16,7 @@ const STATE_BADGE = {
 
 export default function InvoicesPage() {
   const { user } = useAuth()
+  const location = useLocation()
   const [invoices, setInvoices] = useState([])
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
@@ -29,9 +30,19 @@ export default function InvoicesPage() {
   const [hasPrevious, setHasPrevious] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [draftToDelete, setDraftToDelete] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const [selectedIds, setSelectedIds] = useState([])
   const [summaryOpen, setSummaryOpen] = useState(false)
   const latestLoad = useRef(0)
+
+  useEffect(() => {
+    if (location.state?.successMessage) {
+      setSuccess(location.state.successMessage)
+      window.history.replaceState({}, document.title)
+    }
+  }, [location.state])
 
   useEffect(() => {
     const trimmed = searchInput.trim()
@@ -45,7 +56,7 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     const requestId = ++latestLoad.current
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setSuccess('')
     fetchInvoices({
       page,
       search,
@@ -97,6 +108,28 @@ export default function InvoicesPage() {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]))
   }
 
+  const isAdmin = user?.role === 'admin' || user?.normalized_role === 'admin'
+  const canDeleteDraft = (inv) => inv.state === 'DRAFT' && (isAdmin || !inv.created_by || inv.created_by === user?.id)
+
+  async function handleConfirmDeleteDraft() {
+    if (!draftToDelete) return
+    setDeleting(true)
+    setError('')
+    try {
+      await deleteDraftInvoice(draftToDelete.id)
+      setInvoices((prev) => prev.filter((inv) => inv.id !== draftToDelete.id))
+      setTotal((prev) => Math.max(0, prev - 1))
+      setSelectedIds((prev) => prev.filter((id) => id !== draftToDelete.id))
+      setSuccess(`Draft invoice ${draftToDelete.invoice_number} deleted successfully.`)
+      setDraftToDelete(null)
+    } catch (err) {
+      setError(apiErrorMessage(err))
+      setDraftToDelete(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / 25))
   const filtersActive = search || stateFilter || paymentFilter || fromFilter || toFilter
 
@@ -120,7 +153,7 @@ export default function InvoicesPage() {
         <Link className="primary-button" to="/invoices/new">New invoice</Link>
       </div>
     </header>
-    <StatusMessage>{error}</StatusMessage>
+    <StatusMessage type={error ? 'error' : 'success'}>{error || success}</StatusMessage>
 
     <div className="table-frame">
       <div className="table-meta">
@@ -184,7 +217,20 @@ export default function InvoicesPage() {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <Link className="text-button" to={`/invoices/${invoice.id}`}>View</Link>
               {invoice.state === 'DRAFT' && (
-                <Link className="text-button" to={`/invoices/new?edit=${invoice.id}`} aria-label={`Edit draft invoice ${invoice.invoice_number}`}>Edit</Link>
+                <>
+                  <Link className="text-button" to={`/invoices/new?edit=${invoice.id}`} aria-label={`Edit draft invoice ${invoice.invoice_number}`}>Edit</Link>
+                  {canDeleteDraft(invoice) && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      style={{ color: 'var(--red)' }}
+                      onClick={() => { setError(''); setSuccess(''); setDraftToDelete(invoice) }}
+                      aria-label={`Delete draft invoice ${invoice.invoice_number}`}
+                    >
+                      Delete Draft
+                    </button>
+                  )}
+                </>
               )}
               {invoice.state === 'POSTED' && <>
                 <button className="text-button" onClick={() => handlePrint(invoice.id, 'original', invoice.invoice_number)} aria-label={`Print original invoice ${invoice.invoice_number}`}>Original</button>
@@ -209,6 +255,60 @@ export default function InvoicesPage() {
       </div>
     </div>
     {!user && <div className="empty-state">Session expired.</div>}
+
+    {draftToDelete && (
+      <div
+        className="modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-draft-title"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}
+      >
+        <div
+          className="modal-content"
+          style={{
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            padding: '1.5rem',
+            maxWidth: '450px',
+            width: '90%',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
+          }}
+        >
+          <h3 id="delete-draft-title" style={{ marginTop: 0, color: '#111827' }}>Delete Draft Invoice?</h3>
+          <p style={{ color: '#4b5563', lineHeight: 1.5 }}>
+            This will permanently remove this draft invoice and its line items. This action cannot be undone.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+            <button
+              type="button"
+              className="quiet-button"
+              onClick={() => setDraftToDelete(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              style={{ background: 'var(--red)' }}
+              onClick={handleConfirmDeleteDraft}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete Draft'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     <InvoiceItemSummaryModal
       isOpen={summaryOpen}

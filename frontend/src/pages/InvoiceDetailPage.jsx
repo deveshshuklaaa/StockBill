@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiErrorMessage, apiForbiddenMessage } from '../api/client'
-import { cancelInvoice, fetchCorrectionEligibility, fetchInvoice, postInvoice, printInvoicePdf } from '../api/invoices'
+import { cancelInvoice, deleteDraftInvoice, fetchCorrectionEligibility, fetchInvoice, postInvoice, printInvoicePdf } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 import { formatQuantity, formatQuantityWithUnit } from '../utils/format'
@@ -16,12 +16,15 @@ const STATE_BADGE = {
 
 export default function InvoiceDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.normalized_role === 'admin'
   const [invoice, setInvoice] = useState(null)
   const [error, setError] = useState('')
   const [downloading, setDownloading] = useState(null)
   const [showCancel, setShowCancel] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   // Correction eligibility (for POSTED invoices)
@@ -91,11 +94,28 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  async function handleDeleteDraft() {
+    setDeleting(true)
+    setError('')
+    try {
+      await deleteDraftInvoice(id)
+      navigate('/invoices', {
+        state: { successMessage: `Draft invoice ${invoice.invoice_number} deleted successfully.` },
+      })
+    } catch (err) {
+      setError(apiErrorMessage(err))
+      setShowDeleteModal(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (error && !invoice) return <section className="page-section"><StatusMessage>{error}</StatusMessage><Link className="quiet-button" to="/invoices">Back to invoices</Link></section>
   if (!invoice) return <section className="page-section"><div className="empty-state">Loading invoice...</div></section>
 
   const isCancelled = invoice.state === 'CANCELLED'
   const isPosted = invoice.state === 'POSTED'
+  const canDeleteDraft = invoice.state === 'DRAFT' && (isAdmin || !invoice.created_by || invoice.created_by === user?.id)
   const totalDiscount = (invoice.line_items || []).reduce((sum, line) => sum + Number(line.discount_amount || 0), 0)
   const totalTaxable = (invoice.line_items || []).reduce((sum, line) => sum + Number(line.taxable_value_snapshot || 0), 0)
   const totalCgst = (invoice.line_items || []).reduce((sum, line) => sum + Number(line.cgst_amount || 0), 0)
@@ -117,12 +137,24 @@ export default function InvoiceDetailPage() {
             {downloading === 'reprint' ? 'Preparing...' : 'Reprint'}
           </button>
         </>}
-        {/* DRAFT: Edit and Post buttons */}
+        {/* DRAFT: Edit, Post, and Delete buttons */}
         {invoice.state === 'DRAFT' && <>
           <Link id="edit-draft-btn" className="quiet-button" to={`/invoices/new?edit=${id}`} style={{ fontWeight: 600 }}>Edit draft</Link>
-          <button id="post-draft-btn" className="primary-button" onClick={handlePostDraft} disabled={busy}>
+          <button id="post-draft-btn" className="primary-button" onClick={handlePostDraft} disabled={busy || deleting}>
             {busy ? 'Posting...' : 'Post invoice'}
           </button>
+          {canDeleteDraft && (
+            <button
+              id="delete-draft-btn"
+              type="button"
+              className="quiet-button"
+              style={{ color: 'var(--red)', fontWeight: 600 }}
+              onClick={() => { setError(''); setShowDeleteModal(true) }}
+              disabled={busy || deleting}
+            >
+              Delete draft
+            </button>
+          )}
         </>}
         {/* POSTED: Post action available only for admin and before correction */}
         {isAdmin && isPosted && !invoice.replacement_invoice && (
@@ -242,5 +274,60 @@ export default function InvoiceDetailPage() {
       </div>
       {isCancelled && <p className="field-help" style={{ marginTop: 14 }}>This invoice was cancelled. Stock was restored through a sale-reversal movement; the original sale remains in the ledger.</p>}
     </div>
+
+    {showDeleteModal && (
+      <div
+        className="modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-draft-detail-title"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}
+      >
+        <div
+          className="modal-content"
+          style={{
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            padding: '1.5rem',
+            maxWidth: '450px',
+            width: '90%',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
+          }}
+        >
+          <h3 id="delete-draft-detail-title" style={{ marginTop: 0, color: '#111827' }}>Delete Draft Invoice?</h3>
+          <p style={{ color: '#4b5563', lineHeight: 1.5 }}>
+            This will permanently remove this draft invoice and its line items. This action cannot be undone.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+            <button
+              type="button"
+              className="quiet-button"
+              onClick={() => setShowDeleteModal(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              id="confirm-delete-draft-btn"
+              type="button"
+              className="primary-button"
+              style={{ background: 'var(--red)' }}
+              onClick={handleDeleteDraft}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete Draft'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </section>
 }

@@ -407,4 +407,144 @@ describe('InvoiceDetailPage', () => {
     expect(writtenHtml).toContain('<embed src="blob:mock-url" type="application/pdf"')
     expect(mockWin.document.close).toHaveBeenCalled()
   })
+
+  describe('Delete Draft Invoice', () => {
+    const PAGE_WITH_DRAFT = {
+      count: 3,
+      next: null,
+      previous: null,
+      results: [
+        {
+          id: 21,
+          invoice_number: 'INV-DRAFT-1',
+          invoice_date: '2026-09-12',
+          customer_name: 'Draft Customer',
+          payment_type: 'credit',
+          payment_status: 'credit',
+          state: 'DRAFT',
+          total_amount: '500.00',
+          created_by: 1,
+        },
+        {
+          id: 22,
+          invoice_number: 'INV-POSTED-1',
+          invoice_date: '2026-09-12',
+          customer_name: 'Posted Customer',
+          payment_type: 'cash',
+          payment_status: 'paid',
+          state: 'POSTED',
+          total_amount: '400.00',
+        },
+        {
+          id: 23,
+          invoice_number: 'INV-CANCELLED-1',
+          invoice_date: '2026-09-12',
+          customer_name: 'Cancelled Customer',
+          payment_type: 'credit',
+          payment_status: 'credit',
+          state: 'CANCELLED',
+          total_amount: '300.00',
+        },
+      ],
+    }
+
+    const DRAFT_DETAIL = {
+      ...DETAIL,
+      id: 21,
+      invoice_number: 'INV-DRAFT-1',
+      state: 'DRAFT',
+      created_by: 1,
+    }
+
+    it('shows Delete Draft for DRAFT rows and hides it for POSTED and CANCELLED rows on list', async () => {
+      vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue(PAGE_WITH_DRAFT)
+      mountPage('list')
+      await screen.findByText('INV-DRAFT-1')
+
+      const deleteBtn = screen.getByRole('button', { name: /Delete draft invoice INV-DRAFT-1/i })
+      expect(deleteBtn).toBeInTheDocument()
+
+      expect(screen.queryByRole('button', { name: /Delete draft invoice INV-POSTED-1/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Delete draft invoice INV-CANCELLED-1/i })).not.toBeInTheDocument()
+    })
+
+    it('shows confirmation dialog with exact text and deletes draft on list', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue(PAGE_WITH_DRAFT)
+      const deleteSpy = vi.spyOn(invoicesApi, 'deleteDraftInvoice').mockResolvedValue({ detail: 'Draft invoice deleted successfully.' })
+
+      mountPage('list')
+      await screen.findByText('INV-DRAFT-1')
+
+      const deleteBtn = screen.getByRole('button', { name: /Delete draft invoice INV-DRAFT-1/i })
+      await user.click(deleteBtn)
+
+      expect(screen.getByRole('heading', { name: 'Delete Draft Invoice?' })).toBeInTheDocument()
+      expect(screen.getByText('This will permanently remove this draft invoice and its line items. This action cannot be undone.')).toBeInTheDocument()
+
+      const confirmBtn = screen.getAllByRole('button', { name: 'Delete Draft' }).find(b => b.classList.contains('primary-button'))
+      await user.click(confirmBtn)
+
+      expect(deleteSpy).toHaveBeenCalledWith(21)
+      await waitFor(() => {
+        expect(screen.queryByText('INV-DRAFT-1')).not.toBeInTheDocument()
+      })
+      expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument()
+    })
+
+    it('shows Delete draft button on detail page for DRAFT', async () => {
+      vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
+      mountPage('detail', { route: '/invoices/21' })
+      await screen.findByText('INV-DRAFT-1')
+      expect(screen.getByRole('button', { name: 'Delete draft' })).toBeInTheDocument()
+    })
+
+    it('hides Delete draft button on detail page for POSTED/CANCELLED', async () => {
+      vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DETAIL)
+      mountPage('detail', { route: '/invoices/11' })
+      await screen.findByText('INV-20260912-1')
+      expect(screen.queryByRole('button', { name: 'Delete draft' })).not.toBeInTheDocument()
+    })
+
+    it('opens confirmation dialog on detail page and handles deletion navigation', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
+      const deleteSpy = vi.spyOn(invoicesApi, 'deleteDraftInvoice').mockResolvedValue({ detail: 'Draft invoice deleted successfully.' })
+      vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue({ count: 0, results: [] })
+
+      mountPage('detail', { route: '/invoices/21' })
+      await screen.findByText('INV-DRAFT-1')
+
+      await user.click(screen.getByRole('button', { name: 'Delete draft' }))
+
+      expect(screen.getByRole('heading', { name: 'Delete Draft Invoice?' })).toBeInTheDocument()
+      expect(screen.getByText('This will permanently remove this draft invoice and its line items. This action cannot be undone.')).toBeInTheDocument()
+
+      const confirmBtn = screen.getByRole('button', { name: 'Delete Draft' })
+      await user.click(confirmBtn)
+
+      expect(deleteSpy).toHaveBeenCalledWith('21')
+    })
+
+    it('displays API error message when draft deletion fails', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue(PAGE_WITH_DRAFT)
+      vi.spyOn(invoicesApi, 'deleteDraftInvoice').mockRejectedValue({
+        response: { status: 403, data: { detail: 'You do not have permission to delete this draft invoice.' } },
+      })
+
+      mountPage('list')
+      await screen.findByText('INV-DRAFT-1')
+
+      await user.click(screen.getByRole('button', { name: /Delete draft invoice INV-DRAFT-1/i }))
+      await screen.findByRole('heading', { name: 'Delete Draft Invoice?' })
+      const confirmBtn = screen.getAllByRole('button', { name: 'Delete Draft' }).find(b => b.classList.contains('primary-button'))
+      await user.click(confirmBtn)
+
+      await waitFor(() => {
+        expect(screen.getByText(/You do not have permission to perform this action/i)).toBeInTheDocument()
+      })
+      expect(screen.getByText('INV-DRAFT-1')).toBeInTheDocument()
+    })
+  })
 })

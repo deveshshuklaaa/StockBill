@@ -118,3 +118,8 @@ export async function exportInvoiceItemSummaryXlsx(invoiceIds) {
   return blob
 }
 
+export async function deleteDraftInvoice(id) {
+  const { data } = await api.delete(`/invoices/${id}/draft/`)
+  return data
+}
+

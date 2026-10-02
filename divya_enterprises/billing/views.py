@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.db import IntegrityError, transaction
 from rest_framework import generics, permissions, status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,6 +23,7 @@ from .services import (
     build_selected_invoices_item_summary,
     cancel_invoice,
     check_invoice_correction_eligibility,
+    delete_draft_invoice,
     post_invoice,
     reverse_payment,
     update_draft_invoice,
@@ -375,6 +376,19 @@ class InvoiceDraftUpdateView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(InvoiceSerializer(updated).data)
+
+    def delete(self, request, pk):
+        try:
+            delete_draft_invoice(invoice_id=pk, deleted_by=request.user)
+            return Response({"detail": "Draft invoice deleted successfully."}, status=status.HTTP_200_OK)
+        except Invoice.DoesNotExist:
+            return Response({"detail": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+        except PermissionDenied as exc:
+            detail_msg = exc.detail if hasattr(exc, "detail") else str(exc)
+            return Response({"detail": str(detail_msg)}, status=status.HTTP_403_FORBIDDEN)
+        except (ValidationError, ValueError) as exc:
+            msg = exc.detail if hasattr(exc, "detail") else str(exc)
+            return Response({"state": "Only draft invoices can be deleted.", "detail": msg}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class InvoiceCorrectionEligibilityView(APIView):
