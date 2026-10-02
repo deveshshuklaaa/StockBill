@@ -12,12 +12,12 @@ export function daysAgo(n) {
   return d.toISOString().slice(0, 10)
 }
 
-export default function ReportFilters({ from, to, onFrom, onTo, onApply, children }) {
+export default function ReportFilters({ from, to, onFrom, onTo, onApply, fromLabel = 'From', toLabel = 'To', children }) {
   return <div className="filter-row report-filters">
-    <label className="filter-field">From<input type="date" value={from} onChange={(e) => onFrom(e.target.value)} aria-label="Report from date" /></label>
-    <label className="filter-field">To<input type="date" value={to} onChange={(e) => onTo(e.target.value)} aria-label="Report to date" /></label>
+    <label className="filter-field">{fromLabel}<input type="date" value={from} onChange={(e) => onFrom(e.target.value)} aria-label="Report from date" /></label>
+    <label className="filter-field">{toLabel}<input type="date" value={to} onChange={(e) => onTo(e.target.value)} aria-label="Report to date" /></label>
     {children}
-    <button type="button" className="quiet-button" onClick={onApply}>Apply</button>
+    <button type="button" className="report-apply-button" onClick={onApply}>Apply</button>
   </div>
 }
 

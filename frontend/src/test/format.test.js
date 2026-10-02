@@ -113,8 +113,8 @@ describe('formatMasterBoxView', () => {
 describe('formatStockWithBoxes', () => {
   it('shows base + master box view when product has M.Box and quantity >= box', () => {
     const product = { base_unit: 'piece', attributes: { units_per_master_box: 192 } }
-    expect(formatStockWithBoxes(200, product)).toBe('200 pcs · 1 box + 8 pcs')
-    expect(formatStockWithBoxes(384, product)).toBe('384 pcs · 2 boxes')
+    expect(formatStockWithBoxes(200, product)).toBe('200 pcs / 1 box + 8 pcs')
+    expect(formatStockWithBoxes(384, product)).toBe('384 pcs / 2 boxes')
   })
 
   it('shows only pieces when below one box', () => {

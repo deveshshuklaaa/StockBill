@@ -6,7 +6,7 @@ import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 import { formatQuantity } from '../utils/format'
 
-function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
+function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
 export default function PurchaseDetailPage() {
   const { id } = useParams()

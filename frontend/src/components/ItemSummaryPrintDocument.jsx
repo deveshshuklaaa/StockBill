@@ -76,47 +76,30 @@ export default function ItemSummaryPrintDocument({
       <table className="print-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ background: '#f2f6f3' }}>
-            <th style={{ width: '36px', textAlign: 'center' }}>#</th>
+            <th style={{ width: '40px', textAlign: 'center' }}>#</th>
             <th style={{ textAlign: 'left' }}>Product Name</th>
-            <th style={{ textAlign: 'left', width: '90px' }}>SKU</th>
-            <th style={{ textAlign: 'left', width: '130px' }}>Variant / Pack</th>
-            <th style={{ textAlign: 'right', width: '75px' }}>MRP</th>
-            <th style={{ textAlign: 'right', width: '120px' }}>Total Quantity</th>
-            <th style={{ textAlign: 'right', width: '95px' }}>Base Qty (pcs)</th>
-            <th style={{ textAlign: 'center', width: '65px' }}>Invoices</th>
+            <th style={{ textAlign: 'right', width: '100px' }}>MRP</th>
+            <th style={{ textAlign: 'right', width: '180px' }}>Total Quantity</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item, idx) => {
             const mrpFormatted = item.mrp != null ? `₹${Number(item.mrp).toFixed(2)}` : '—'
             const totalQtyFormatted = formatStockWithBoxes(item.total_base_quantity, item)
-            const baseQtyFormatted = formatQuantityWithUnit(item.total_base_quantity, 'piece')
 
             return (
               <tr key={item.product_id || idx}>
-                <td style={{ textAlign: 'center', color: '#687e71', fontSize: '10px' }}>
+                <td style={{ textAlign: 'center', color: '#687e71', fontSize: '11px' }}>
                   {idx + 1}
                 </td>
-                <td>
-                  <strong style={{ color: '#1e382b' }}>{item.product_name}</strong>
+                <td style={{ textAlign: 'left' }}>
+                  <strong style={{ color: '#1e382b', fontSize: '12px' }}>{item.product_name}</strong>
                 </td>
-                <td style={{ color: '#4a5d52', fontFamily: 'monospace', fontSize: '10px' }}>
-                  {item.sku || '—'}
-                </td>
-                <td style={{ color: '#55695e', fontSize: '10px' }}>
-                  {item.variant_summary || '—'}
-                </td>
-                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontSize: '12px' }}>
                   {mrpFormatted}
                 </td>
-                <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600 }}>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600, fontSize: '12px' }}>
                   {totalQtyFormatted}
-                </td>
-                <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600 }}>
-                  {baseQtyFormatted}
-                </td>
-                <td style={{ textAlign: 'center' }}>
-                  <span style={{ fontWeight: 600 }}>{item.invoice_count}</span>
                 </td>
               </tr>
             )

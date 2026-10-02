@@ -131,7 +131,8 @@ describe('Supplier Purchase Pricing - SupplierDetailPage UI', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { level: 1, name: 'Supplier Alpha Traders' })).toBeInTheDocument()
-      expect(screen.getByText('Supplier Purchase Rates')).toBeInTheDocument()
+      expect(screen.getByText('Purchase Rates')).toBeInTheDocument()
+      expect(screen.getByText('Supplier MRP Pricing')).toBeInTheDocument()
     })
 
     // Check MRP slabs displayed
@@ -161,11 +162,12 @@ describe('Supplier Purchase Pricing - SupplierDetailPage UI', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Supplier Purchase Rates')).toBeInTheDocument()
+      expect(screen.getByText('Purchase Rates')).toBeInTheDocument()
+      expect(screen.getByText('Supplier MRP Pricing')).toBeInTheDocument()
     })
 
-    // Click "+ Add Custom MRP Slab"
-    const toggleBtn = screen.getByRole('button', { name: /\+ Add Custom MRP Slab/i })
+    // Click "+ Add Custom MRP"
+    const toggleBtn = screen.getByRole('button', { name: /\+ Add Custom MRP/i })
     await user.click(toggleBtn)
 
     // Custom slab form fields
@@ -247,11 +249,12 @@ describe('Supplier Purchase Pricing - SupplierDetailPage UI', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Supplier Purchase Rates')).toBeInTheDocument()
+      expect(screen.getByText('Purchase Rates')).toBeInTheDocument()
+      expect(screen.getByText('Supplier MRP Pricing')).toBeInTheDocument()
     })
 
-    // "+ Add Custom MRP Slab" should not be rendered
-    expect(screen.queryByRole('button', { name: /\+ Add Custom MRP Slab/i })).not.toBeInTheDocument()
+    // "+ Add Custom MRP" should not be rendered
+    expect(screen.queryByRole('button', { name: /\+ Add Custom MRP/i })).not.toBeInTheDocument()
 
     // Editable inputs should not be rendered; rates are displayed as read-only text
     expect(screen.queryByLabelText(/Rate for MRP ₹5.00/i)).not.toBeInTheDocument()

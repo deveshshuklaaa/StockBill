@@ -13,7 +13,7 @@ import { useAuth } from '../context/AuthContext'
 import { formatNetWeight, formatStockWithBoxes } from '../utils/format'
 
 function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
-function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
+function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
 function formatAttributes(attributes) {
   if (!attributes || Object.keys(attributes).length === 0) return null

@@ -673,8 +673,8 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         )
         wb = self._open_wb(res.content)
         ws = wb.active
-        # Read column A starting row 7
-        products = [ws.cell(row=r, column=1).value for r in range(7, 11)]
+        # Read column B (PRODUCT NAME) starting row 7
+        products = [ws.cell(row=r, column=2).value for r in range(7, 11)]
         self.assertIn("Yellow Banana Chips", products)
         self.assertIn("Classic Salted", products)
         self.assertIn("Manglori Mix", products)
@@ -692,11 +692,11 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         ws = wb.active
         row_map = {}
         for r in range(7, 11):
-            prod = ws.cell(row=r, column=1).value
-            qty = ws.cell(row=r, column=5).value
+            prod = ws.cell(row=r, column=2).value
+            qty = ws.cell(row=r, column=4).value
             row_map[prod] = qty
-        self.assertEqual(row_map["Yellow Banana Chips"], 16.0)
-        self.assertEqual(row_map["Classic Salted"], 38.0)
+        self.assertEqual(row_map["Yellow Banana Chips"], "16 pcs")
+        self.assertEqual(row_map["Classic Salted"], "38 pcs")
 
     def test_6_master_box_plus_piece_aggregation(self):
         """6. Master Box + Piece aggregated into base quantity in pieces."""
@@ -712,11 +712,11 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         ws = wb.active
         row_map = {}
         for r in range(7, 12):
-            prod = ws.cell(row=r, column=1).value
-            qty = ws.cell(row=r, column=5).value
+            prod = ws.cell(row=r, column=2).value
+            qty = ws.cell(row=r, column=4).value
             if prod:
                 row_map[prod] = qty
-        self.assertEqual(row_map["Yellow Banana Chips"], 388.0)
+        self.assertIn("388 pcs", str(row_map["Yellow Banana Chips"]))
 
     def test_7_draft_and_cancelled_exclusion(self):
         """7. Draft and cancelled invoices excluded from export."""
@@ -764,8 +764,8 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         ws = wb.active
         self.assertEqual(ws["B3"].value, "INV-SUM-001")
 
-    def test_10_correct_invoice_count_per_product(self):
-        """10. Correct invoice count per product in column 7."""
+    def test_10_simplified_columns_present_and_unneeded_removed(self):
+        """10. Simplified 4 columns present; SKU, Variant/Pack, Base Unit, Invoice Count removed."""
         client = self.client_as(self.staff)
         res = client.post(
             "/api/invoices/item-summary/export/",
@@ -774,18 +774,14 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         )
         wb = self._open_wb(res.content)
         ws = wb.active
-        inv_counts = {}
-        for r in range(7, 11):
-            prod = ws.cell(row=r, column=1).value
-            cnt = ws.cell(row=r, column=7).value
-            inv_counts[prod] = cnt
-        self.assertEqual(inv_counts["Yellow Banana Chips"], 2)
-        self.assertEqual(inv_counts["Classic Salted"], 2)
-        self.assertEqual(inv_counts["Manglori Mix"], 1)
-        self.assertEqual(inv_counts["Tasty Nuts"], 1)
+        headers = [ws.cell(row=6, column=c).value for c in range(1, 5)]
+        self.assertEqual(headers, ["#", "PRODUCT NAME", "MRP", "TOTAL QUANTITY"])
+        self.assertIsNone(ws.cell(row=6, column=5).value)
+        self.assertIsNone(ws.cell(row=6, column=6).value)
+        self.assertIsNone(ws.cell(row=6, column=7).value)
 
     def test_11_correct_xlsx_headers(self):
-        """11. Correct XLSX table headers on row 6."""
+        """11. Correct simplified XLSX table headers on row 6."""
         client = self.client_as(self.staff)
         res = client.post(
             "/api/invoices/item-summary/export/",
@@ -795,15 +791,12 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         wb = self._open_wb(res.content)
         ws = wb.active
         expected = [
-            "Product",
-            "SKU",
-            "Variant/Pack",
+            "#",
+            "PRODUCT NAME",
             "MRP",
-            "Total Quantity",
-            "Base Unit",
-            "Invoice Count",
+            "TOTAL QUANTITY",
         ]
-        actual = [ws.cell(row=6, column=c).value for c in range(1, 8)]
+        actual = [ws.cell(row=6, column=c).value for c in range(1, 5)]
         self.assertEqual(actual, expected)
 
     def test_12_correct_worksheet_title(self):
@@ -829,10 +822,9 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         ws = wb.active
         # Row 11 is Totals row (4 items on rows 7, 8, 9, 10)
         tot_row = 11
-        self.assertEqual(ws.cell(row=tot_row, column=1).value, "Total Products:")
-        self.assertEqual(ws.cell(row=tot_row, column=2).value, 4)
-        self.assertEqual(ws.cell(row=tot_row, column=3).value, "Total Base Quantity:")
-        self.assertEqual(ws.cell(row=tot_row, column=5).value, 73.0)
+        self.assertEqual(ws.cell(row=tot_row, column=2).value, "Total Products: 4")
+        self.assertEqual(ws.cell(row=tot_row, column=3).value, "Total Base Qty:")
+        self.assertEqual(ws.cell(row=tot_row, column=4).value, "73 pcs")
 
     def test_14_content_type(self):
         """14. Content-Type is openxmlformats sheet."""

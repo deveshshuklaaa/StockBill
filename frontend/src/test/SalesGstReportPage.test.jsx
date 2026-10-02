@@ -148,25 +148,23 @@ describe('SalesGstReportPage', () => {
     expect(screen.getByRole('heading', { level: 1, name: /Sales GST Report/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/From Date/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/To Date/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Generate/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Generate/i })).toBeNull()
     expect(screen.getByRole('button', { name: /Export Excel/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Print/i })).toBeInTheDocument()
   })
 
-  it('2. date filters are editable and trigger generate on form submit', async () => {
+  it('2. date filters are editable and automatically trigger report fetch', async () => {
     const user = userEvent.setup()
     const fetchSpy = vi.spyOn(reportsApi, 'fetchSalesGstReport').mockResolvedValue(SAMPLE_REPORT)
     mount()
 
     const fromInput = screen.getByLabelText(/From Date/i)
     const toInput = screen.getByLabelText(/To Date/i)
-    const generateBtn = screen.getByRole('button', { name: /Generate/i })
 
     await user.clear(fromInput)
     await user.type(fromInput, '2026-08-01')
     await user.clear(toInput)
     await user.type(toInput, '2026-08-31')
-    await user.click(generateBtn)
 
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith({ from: '2026-08-01', to: '2026-08-31' })

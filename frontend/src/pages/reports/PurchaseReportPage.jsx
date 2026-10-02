@@ -44,9 +44,9 @@ export default function PurchaseReportPage() {
     <StatusMessage>{error}</StatusMessage>
 
     <div className="table-frame">
-      <div className="table-meta">
+      <div className="table-meta report-table-meta">
         <span>{busy ? 'Calculating...' : `${report ? report.purchase_count : 0} posted purchase${report?.purchase_count === 1 ? '' : 's'} · ${range.from} → ${range.to}`}</span>
-        <ReportsShared from={fromInput} to={toInput} onFrom={setFromInput} onTo={setToInput} onApply={applyAll}>
+        <ReportsShared from={fromInput} to={toInput} onFrom={setFromInput} onTo={setToInput} onApply={applyAll} fromLabel="From Date" toLabel="To Date">
           <label className="filter-field">Supplier<select value={supplier} onChange={(e) => setSupplier(e.target.value)} aria-label="Filter by supplier"><option value="">All</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         </ReportsShared>
       </div>

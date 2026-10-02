@@ -86,55 +86,26 @@ export default function TaxConfigurationPage() {
     <StatusMessage type={success ? 'success' : 'error'}>{success || error}</StatusMessage>
 
     {showForm && (
-      <div style={{ marginBottom: '2rem', padding: '1.5rem', border: '1px solid #e5e7eb', borderRadius: '8px', backgroundColor: '#f9fafb' }}>
-        <h2 style={{ marginBottom: '1rem' }}>{editingId ? 'Edit Tax Rate' : 'New Tax Rate'}</h2>
-        <form onSubmit={handleSubmit} style={{ maxWidth: '600px' }}>
-          <div style={{ display: 'grid', gap: '1rem' }}>
-            <label className="form-field">
-              <span className="form-label">Name <span style={{ color: 'red' }}>*</span></span>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-                required
-                className="form-input"
-                placeholder="e.g. GST 18%"
-              />
-            </label>
-
-            <label className="form-field">
-              <span className="form-label">Rate (%) <span style={{ color: 'red' }}>*</span></span>
-              <input
-                type="number"
-                step="0.01"
-                value={formData.rate}
-                onChange={(e) => setFormData((prev) => ({ ...prev, rate: e.target.value }))}
-                required
-                className="form-input"
-                placeholder="e.g. 18.00"
-              />
-            </label>
-
-            <label className="form-field" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                checked={formData.is_active}
-                onChange={(e) => setFormData((prev) => ({ ...prev, is_active: e.target.checked }))}
-              />
-              <span className="form-label" style={{ margin: 0 }}>Active</span>
-            </label>
+      <form className="record-form" onSubmit={handleSubmit}>
+        <div className="form-heading">
+          <div>
+            <p className="eyebrow">Tax Configuration</p>
+            <h2>{editingId ? 'Edit Tax Rate' : 'New Tax Rate'}</h2>
           </div>
-
-          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
-            <button type="submit" className="primary-button" disabled={saving}>
-              {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
-            </button>
-            <button type="button" className="secondary-button" onClick={handleCancel}>
-              Cancel
-            </button>
-          </div>
-        </form>
-      </div>
+          <button type="button" className="quiet-button" onClick={handleCancel}>Close</button>
+        </div>
+        <div className="form-grid">
+          <label>Name<input type="text" value={formData.name} onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))} required placeholder="e.g. GST 18%" /></label>
+          <label>Rate (%)<input type="number" step="0.01" value={formData.rate} onChange={(e) => setFormData((prev) => ({ ...prev, rate: e.target.value }))} required placeholder="e.g. 18.00" /></label>
+          <label className="checkbox-label"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData((prev) => ({ ...prev, is_active: e.target.checked }))} /> Active</label>
+        </div>
+        <div className="form-actions">
+          <button type="submit" className="primary-button" disabled={saving}>
+            {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
+          </button>
+          <button type="button" className="quiet-button" onClick={handleCancel}>Cancel</button>
+        </div>
+      </form>
     )}
 
     <div className="table-frame">
@@ -151,7 +122,7 @@ export default function TaxConfigurationPage() {
                 <th>Name</th>
                 <th style={{ textAlign: 'right' }}>Rate (%)</th>
                 <th>Status</th>
-                <th>Actions</th>
+                <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
@@ -160,14 +131,12 @@ export default function TaxConfigurationPage() {
                   <td><strong>{rate.name}</strong></td>
                   <td style={{ textAlign: 'right' }}>{Number(rate.rate).toFixed(2)}</td>
                   <td>
-                    <span className={rate.is_active ? 'tax-chip' : 'state-cancelled'}>
+                    <span className={rate.is_active ? 'badge badge-active' : 'badge badge-archived'}>
                       {rate.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
                   <td>
-                    <button className="secondary-button" onClick={() => handleEdit(rate)} style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem' }}>
-                      Edit
-                    </button>
+                    <button className="text-button" onClick={() => handleEdit(rate)}>Edit</button>
                   </td>
                 </tr>
               ))}

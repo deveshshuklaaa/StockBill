@@ -496,11 +496,21 @@ describe('Item-wise Summary Frontend Feature', () => {
     const rows = printDoc.querySelectorAll('tbody tr')
     expect(rows).toHaveLength(17)
     rows.forEach((row, idx) => {
+      expect(row.cells).toHaveLength(4)
       expect(row.cells[0].textContent.trim()).toBe(String(idx + 1))
       expect(row.cells[1].textContent).toContain(SEVENTEEN_PRODUCTS[idx].product_name)
-      expect(row.cells[2].textContent).toBe(SEVENTEEN_PRODUCTS[idx].sku)
-      expect(row.cells[4].textContent).toBe(`₹${Number(SEVENTEEN_PRODUCTS[idx].mrp).toFixed(2)}`)
+      expect(row.cells[2].textContent).toBe(`₹${Number(SEVENTEEN_PRODUCTS[idx].mrp).toFixed(2)}`)
+      expect(row.cells[3].textContent).toContain(`${(idx + 1) * 10} pcs`)
     })
+
+    // Verify removed columns are absent from print headers
+    const ths = printDoc.querySelectorAll('thead th')
+    const headerTexts = Array.from(ths).map((th) => th.textContent.trim().toUpperCase())
+    expect(headerTexts).toEqual(['#', 'PRODUCT NAME', 'MRP', 'TOTAL QUANTITY'])
+    expect(headerTexts).not.toContain('SKU')
+    expect(headerTexts).not.toContain('VARIANT / PACK')
+    expect(headerTexts).not.toContain('BASE QTY (PCS)')
+    expect(headerTexts).not.toContain('INVOICES')
 
     // 3. Totals appear exactly once in the footer
     const footer = printDoc.querySelector('footer')

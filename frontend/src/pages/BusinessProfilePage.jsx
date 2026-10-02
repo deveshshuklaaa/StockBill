@@ -77,98 +77,25 @@ export default function BusinessProfilePage() {
     </header>
     <StatusMessage type={success ? 'success' : 'error'}>{success || error}</StatusMessage>
 
-    <form onSubmit={handleSubmit} style={{ maxWidth: '800px' }}>
-      <div style={{ display: 'grid', gap: '1.5rem' }}>
-        <label className="form-field">
-          <span className="form-label">Business Name <span style={{ color: 'red' }}>*</span></span>
-          <input
-            type="text"
-            name="business_name"
-            value={formData.business_name}
-            onChange={handleChange}
-            required
-            className="form-input"
-          />
-        </label>
-
-        <label className="form-field">
-          <span className="form-label">Trade Name</span>
-          <input
-            type="text"
-            name="trade_name"
-            value={formData.trade_name}
-            onChange={handleChange}
-            className="form-input"
-          />
-        </label>
-
-        <label className="form-field">
-          <span className="form-label">GSTIN <span style={{ color: 'red' }}>*</span></span>
-          <input
-            type="text"
-            name="gstin"
-            value={formData.gstin}
-            onChange={handleChange}
-            required
-            maxLength={15}
-            className="form-input"
-            placeholder="15-character GST identification number"
-          />
-        </label>
-
-        <label className="form-field">
-          <span className="form-label">Registered Address <span style={{ color: 'red' }}>*</span></span>
-          <textarea
-            name="registered_address"
-            value={formData.registered_address}
-            onChange={handleChange}
-            required
-            rows={3}
-            className="form-input"
-          />
-        </label>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
-          <label className="form-field">
-            <span className="form-label">State <span style={{ color: 'red' }}>*</span></span>
-            <input
-              type="text"
-              name="state"
-              value={formData.state}
-              onChange={handleChange}
-              required
-              className="form-input"
-            />
-          </label>
-
-          <label className="form-field">
-            <span className="form-label">State Code <span style={{ color: 'red' }}>*</span></span>
-            <input
-              type="text"
-              name="state_code"
-              value={formData.state_code}
-              onChange={handleChange}
-              required
-              className="form-input"
-              placeholder="e.g. 27"
-            />
-          </label>
+    <form onSubmit={handleSubmit} className="record-form">
+      <div className="form-heading">
+        <div>
+          <p className="eyebrow">Business Profile</p>
+          <h2>Update details</h2>
         </div>
-
-        <label className="form-field">
-          <span className="form-label">Contact Details</span>
-          <input
-            type="text"
-            name="contact_details"
-            value={formData.contact_details}
-            onChange={handleChange}
-            className="form-input"
-            placeholder="Phone, email, or other contact information"
-          />
-        </label>
       </div>
 
-      <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>
+      <div className="form-grid">
+        <label>Business Name<input name="business_name" value={formData.business_name} onChange={handleChange} required aria-required="true" /></label>
+        <label>Trade Name<input name="trade_name" value={formData.trade_name} onChange={handleChange} /></label>
+        <label>GSTIN<input name="gstin" value={formData.gstin} onChange={handleChange} required aria-required="true" maxLength={15} placeholder="15-character GST identification number" /></label>
+        <label>State<input name="state" value={formData.state} onChange={handleChange} required aria-required="true" /></label>
+        <label>State Code<input name="state_code" value={formData.state_code} onChange={handleChange} required aria-required="true" placeholder="e.g. 27" /></label>
+        <label className="full-width">Registered Address<textarea name="registered_address" value={formData.registered_address} onChange={handleChange} required rows={3} /></label>
+        <label className="full-width">Contact Details<input name="contact_details" value={formData.contact_details} onChange={handleChange} placeholder="Phone, email, or other contact information" /></label>
+      </div>
+
+      <div className="form-actions">
         <button type="submit" className="primary-button" disabled={saving}>
           {saving ? 'Saving...' : 'Save Changes'}
         </button>

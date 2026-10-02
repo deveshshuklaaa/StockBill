@@ -79,7 +79,7 @@ export function formatMasterBoxView(baseQuantity, boxSize) {
 }
 
 // Secondary stock line for tables/cards: base quantity plus optional
-// master-box representation ("200 pcs · 1 box + 8 pcs"). Sub-box stock
+// master-box representation ("200 pcs / 1 box + 8 pcs"). Sub-box stock
 // shows pieces only; the main numeric value is always the base quantity.
 export function formatStockWithBoxes(baseQuantity, product) {
   const unit = product?.base_unit || product?.unit_type
@@ -89,7 +89,7 @@ export function formatStockWithBoxes(baseQuantity, product) {
   const quantity = Number(baseQuantity)
   if (!Number.isFinite(quantity) || quantity < box) return base
   const boxText = formatMasterBoxView(baseQuantity, box)
-  return boxText ? `${base} · ${boxText}` : base
+  return boxText ? `${base} / ${boxText}` : base
 }
 
 // Variant identity line: weight + MRP + SKU + category.

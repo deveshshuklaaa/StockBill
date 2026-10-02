@@ -6,7 +6,7 @@ import { fetchActiveSuppliers, fetchSupplierPricing } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 
-function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
+function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
 function today() { return new Date().toISOString().slice(0, 10) }
 
@@ -319,9 +319,9 @@ export default function NewPurchasePage() {
             <label>Purchase date<input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} required /></label>
             <label>Supplier bill no<input value={supplierInvoiceNo} onChange={(e) => setSupplierInvoiceNo(e.target.value)} placeholder="As printed on the bill" /></label>
             <label>Receiving warehouse<select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} required><option value="">Select warehouse</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
-            <label>Tax mode<select value={taxMode} onChange={(e) => setTaxMode(e.target.value)}><option value="exclusive">Exclusive</option><option value="inclusive">Inclusive</option></select></label>
+            <label className="purchase-inline-field"><span>Tax Mode</span><select value={taxMode} onChange={(e) => setTaxMode(e.target.value)}><option value="exclusive">Exclusive</option><option value="inclusive">Inclusive</option></select></label>
           </div>
-          <label className="filter-field" style={{ marginTop: 14, display: 'block' }}>Notes<textarea style={{ display: 'block', width: '100%', marginTop: 6, border: '1px solid #cbd5cd', padding: '10px 11px', fontFamily: 'inherit', resize: 'vertical' }} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional reference notes" /></label>
+          <label className="purchase-inline-field" style={{ marginTop: 14 }}><span>Notes</span><textarea className="form-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional reference notes" /></label>
         </section>
 
         <section className="invoice-card lines-card">
@@ -351,54 +351,111 @@ export default function NewPurchasePage() {
               const calculated = calculateLine(line, taxMode)
               const box = masterBoxSize(line.productData)
               const isMasterBox = line.purchaseUnit === 'master box'
-              return <div className="invoice-line" key={line.key}>
+              return <div className="invoice-line new-purchase-line" key={line.key}>
                 <div className="line-product">
-                  <strong>{line.productData.name}</strong>
+                  <span className="line-field-title">Product</span>
+                  <strong className="line-product-name">{line.productData.name}</strong>
                   <span className="variant-line">{variantSummary(line.productData) || line.productData.base_unit}</span>
-                  <span className="line-conversion-badge" style={{ display: 'block', marginTop: 4, color: '#1e40af', fontSize: '0.85rem' }}>
+                  <span className="line-conversion-badge">
                     {isMasterBox && box
                       ? `Conversion: ${line.quantity || 0} × ${box} = ${calculated.baseQty} Pieces`
                       : `${calculated.baseQty} ${line.productData.base_unit || 'Pieces'}`}
                     {' · '}Effective cost: {money(calculated.unitCost)} / pc
                   </span>
                 </div>
-                <label>Unit<select value={line.purchaseUnit} onChange={(e) => updateLine(line.key, 'purchaseUnit', e.target.value)}>
-                  <option value="piece">Pieces</option>
-                  {box && <option value="master box">Master Box ({box} pcs)</option>}
-                </select></label>
-                <label>{isMasterBox ? 'Master Boxes' : 'Pieces'}<input type="number" min="0.001" step={isMasterBox ? '1' : '0.001'} value={line.quantity} onChange={(e) => updateLine(line.key, 'quantity', e.target.value)} placeholder={isMasterBox ? 'Boxes' : 'Pieces'} aria-label={`Quantity in ${isMasterBox ? 'master boxes' : 'pieces'} for ${line.productData.name}`} /></label>
-                <label>
-                  Purchase Rate (per Piece)
+                <label className="line-field line-field-unit">
+                  <span className="line-field-title">Unit</span>
+                  <select value={line.purchaseUnit} onChange={(e) => updateLine(line.key, 'purchaseUnit', e.target.value)} aria-label={`Unit for ${line.productData.name}`}>
+                    <option value="piece">Pieces</option>
+                    {box && <option value="master box">Master Box ({box} pcs)</option>}
+                  </select>
+                </label>
+                <label className="line-field line-field-qty">
+                  <span className="line-field-title">Qty</span>
+                  <input
+                    type="number"
+                    min="0.001"
+                    step={isMasterBox ? '1' : '0.001'}
+                    value={line.quantity}
+                    onChange={(e) => updateLine(line.key, 'quantity', e.target.value)}
+                    placeholder={isMasterBox ? 'Boxes' : 'Pieces'}
+                    aria-label={`Quantity in ${isMasterBox ? 'master boxes' : 'pieces'} for ${line.productData.name}`}
+                  />
+                </label>
+                <label className="line-field line-field-mrp">
+                  <span className="line-field-title">MRP</span>
+                  <input
+                    type="text"
+                    readOnly
+                    tabIndex={-1}
+                    value={line.productData?.mrp != null ? `₹${Number(line.productData.mrp).toFixed(2)}` : '—'}
+                    className="line-mrp-input"
+                    aria-label={`MRP for ${line.productData.name}`}
+                  />
+                </label>
+                <label className="line-field line-field-rate">
+                  <span className="line-field-title">Purchase Rate</span>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={line.rate}
                     onChange={(e) => updateLine(line.key, 'rate', e.target.value)}
-                    placeholder="₹ / piece"
+                    placeholder="₹ / pc"
+                    className="line-rate-input"
                     aria-label={`Purchase rate per piece for ${line.productData.name}`}
                   />
                   {line.hasSupplierPrice && !line.isManualRate && (
-                    <span style={{ fontSize: '0.72rem', color: '#047857', display: 'block', marginTop: 2, fontWeight: 500 }}>
+                    <span
+                      className="line-rate-hint rate-supplier supplier-rate-badge"
+                      title={`Supplier rate${line.productData?.mrp != null ? ` (MRP ₹${Number(line.productData.mrp).toFixed(2)})` : ''}: ₹${Number(line.rate).toFixed(2)}/pc`}
+                    >
                       Supplier rate{line.productData?.mrp != null ? ` (MRP ₹${Number(line.productData.mrp).toFixed(2)})` : ''}: ₹{Number(line.rate).toFixed(2)}/pc
                     </span>
                   )}
                   {line.isManualRate && line.hasSupplierPrice && (
-                    <span style={{ fontSize: '0.72rem', color: '#d97706', display: 'block', marginTop: 2, fontWeight: 500 }}>
+                    <span className="line-rate-hint rate-manual manual-override-badge">
                       Manually overridden
                     </span>
                   )}
                 </label>
-                <label>Disc (₹)<input type="number" min="0" step="0.01" value={line.discountAmount} onChange={(e) => updateLine(line.key, 'discountAmount', e.target.value)} placeholder="0.00" aria-label={`Discount amount for ${line.productData.name}`} /></label>
-                <div className="line-tax" style={{ minWidth: 65, textAlign: 'center' }}>
-                  <span>{calculated.taxRate}%</span>
-                  <small style={{ display: 'block', color: '#64748b' }}>{money(calculated.tax)}</small>
+                <label className="line-field line-field-disc">
+                  <span className="line-field-title">Disc.</span>
+                  <div className="disc-input-wrap">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.discountAmount}
+                      onChange={(e) => updateLine(line.key, 'discountAmount', e.target.value)}
+                      placeholder="0.00"
+                      className="line-disc-input"
+                      aria-label={`Discount amount for ${line.productData.name}`}
+                    />
+                    <span className="disc-symbol">%</span>
+                  </div>
+                </label>
+                <div className="line-field line-field-tax">
+                  <span className="line-field-title">GST</span>
+                  <div className="line-val-display">{calculated.taxRate}%</div>
                 </div>
-                <div className="line-total" style={{ minWidth: 110, textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Taxable: {money(calculated.taxable)}</div>
-                  <strong>{money(calculated.total)}</strong>
+                <div className="line-field line-field-taxable">
+                  <span className="line-field-title">Taxable</span>
+                  <div className="line-val-display line-val-taxable">
+                    <span className="sr-only">{`Taxable: ${money(calculated.taxable)}`}</span>
+                    <span aria-hidden="true">{money(calculated.taxable)}</span>
+                  </div>
                 </div>
-                <button type="button" className="remove-line" onClick={() => removeLine(line.key)} aria-label="Remove line">×</button>
+                <div className="line-field line-field-total">
+                  <span className="line-field-title">Total</span>
+                  <div className="line-val-display line-val-total">
+                    <strong>{money(calculated.total)}</strong>
+                  </div>
+                </div>
+                <div className="line-field line-field-remove">
+                  <span className="line-field-title">&nbsp;</span>
+                  <button type="button" className="remove-line" onClick={() => removeLine(line.key)} aria-label="Remove line" title="Remove line">×</button>
+                </div>
               </div>
             })}
           </div>}

@@ -13,7 +13,7 @@ function rows(data) {
 }
 
 function money(value) {
-  return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+  return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 }
 
 function makeInvoiceNumber() {
@@ -510,11 +510,15 @@ export default function NewInvoicePage() {
                   const overStock = baseQty > Number(line.productData.current_stock)
                   const fixedUnit = Number(line.productData.unit_conversion_factor) <= 1
                   return (
-                    <div className="invoice-line" key={line.key}>
-                      <div className="line-number">{String(index + 1).padStart(2, '0')}</div>
+                    <div className="invoice-line new-invoice-line" key={line.key}>
+                      <div className="line-number">
+                        <span className="line-field-title">#</span>
+                        <span className="line-number-val">{String(index + 1).padStart(2, '0')}</span>
+                      </div>
                       <div className="line-product">
-                        <strong>{line.productData.name}</strong>
-                        <span>{formatStockWithBoxes(line.productData.current_stock, line.productData)} available</span>
+                        <span className="line-field-title">Product</span>
+                        <strong className="line-product-name">{line.productData.name}</strong>
+                        <span className="line-product-stock">{formatStockWithBoxes(line.productData.current_stock, line.productData)} available</span>
                         {line.salesUnit === 'master box' && box ? (
                           <span className="variant-line">
                             {line.quantity || 0} Box × {box} = {formatQuantityWithUnit(baseQty, line.productData.base_unit || 'piece')}
@@ -527,7 +531,8 @@ export default function NewInvoicePage() {
                           </span>
                         )}
                       </div>
-                      <label>Unit
+                      <label className="line-field line-field-unit">
+                        <span className="line-field-title">Unit</span>
                         <select
                           value={line.salesUnit}
                           onChange={(event) => updateLine(line.key, 'salesUnit', event.target.value)}
@@ -537,9 +542,31 @@ export default function NewInvoicePage() {
                           {box && <option value="master box">Master Box ({box})</option>}
                         </select>
                       </label>
-                      <label>Qty<input type="number" min="0.001" step={fixedUnit ? '1' : '0.001'} value={line.quantity} onChange={(event) => updateLine(line.key, 'quantity', event.target.value)} className={overStock ? 'input-warning' : ''} /></label>
-                      <label>
-                        Rate / Piece
+                      <label className="line-field line-field-qty">
+                        <span className="line-field-title">Qty</span>
+                        <input
+                          type="number"
+                          min="0.001"
+                          step={fixedUnit ? '1' : '0.001'}
+                          value={line.quantity}
+                          onChange={(event) => updateLine(line.key, 'quantity', event.target.value)}
+                          className={overStock ? 'input-warning' : ''}
+                          aria-label={`Quantity for ${line.productData.name}`}
+                        />
+                      </label>
+                      <label className="line-field line-field-mrp">
+                        <span className="line-field-title">MRP</span>
+                        <input
+                          type="text"
+                          readOnly
+                          tabIndex={-1}
+                          value={line.productData?.mrp != null ? `₹${Number(line.productData.mrp).toFixed(2)}` : '—'}
+                          className="line-mrp-input"
+                          aria-label={`MRP for ${line.productData.name}`}
+                        />
+                      </label>
+                      <label className="line-field line-field-rate">
+                        <span className="line-field-title">Rate / Piece</span>
                         <input
                           type="number"
                           min="0"
@@ -548,29 +575,67 @@ export default function NewInvoicePage() {
                           onChange={(event) =>
                             updateLine(line.key, 'rate_charged', event.target.value)
                           }
-                          placeholder="₹ / piece"
+                          placeholder="₹ / pc"
+                          className="line-rate-input"
                           aria-label={`Selling rate per piece for ${line.productData.name}`}
                         />
                         {line.hasCustomerPrice && !line.isManualRate && (
-                          <span style={{ fontSize: '0.75rem', color: '#047857', display: 'block' }}>
+                          <span
+                            className="line-rate-hint rate-customer"
+                            title={`Customer MRP rate (₹${Number(line.rate_charged).toFixed(2)}/pc)`}
+                          >
                             ✓ Customer MRP rate (₹{Number(line.rate_charged).toFixed(2)}/pc)
                           </span>
                         )}
-                        {!line.hasCustomerPrice && (
-                          <span style={{ fontSize: '0.75rem', color: '#b45309', display: 'block' }}>
-                            No MRP ₹{Number(line.productData.mrp || 0).toFixed(2)} rate configured
+                        {!line.hasCustomerPrice && !line.isManualRate && (
+                          <span
+                            className="line-rate-hint rate-missing"
+                            title={`No MRP ₹${Number(line.productData?.mrp || 0).toFixed(2)} rate configured`}
+                          >
+                            No MRP rate configured
                           </span>
                         )}
                         {line.isManualRate && (
-                          <span style={{ fontSize: '0.75rem', color: '#6b7280', display: 'block' }}>
+                          <span className="line-rate-hint rate-manual">
                             (manual override)
                           </span>
                         )}
                       </label>
-                      <label>Disc<input type="number" min="0" step="0.01" value={line.discount_amount} onChange={(event) => updateLine(line.key, 'discount_amount', event.target.value)} /></label>
-                      <div className="line-tax">{line.tax_rate}%</div>
-                      <div className="line-total">{money(calculated.total)}</div>
-                      <button type="button" className="remove-line" onClick={() => removeLine(line.key)} aria-label="Remove line">×</button>
+                      <label className="line-field line-field-disc">
+                        <span className="line-field-title">Disc.</span>
+                        <div className="disc-input-wrap">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={line.discount_amount}
+                            onChange={(event) => updateLine(line.key, 'discount_amount', event.target.value)}
+                            className="line-disc-input"
+                            aria-label={`Discount for ${line.productData.name}`}
+                          />
+                          <span className="disc-symbol">%</span>
+                        </div>
+                      </label>
+                      <div className="line-field line-field-tax">
+                        <span className="line-field-title">GST</span>
+                        <div className="line-val-display">{line.tax_rate}%</div>
+                      </div>
+                      <div className="line-field line-field-total">
+                        <span className="line-field-title">Line Total</span>
+                        <div className="line-val-display line-val-total">{money(calculated.total)}</div>
+                      </div>
+                      <div className="line-field line-field-remove">
+                        <span className="line-field-title">&nbsp;</span>
+                        <button
+                          type="button"
+                          className="remove-line"
+                          onClick={() => removeLine(line.key)}
+                          aria-label="Remove line"
+                          title="Remove item"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
                   )
                 })}

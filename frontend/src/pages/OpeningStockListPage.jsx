@@ -287,9 +287,7 @@ export default function OpeningStockListPage() {
                       <strong>{money(record.opening_value)}</strong>
                     </td>
                     <td>
-                      <span className="badge" style={{ backgroundColor: '#f3f4f6', color: '#374151', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem' }}>
-                        {record.reason}
-                      </span>
+                      <span className="badge badge-not-set">{record.reason}</span>
                     </td>
                   </tr>
                 ))}

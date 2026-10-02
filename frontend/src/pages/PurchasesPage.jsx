@@ -6,7 +6,7 @@ import { fetchSuppliers } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 
-function money(value) { return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
+function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
 const STATE_BADGE = {
   DRAFT: 'type-chip',

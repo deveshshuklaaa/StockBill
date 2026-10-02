@@ -158,9 +158,7 @@ export default function OpeningStockDetailPage() {
             <div>
               <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>Reason</span>
               <div>
-                <span className="badge" style={{ backgroundColor: '#f3f4f6', color: '#374151', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                  {openingStock.reason}
-                </span>
+                <span className="badge badge-not-set">{openingStock.reason}</span>
               </div>
             </div>
             <div>

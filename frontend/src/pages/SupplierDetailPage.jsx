@@ -334,33 +334,35 @@ export default function SupplierDetailPage() {
       </div>
 
       {/* Supplier Purchase Pricing Section (MRP-based) */}
-      <div className="supplier-pricing-section" style={{ marginTop: '28px', borderTop: '1px solid #e5e7eb', paddingTop: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+      <div className="supplier-pricing-section" style={{ margin: '28px 0 16px' }} id="supplier-pricing">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <div>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>Supplier Purchase Rates</h2>
-            <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.875rem' }}>
-              Configure default purchase rates per piece by MRP slab. Products sharing the same MRP automatically receive that rate on purchase entry.
-            </p>
+            <p className="eyebrow" style={{ margin: 0 }}>Purchase Rates</p>
+            <h2 style={{ fontSize: '1.25rem', margin: '4px 0 0' }}>Supplier MRP Pricing</h2>
           </div>
           {isAdmin && supplier.is_active && (
             <button
               type="button"
-              className="secondary-button"
+              className="quiet-button"
               onClick={() => setShowAddCustomSlab((prev) => !prev)}
               id="btn-toggle-add-pricing"
             >
-              {showAddCustomSlab ? 'Close Custom Slab' : '+ Add Custom MRP Slab'}
+              {showAddCustomSlab ? 'Cancel' : '+ Add Custom MRP'}
             </button>
           )}
         </div>
 
+        <p style={{ fontSize: '0.875rem', color: '#4b5563', margin: '0 0 12px' }}>
+          Configure default purchase rates per piece by MRP slab. <strong>Rate is per piece/base unit.</strong> Products sharing the same MRP automatically receive that rate on purchase entry.
+        </p>
+
         {pricingMsg && (
-          <div style={{ backgroundColor: '#ecfdf5', color: '#065f46', padding: '0.6rem 1rem', borderRadius: '6px', marginBottom: '12px', fontSize: '0.875rem' }}>
+          <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#f0fdf4', color: '#166534', borderRadius: '4px', fontSize: '0.85rem', marginBottom: '10px' }}>
             {pricingMsg}
           </div>
         )}
         {pricingError && (
-          <div style={{ backgroundColor: '#fef2f2', color: '#991b1b', padding: '0.6rem 1rem', borderRadius: '6px', marginBottom: '12px', fontSize: '0.875rem' }}>
+          <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#fef2f2', color: '#b91c1c', borderRadius: '4px', fontSize: '0.85rem', marginBottom: '10px' }}>
             {pricingError}
           </div>
         )}
@@ -371,17 +373,16 @@ export default function SupplierDetailPage() {
             onSubmit={addCustomSlab}
             style={{
               display: 'flex',
-              gap: '12px',
+              gap: '10px',
               alignItems: 'center',
-              padding: '14px',
+              padding: '12px',
               backgroundColor: '#f9fafb',
-              border: '1px solid #e5e7eb',
-              borderRadius: '8px',
-              marginBottom: '16px',
+              borderRadius: '6px',
+              marginBottom: '12px',
               flexWrap: 'wrap',
             }}
           >
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               MRP (₹):
               <input
                 type="number"
@@ -390,12 +391,12 @@ export default function SupplierDetailPage() {
                 placeholder="e.g. 5.00"
                 value={customMrp}
                 onChange={(e) => setCustomMrp(e.target.value)}
-                style={{ width: '110px' }}
+                style={{ width: '100px' }}
                 required
                 aria-label="Custom MRP"
               />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               Rate / Piece (₹):
               <input
                 type="number"
@@ -404,29 +405,13 @@ export default function SupplierDetailPage() {
                 placeholder="e.g. 3.20"
                 value={customRate}
                 onChange={(e) => setCustomRate(e.target.value)}
-                style={{ width: '110px' }}
+                style={{ width: '100px' }}
                 required
                 aria-label="Custom rate per piece"
               />
             </label>
-            <button
-              type="submit"
-              className="primary-button"
-              style={{ padding: '0.4rem 0.9rem' }}
-              id="btn-save-custom-slab"
-            >
+            <button type="submit" className="primary-button" style={{ padding: '0.4rem 0.8rem' }} id="btn-save-custom-slab">
               Add Slab
-            </button>
-            <button
-              type="button"
-              className="quiet-button"
-              onClick={() => {
-                setShowAddCustomSlab(false)
-                setCustomMrp('')
-                setCustomRate('')
-              }}
-            >
-              Cancel
             </button>
           </form>
         )}
@@ -481,7 +466,7 @@ export default function SupplierDetailPage() {
                     return (
                       <tr key={mrpStr}>
                         <td>
-                          <strong>₹{mrpStr}</strong>
+                          <strong>₹{Number(mrpStr).toFixed(2)}</strong>
                         </td>
                         <td>
                           {isAdmin && supplier.is_active ? (
@@ -516,46 +501,11 @@ export default function SupplierDetailPage() {
                         </td>
                         <td>
                           {isConfigured ? (
-                            <span
-                              className="badge"
-                              style={{
-                                backgroundColor: '#ecfdf5',
-                                color: '#065f46',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                fontWeight: 600,
-                              }}
-                            >
-                              Configured
-                            </span>
+                            <span className="badge badge-configured">Configured</span>
                           ) : existing && !existing.is_active ? (
-                            <span
-                              className="badge"
-                              style={{
-                                backgroundColor: '#fef2f2',
-                                color: '#991b1b',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                fontWeight: 600,
-                              }}
-                            >
-                              Inactive
-                            </span>
+                            <span className="badge badge-inactive">Inactive</span>
                           ) : (
-                            <span
-                              className="badge"
-                              style={{
-                                backgroundColor: '#f3f4f6',
-                                color: '#6b7280',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                              }}
-                            >
-                              Not Set
-                            </span>
+                            <span className="badge badge-not-set">Not Set</span>
                           )}
                         </td>
                         {isAdmin && (

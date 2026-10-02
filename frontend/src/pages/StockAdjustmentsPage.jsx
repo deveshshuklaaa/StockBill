@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { formatQuantityWithUnit } from '../utils/format'
 
 function money(value) {
-  return `Rs ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+  return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 }
 
 const TYPE_BADGE = {

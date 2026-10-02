@@ -117,17 +117,18 @@ export default function WarehouseTransfersPage() {
       <StatusMessage>{error}</StatusMessage>
 
       <div className="table-frame">
-        <div className="table-meta">
+        <div className="table-meta transfers-table-meta">
           <span>
             {busy ? 'Loading transfers...' : `${total} transfer${total === 1 ? '' : 's'}`}
           </span>
-          <div className="table-filters" style={{ flexWrap: 'wrap', gap: '8px' }}>
+          <div className="transfers-filter-row">
             <input
               type="text"
               placeholder="Search transfer #, product, warehouse..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              style={{ width: '220px' }}
+              aria-label="Search transfers"
+              className="transfer-filter-search"
             />
             <select
               value={warehouseFilter}
@@ -135,6 +136,8 @@ export default function WarehouseTransfersPage() {
                 setWarehouseFilter(e.target.value)
                 setPage(1)
               }}
+              aria-label="Filter by warehouse"
+              className="transfer-filter-select"
             >
               <option value="">All Warehouses</option>
               {warehouses.map((wh) => (
@@ -149,6 +152,8 @@ export default function WarehouseTransfersPage() {
                 setReasonFilter(e.target.value)
                 setPage(1)
               }}
+              aria-label="Filter by reason"
+              className="transfer-filter-select"
             >
               <option value="">All Reasons</option>
               {REASONS_ALL.map((r) => (
@@ -160,26 +165,29 @@ export default function WarehouseTransfersPage() {
             <input
               type="date"
               title="From date"
+              aria-label="From date"
               value={fromDate}
               onChange={(e) => {
                 setFromDate(e.target.value)
                 setPage(1)
               }}
+              className="transfer-filter-date"
             />
             <input
               type="date"
               title="To date"
+              aria-label="To date"
               value={toDate}
               onChange={(e) => {
                 setToDate(e.target.value)
                 setPage(1)
               }}
+              className="transfer-filter-date"
             />
             {(warehouseFilter || reasonFilter || fromDate || toDate || search) && (
               <button
                 type="button"
-                className="quiet-button"
-                style={{ border: '1px solid #cbd5cd' }}
+                className="reset-button"
                 onClick={handleResetFilters}
               >
                 Reset
@@ -270,14 +278,14 @@ export default function WarehouseTransfersPage() {
           </div>
         )}
 
-        <footer className="table-pagination">
+        <div className="table-meta pager" role="navigation" aria-label="Transfer pagination">
           <span>
             Page {page} of {totalPages}
           </span>
-          <div className="table-pagination-actions">
+          <div style={{ display: 'flex', gap: '8px' }}>
             <button
               type="button"
-              className="quiet-button"
+              className="pager-button"
               disabled={!hasPrevious || busy}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
@@ -285,14 +293,14 @@ export default function WarehouseTransfersPage() {
             </button>
             <button
               type="button"
-              className="quiet-button"
+              className="pager-button"
               disabled={!hasNext || busy}
               onClick={() => setPage((p) => p + 1)}
             >
               Next
             </button>
           </div>
-        </footer>
+        </div>
       </div>
     </section>
   )

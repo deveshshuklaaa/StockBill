@@ -458,46 +458,11 @@ export default function CustomerDetailPage() {
                         </td>
                         <td>
                           {isConfigured ? (
-                            <span
-                              className="badge"
-                              style={{
-                                backgroundColor: '#ecfdf5',
-                                color: '#065f46',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                fontWeight: 600,
-                              }}
-                            >
-                              Configured
-                            </span>
+                            <span className="badge badge-configured">Configured</span>
                           ) : existing && !existing.is_active ? (
-                            <span
-                              className="badge"
-                              style={{
-                                backgroundColor: '#fef2f2',
-                                color: '#991b1b',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                fontWeight: 600,
-                              }}
-                            >
-                              Inactive
-                            </span>
+                            <span className="badge badge-inactive">Inactive</span>
                           ) : (
-                            <span
-                              className="badge"
-                              style={{
-                                backgroundColor: '#f3f4f6',
-                                color: '#6b7280',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                              }}
-                            >
-                              Not Set
-                            </span>
+                            <span className="badge badge-not-set">Not Set</span>
                           )}
                         </td>
                         {isAdmin && (

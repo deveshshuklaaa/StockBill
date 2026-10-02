@@ -48,10 +48,20 @@ export default function SalesGstReportPage() {
     }
   }, [range])
 
-  function handleGenerate(e) {
-    if (e) e.preventDefault()
-    if (!fromInput || !toInput) return
-    setRange({ from: fromInput, to: toInput })
+  function handleFromChange(e) {
+    const val = e.target.value
+    setFromInput(val)
+    if (val && toInput) {
+      setRange({ from: val, to: toInput })
+    }
+  }
+
+  function handleToChange(e) {
+    const val = e.target.value
+    setToInput(val)
+    if (fromInput && val) {
+      setRange({ from: fromInput, to: val })
+    }
   }
 
   async function handleExportExcel() {
@@ -186,8 +196,7 @@ export default function SalesGstReportPage() {
       {/* Main Screen Container */}
       <div className="table-frame no-print">
         <div className="table-meta" style={{ flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
-          <form
-            onSubmit={handleGenerate}
+          <div
             className="filter-row report-filters"
             style={{ margin: 0, display: 'inline-flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}
           >
@@ -196,7 +205,7 @@ export default function SalesGstReportPage() {
               <input
                 type="date"
                 value={fromInput}
-                onChange={(e) => setFromInput(e.target.value)}
+                onChange={handleFromChange}
                 aria-label="From Date"
               />
             </label>
@@ -205,14 +214,11 @@ export default function SalesGstReportPage() {
               <input
                 type="date"
                 value={toInput}
-                onChange={(e) => setToInput(e.target.value)}
+                onChange={handleToChange}
                 aria-label="To Date"
               />
             </label>
-            <button type="submit" className="quiet-button" disabled={busy}>
-              Generate
-            </button>
-          </form>
+          </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button
@@ -237,79 +243,77 @@ export default function SalesGstReportPage() {
         </div>
 
         {/* Loading Indicator */}
-        {busy && <div className="loading-state" style={{ padding: '24px', textAlign: 'center', color: '#55695e' }}>Generating report...</div>}
+        {busy && <div className="loading-state">Generating report...</div>}
 
         {/* Empty State */}
         {!busy && report && report.rows.length === 0 && (
-          <div className="empty-state" style={{ padding: '32px 16px', textAlign: 'center' }}>
-            No posted sales invoices found for the selected period.
-          </div>
+          <div className="empty-state">No posted sales invoices found for the selected period.</div>
         )}
 
         {/* Report Data Table */}
         {!busy && hasData && (
           <div className="table-scroll" style={{ maxHeight: 'calc(100vh - 280px)', overflowX: 'auto', overflowY: 'auto' }}>
-            <table className="data-table" style={{ width: '100%', minWidth: '1540px', fontSize: '13px' }}>
+            <table className="report-table" style={{ width: '100%', minWidth: '1540px', fontSize: '13px' }}>
               <thead>
                 <tr>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '95px', minWidth: '95px', whiteSpace: 'nowrap' }}>DATE</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '105px', minWidth: '105px', whiteSpace: 'nowrap' }}>BILL NO.</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', minWidth: '180px', whiteSpace: 'nowrap' }}>PARTY NAME</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '135px', minWidth: '135px', whiteSpace: 'nowrap' }}>GSTIN</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '95px', minWidth: '95px', whiteSpace: 'nowrap' }}>HSN</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '110px', minWidth: '110px', whiteSpace: 'nowrap' }}>BILL AMT.</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '105px', minWidth: '105px', whiteSpace: 'nowrap' }}>TAXABLE</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '95px', minWidth: '95px', whiteSpace: 'nowrap' }}>TAX</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '95px', minWidth: '95px', whiteSpace: 'nowrap' }}>SGST</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '95px', minWidth: '95px', whiteSpace: 'nowrap' }}>CGST</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '90px', minWidth: '90px', whiteSpace: 'nowrap' }}>IGST</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '105px', minWidth: '105px', whiteSpace: 'nowrap' }}>TOTAL GST</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '70px', minWidth: '70px', whiteSpace: 'nowrap' }}>SUR.</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '85px', minWidth: '85px', whiteSpace: 'nowrap' }}>TAX FREE</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '90px', minWidth: '90px', whiteSpace: 'nowrap' }}>EXEMPTED</th>
-                  <th style={{ textAlign: 'center', verticalAlign: 'middle', width: '80px', minWidth: '80px', whiteSpace: 'nowrap' }}>R.OFF</th>
+                  <th style={{ width: '95px', minWidth: '95px' }}>DATE</th>
+                  <th style={{ width: '105px', minWidth: '105px' }}>BILL NO.</th>
+                  <th style={{ minWidth: '180px' }}>PARTY NAME</th>
+                  <th style={{ width: '135px', minWidth: '135px' }}>GSTIN</th>
+                  <th style={{ width: '95px', minWidth: '95px' }}>HSN</th>
+                  <th className="numeric" style={{ width: '110px', minWidth: '110px' }}>BILL AMT.</th>
+                  <th className="numeric" style={{ width: '105px', minWidth: '105px' }}>TAXABLE</th>
+                  <th className="numeric" style={{ width: '95px', minWidth: '95px' }}>TAX</th>
+                  <th className="numeric" style={{ width: '95px', minWidth: '95px' }}>SGST</th>
+                  <th className="numeric" style={{ width: '95px', minWidth: '95px' }}>CGST</th>
+                  <th className="numeric" style={{ width: '90px', minWidth: '90px' }}>IGST</th>
+                  <th className="numeric" style={{ width: '105px', minWidth: '105px' }}>TOTAL GST</th>
+                  <th className="numeric muted" style={{ width: '70px', minWidth: '70px' }}>SUR.</th>
+                  <th className="numeric muted" style={{ width: '85px', minWidth: '85px' }}>TAX FREE</th>
+                  <th className="numeric muted" style={{ width: '90px', minWidth: '90px' }}>EXEMPTED</th>
+                  <th className="numeric" style={{ width: '80px', minWidth: '80px' }}>R.OFF</th>
                 </tr>
               </thead>
               <tbody>
                 {report.rows.map((row) => (
                   <tr key={row.bill_no}>
-                    <td style={{ textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>{row.date}</td>
-                    <td style={{ textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600 }}>{row.bill_no}</td>
-                    <td style={{ textAlign: 'left', verticalAlign: 'middle' }}>{row.party_name}</td>
-                    <td style={{ textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>{row.gstin || '-'}</td>
-                    <td style={{ textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>{row.hsn || '-'}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 600, whiteSpace: 'nowrap' }}>₹{formatCurrency(row.bill_amt)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>₹{formatCurrency(row.taxable)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>₹{formatCurrency(row.tax)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>₹{formatCurrency(row.sgst)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>₹{formatCurrency(row.cgst)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>₹{formatCurrency(row.igst)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600 }}>₹{formatCurrency(row.total_gst)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap', color: '#88988e' }}>{formatCurrency(row.sur)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap', color: '#88988e' }}>{formatCurrency(row.tax_free)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap', color: '#88988e' }}>{formatCurrency(row.exempted)}</td>
-                    <td style={{ textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap', color: Number(row.r_off) !== 0 ? '#1e382b' : '#88988e' }}>
+                    <td>{row.date}</td>
+                    <td style={{ fontWeight: 600 }}>{row.bill_no}</td>
+                    <td style={{ textAlign: 'left' }}>{row.party_name}</td>
+                    <td style={{ fontFamily: 'monospace' }}>{row.gstin || '-'}</td>
+                    <td>{row.hsn || '-'}</td>
+                    <td className="numeric" style={{ fontWeight: 600 }}>₹{formatCurrency(row.bill_amt)}</td>
+                    <td className="numeric">₹{formatCurrency(row.taxable)}</td>
+                    <td className="numeric">₹{formatCurrency(row.tax)}</td>
+                    <td className="numeric">₹{formatCurrency(row.sgst)}</td>
+                    <td className="numeric">₹{formatCurrency(row.cgst)}</td>
+                    <td className="numeric">₹{formatCurrency(row.igst)}</td>
+                    <td className="numeric" style={{ fontWeight: 600 }}>₹{formatCurrency(row.total_gst)}</td>
+                    <td className="numeric muted">{formatCurrency(row.sur)}</td>
+                    <td className="numeric muted">{formatCurrency(row.tax_free)}</td>
+                    <td className="numeric muted">{formatCurrency(row.exempted)}</td>
+                    <td className="numeric" style={{ color: Number(row.r_off) !== 0 ? '#1e382b' : '#88988e' }}>
                       {Number(row.r_off) > 0 ? `+${formatCurrency(row.r_off)}` : formatCurrency(row.r_off)}
                     </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
-                <tr style={{ background: '#f2f6f3', fontWeight: 'bold', borderTop: '2px solid #2c4d3b' }}>
-                  <td colSpan={5} style={{ textAlign: 'left', verticalAlign: 'middle', fontWeight: 'bold' }}>
+                <tr>
+                  <td colSpan={5} style={{ textAlign: 'left' }}>
                     TOTAL ({totals.invoice_count} {totals.invoice_count === 1 ? 'Invoice' : 'Invoices'})
                   </td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 800, whiteSpace: 'nowrap' }}>₹{formatCurrency(totals.bill_amt)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>₹{formatCurrency(totals.taxable)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>₹{formatCurrency(totals.tax)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>₹{formatCurrency(totals.sgst)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>₹{formatCurrency(totals.cgst)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>₹{formatCurrency(totals.igst)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 800, whiteSpace: 'nowrap' }}>₹{formatCurrency(totals.total_gst)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatCurrency(totals.sur)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatCurrency(totals.tax_free)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatCurrency(totals.exempted)}</td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  <td className="numeric" style={{ fontWeight: 800 }}>₹{formatCurrency(totals.bill_amt)}</td>
+                  <td className="numeric" style={{ fontWeight: 700 }}>₹{formatCurrency(totals.taxable)}</td>
+                  <td className="numeric" style={{ fontWeight: 700 }}>₹{formatCurrency(totals.tax)}</td>
+                  <td className="numeric" style={{ fontWeight: 700 }}>₹{formatCurrency(totals.sgst)}</td>
+                  <td className="numeric" style={{ fontWeight: 700 }}>₹{formatCurrency(totals.cgst)}</td>
+                  <td className="numeric" style={{ fontWeight: 700 }}>₹{formatCurrency(totals.igst)}</td>
+                  <td className="numeric" style={{ fontWeight: 800 }}>₹{formatCurrency(totals.total_gst)}</td>
+                  <td className="numeric muted" style={{ fontWeight: 700 }}>{formatCurrency(totals.sur)}</td>
+                  <td className="numeric muted" style={{ fontWeight: 700 }}>{formatCurrency(totals.tax_free)}</td>
+                  <td className="numeric muted" style={{ fontWeight: 700 }}>{formatCurrency(totals.exempted)}</td>
+                  <td className="numeric" style={{ fontWeight: 700 }}>
                     {Number(totals.r_off) > 0 ? `+${formatCurrency(totals.r_off)}` : formatCurrency(totals.r_off)}
                   </td>
                 </tr>

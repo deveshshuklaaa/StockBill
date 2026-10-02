@@ -1003,15 +1003,43 @@ def build_item_summary_xlsx(summary_data):
     ws["B4"] = timezone.localtime().strftime("%Y-%m-%d %H:%M:%S")
     ws["B4"].font = meta_val_font
 
+    def format_stock_with_boxes_py(base_quantity, item_dict):
+        unit = item_dict.get("base_unit") or item_dict.get("unit_type") or "piece"
+        try:
+            qty_num = float(Decimal(str(base_quantity)))
+        except Exception:
+            qty_num = 0.0
+
+        qty_str = f"{int(qty_num):,}" if qty_num.is_integer() else f"{qty_num:,.3f}"
+        unit_str = "pcs" if unit == "piece" else unit
+        base_text = f"{qty_str} {unit_str}"
+
+        attrs = item_dict.get("attributes") or {}
+        box_size_raw = attrs.get("units_per_master_box")
+        try:
+            box_size = int(box_size_raw) if box_size_raw is not None else 0
+        except (ValueError, TypeError):
+            box_size = 0
+
+        if box_size <= 0 or qty_num < box_size:
+            return base_text
+
+        full_boxes = int(qty_num // box_size)
+        remaining = int(qty_num % box_size)
+        box_label = "1 box" if full_boxes == 1 else f"{full_boxes:,} boxes"
+        if remaining == 0:
+            box_text = box_label
+        else:
+            box_text = f"{box_label} + {remaining:,} pcs"
+
+        return f"{base_text} / {box_text}"
+
     # 2. Table Headers (Row 6)
     headers = [
-        "Product",
-        "SKU",
-        "Variant/Pack",
+        "#",
+        "PRODUCT NAME",
         "MRP",
-        "Total Quantity",
-        "Base Unit",
-        "Invoice Count",
+        "TOTAL QUANTITY",
     ]
     header_row = 6
     ws.row_dimensions[header_row].height = 24
@@ -1029,95 +1057,62 @@ def build_item_summary_xlsx(summary_data):
     # 3. Data rows
     items = summary_data.get("items", [])
     current_row = header_row + 1
-    for item in items:
-        # Product
-        c1 = ws.cell(row=current_row, column=1, value=item.get("product_name") or item.get("name", ""))
+    for idx, item in enumerate(items, 1):
+        # 1. #
+        c1 = ws.cell(row=current_row, column=1, value=idx)
         c1.font = data_font
         c1.border = thin_border
-        c1.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        c1.alignment = Alignment(horizontal="center", vertical="center")
 
-        # SKU
-        c2 = ws.cell(row=current_row, column=2, value=item.get("sku", ""))
+        # 2. PRODUCT NAME
+        c2 = ws.cell(row=current_row, column=2, value=item.get("product_name") or item.get("name", ""))
         c2.font = data_font
         c2.border = thin_border
-        c2.alignment = Alignment(horizontal="left", vertical="center")
+        c2.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-        # Variant/Pack
-        c3 = ws.cell(row=current_row, column=3, value=item.get("variant_summary", ""))
-        c3.font = data_font
-        c3.border = thin_border
-        c3.alignment = Alignment(horizontal="left", vertical="center")
-
-        # MRP
+        # 3. MRP
         mrp_raw = item.get("mrp")
         mrp_val = float(mrp_raw) if mrp_raw is not None else None
-        c4 = ws.cell(row=current_row, column=4, value=mrp_val)
+        c3 = ws.cell(row=current_row, column=3, value=mrp_val)
+        c3.font = data_font
+        c3.border = thin_border
+        c3.alignment = Alignment(horizontal="right", vertical="center")
+        if mrp_val is not None:
+            c3.number_format = '"₹"#,##0.00'
+
+        # 4. TOTAL QUANTITY
+        total_qty_display = format_stock_with_boxes_py(item.get("total_base_quantity", "0"), item)
+        c4 = ws.cell(row=current_row, column=4, value=total_qty_display)
         c4.font = data_font
         c4.border = thin_border
         c4.alignment = Alignment(horizontal="right", vertical="center")
-        if mrp_val is not None:
-            c4.number_format = "#,##0.00"
-
-        # Total Quantity (numeric)
-        qty_raw = item.get("total_base_quantity", "0")
-        qty_val = float(Decimal(str(qty_raw)))
-        c5 = ws.cell(row=current_row, column=5, value=qty_val)
-        c5.font = data_font
-        c5.border = thin_border
-        c5.alignment = Alignment(horizontal="right", vertical="center")
-        c5.number_format = "#,##0.000" if (qty_val % 1 != 0) else "#,##0"
-
-        # Base Unit
-        c6 = ws.cell(row=current_row, column=6, value=item.get("base_unit", "piece"))
-        c6.font = data_font
-        c6.border = thin_border
-        c6.alignment = Alignment(horizontal="center", vertical="center")
-
-        # Invoice Count
-        inv_count_val = int(item.get("invoice_count", 0))
-        c7 = ws.cell(row=current_row, column=7, value=inv_count_val)
-        c7.font = data_font
-        c7.border = thin_border
-        c7.alignment = Alignment(horizontal="right", vertical="center")
-        c7.number_format = "#,##0"
 
         current_row += 1
 
     # 4. Totals Row
     tot_row = current_row
-    ws.cell(row=tot_row, column=1, value="Total Products:").font = total_font
-    ws.cell(row=tot_row, column=1).alignment = Alignment(horizontal="left", vertical="center")
-    ws.cell(row=tot_row, column=1).fill = total_fill
+    ws.cell(row=tot_row, column=1, value="").fill = total_fill
     ws.cell(row=tot_row, column=1).border = total_border
 
-    ws.cell(row=tot_row, column=2, value=int(summary_data.get("total_products", len(items)))).font = total_font
-    ws.cell(row=tot_row, column=2).alignment = Alignment(horizontal="left", vertical="center")
-    ws.cell(row=tot_row, column=2).fill = total_fill
-    ws.cell(row=tot_row, column=2).border = total_border
+    c_tot_prod = ws.cell(row=tot_row, column=2, value=f"Total Products: {len(items)}")
+    c_tot_prod.font = total_font
+    c_tot_prod.fill = total_fill
+    c_tot_prod.border = total_border
+    c_tot_prod.alignment = Alignment(horizontal="left", vertical="center")
 
-    ws.cell(row=tot_row, column=3, value="Total Base Quantity:").font = total_font
-    ws.cell(row=tot_row, column=3).alignment = Alignment(horizontal="right", vertical="center")
-    ws.cell(row=tot_row, column=3).fill = total_fill
-    ws.cell(row=tot_row, column=3).border = total_border
-
-    ws.cell(row=tot_row, column=4, value="").fill = total_fill
-    ws.cell(row=tot_row, column=4).border = total_border
+    c_tot_lbl = ws.cell(row=tot_row, column=3, value="Total Base Qty:")
+    c_tot_lbl.font = total_font
+    c_tot_lbl.fill = total_fill
+    c_tot_lbl.border = total_border
+    c_tot_lbl.alignment = Alignment(horizontal="right", vertical="center")
 
     tot_qty_val = float(Decimal(str(summary_data.get("total_base_quantity", "0"))))
-    tot_qty_cell = ws.cell(row=tot_row, column=5, value=tot_qty_val)
-    tot_qty_cell.font = total_font
-    tot_qty_cell.fill = total_fill
-    tot_qty_cell.border = total_border
-    tot_qty_cell.alignment = Alignment(horizontal="right", vertical="center")
-    tot_qty_cell.number_format = "#,##0.000" if (tot_qty_val % 1 != 0) else "#,##0"
-
-    ws.cell(row=tot_row, column=6, value="piece").fill = total_fill
-    ws.cell(row=tot_row, column=6).border = total_border
-    ws.cell(row=tot_row, column=6).font = total_font
-    ws.cell(row=tot_row, column=6).alignment = Alignment(horizontal="center", vertical="center")
-
-    ws.cell(row=tot_row, column=7, value="").fill = total_fill
-    ws.cell(row=tot_row, column=7).border = total_border
+    qty_formatted = f"{int(tot_qty_val):,} pcs" if tot_qty_val.is_integer() else f"{tot_qty_val:,.3f} pcs"
+    c_tot_qty = ws.cell(row=tot_row, column=4, value=qty_formatted)
+    c_tot_qty.font = total_font
+    c_tot_qty.fill = total_fill
+    c_tot_qty.border = total_border
+    c_tot_qty.alignment = Alignment(horizontal="right", vertical="center")
 
     # 5. Footnote
     note_cell = ws.cell(
@@ -1128,18 +1123,15 @@ def build_item_summary_xlsx(summary_data):
     note_cell.font = note_font
 
     # 6. Autofilter and Freeze Panes
-    ws.auto_filter.ref = f"A{header_row}:G{max(header_row, current_row - 1)}"
+    ws.auto_filter.ref = f"A{header_row}:D{max(header_row, current_row - 1)}"
     ws.freeze_panes = f"A{header_row + 1}"
 
     # 7. Column Widths
     col_widths = {
-        "A": 34,
-        "B": 16,
-        "C": 24,
-        "D": 14,
-        "E": 18,
-        "F": 14,
-        "G": 16,
+        "A": 8,
+        "B": 48,
+        "C": 14,
+        "D": 26,
     }
     for col_letter, width in col_widths.items():
         ws.column_dimensions[col_letter].width = width

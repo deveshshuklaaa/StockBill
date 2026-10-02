@@ -86,10 +86,10 @@ describe('NewPurchasePage master box purchase rate calculations', () => {
     expect(screen.getByText(/Conversion: 5 × 192 = 960 Pieces/i)).toBeInTheDocument()
 
     // Taxable: 960 × 6.66 = 6,393.60
-    expect(screen.getByText(/Taxable: Rs 6,393.60/i)).toBeInTheDocument()
+    expect(screen.getByText(/Taxable: ₹6,393.60/i)).toBeInTheDocument()
 
     // 5% GST = 319.68, Total = 6,713.28
-    expect(screen.getAllByText(/Rs 6,713.28/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/₹6,713.28/i).length).toBeGreaterThanOrEqual(1)
   })
 
   it('produces identical taxable amount and total for 960 pieces and 5 master boxes (x192)', async () => {
@@ -121,8 +121,8 @@ describe('NewPurchasePage master box purchase rate calculations', () => {
     await userEvent.type(rateInput, '6.66')
 
     // Verify piece calculation
-    expect(screen.getByText(/Taxable: Rs 6,393.60/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/Rs 6,713.28/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/Taxable: ₹6,393.60/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/₹6,713.28/i).length).toBeGreaterThanOrEqual(1)
   })
 
   it('calculates 12 master boxes x 120 pcs @ 3.33/piece correctly as 4,795.20 taxable', async () => {
@@ -159,6 +159,6 @@ describe('NewPurchasePage master box purchase rate calculations', () => {
     expect(screen.getByText(/Conversion: 12 × 120 = 1440 Pieces/i)).toBeInTheDocument()
 
     // 1440 × 3.33 = 4,795.20
-    expect(screen.getByText(/Taxable: Rs 4,795.20/i)).toBeInTheDocument()
+    expect(screen.getByText(/Taxable: ₹4,795.20/i)).toBeInTheDocument()
   })
 })

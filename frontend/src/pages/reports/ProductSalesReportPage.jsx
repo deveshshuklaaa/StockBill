@@ -49,7 +49,12 @@ export default function ProductSalesReportPage() {
         : <div className="table-scroll"><table>
           <thead><tr><th>Product</th><th style={{ textAlign: 'right' }}>Qty sold</th><th style={{ textAlign: 'right' }}>Discounts</th><th style={{ textAlign: 'right' }}>Taxable</th><th style={{ textAlign: 'right' }}>GST</th><th style={{ textAlign: 'right' }}>Sales value</th><th style={{ textAlign: 'right' }}>COGS</th><th style={{ textAlign: 'right' }}>Gross profit</th><th style={{ textAlign: 'right' }}>Margin</th></tr></thead>
           <tbody>{report.products.map((row) => <tr key={row.product_id}>
-            <td><strong>{row.product_name}</strong><small>{row.variant_snapshot}</small></td>
+            <td>
+              <strong>{row.product_name}</strong>
+              {row.variant_snapshot && row.variant_snapshot !== row.product_name && (
+                <small>Sold as: {row.variant_snapshot}</small>
+              )}
+            </td>
             <td style={{ textAlign: 'right' }}>{formatQuantityWithUnit(row.quantity_sold, row.base_unit)}</td>
             <td style={{ textAlign: 'right' }}>{money(row.discounts)}</td>
             <td style={{ textAlign: 'right' }}>{money(row.taxable_sales)}</td>
