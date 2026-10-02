@@ -45,14 +45,16 @@ class GstAuditReproductionTests(TestCase):
         )
         from inventory.services import get_default_warehouse
         cls.warehouse = get_default_warehouse()
-        cls.tax_5 = TaxRate.objects.create(name="GST 5%", rate=Decimal("5.00"))
-        cls.tax_18 = TaxRate.objects.create(name="GST 18%", rate=Decimal("18.00"))
-        cls.category = Category.objects.create(name="Snacks", code="SNK")
-        cls.attr_box = AttributeDefinition.objects.create(
+        cls.tax_5, _ = TaxRate.objects.get_or_create(name="GST 5%", defaults={"rate": Decimal("5.00")})
+        cls.tax_18, _ = TaxRate.objects.get_or_create(name="GST 18%", defaults={"rate": Decimal("18.00")})
+        cls.category, _ = Category.objects.get_or_create(code="SNK", defaults={"name": "Snacks"})
+        cls.attr_box, _ = AttributeDefinition.objects.get_or_create(
             code="units_per_master_box",
-            name="Units per Master Box",
-            data_type=AttributeDefinition.TYPE_INTEGER,
-            is_active=True,
+            defaults={
+                "name": "Units per Master Box",
+                "data_type": AttributeDefinition.TYPE_INTEGER,
+                "is_active": True,
+            },
         )
 
     def _create_product(self, name, sku, mrp, pack_size=None, tax=None):

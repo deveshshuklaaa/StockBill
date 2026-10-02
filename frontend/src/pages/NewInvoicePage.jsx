@@ -464,11 +464,24 @@ export default function NewInvoicePage() {
               </div>
             </div>
             {!customer.id && <p className="inline-note" style={{ marginBottom: 10 }}>Walk-in sales are cash only.</p>}
-            <div style={{ display: 'flex', gap: '20px', marginTop: '10px' }}>
+            <div style={{ display: 'flex', gap: '20px', marginTop: '10px', alignItems: 'center' }}>
               <label style={{ flex: 1 }}>Place of supply (State Code)<input value={placeOfSupply} onChange={e => setPlaceOfSupply(e.target.value)} maxLength="2" placeholder="e.g 27" style={{ marginTop: '5px' }} /></label>
-              <label style={{ flex: 1 }}>Tax Mode<select value={taxMode} onChange={e => setTaxMode(e.target.value)} style={{ marginTop: '5px', padding: '10px' }}><option value="exclusive">Exclusive</option><option value="inclusive">Inclusive</option></select></label>
+              <label className="invoice-inline-field" style={{ flex: 1 }}>
+                <span>Tax Mode</span>
+                <select value={taxMode} onChange={e => setTaxMode(e.target.value)}>
+                  <option value="exclusive">Exclusive</option>
+                  <option value="inclusive">Inclusive</option>
+                </select>
+              </label>
             </div>
-            <label style={{ display: 'block', marginTop: '10px' }}>Notes<input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes on invoice" style={{ marginTop: '5px' }} /></label>
+            <label className="invoice-inline-field" style={{ marginTop: '10px' }}>
+              <span>Notes</span>
+              <input
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Optional notes on invoice"
+              />
+            </label>
           </section>
 
           <section className="invoice-card lines-card">

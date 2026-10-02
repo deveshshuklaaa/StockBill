@@ -435,27 +435,49 @@
   }
 }
 
-/* Purchase Bill Details inline fields */
+/* Document Details inline fields (New Invoice & New Purchase) */
+.invoice-inline-field,
 .purchase-inline-field {
   display: flex;
   align-items: center;
   gap: 10px;
 }
+.invoice-inline-field > span,
 .purchase-inline-field > span {
   color: #526159;
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+}
+.purchase-inline-field > span {
   min-width: 65px;
 }
+.invoice-inline-field select,
 .purchase-inline-field select {
   flex: 1;
   margin-top: 0 !important;
 }
+.invoice-inline-field textarea,
+.invoice-inline-field input,
 .purchase-inline-field textarea,
 .purchase-inline-field input {
   flex: 1;
   margin-top: 0 !important;
+}
+.invoice-inline-field select,
+.invoice-inline-field input {
+  border: 1px solid #cbd5cd;
+  background: #fff;
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+.invoice-inline-field select:focus,
+.invoice-inline-field input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px #d5e6d9;
 }
 
 /* Warehouse Transfers Filter Bar */

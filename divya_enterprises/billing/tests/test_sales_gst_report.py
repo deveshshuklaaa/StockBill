@@ -780,38 +780,48 @@ class SalesGstReportTests(APITestCase):
         self.assertIn("Item-wise Summary", wb.sheetnames)
         ws = wb["Item-wise Summary"]
 
-        # Check headers (row 6)
+        # Check headers (row 6) - exactly 4 columns
         expected_headers = [
-            "Product",
-            "SKU",
-            "Variant/Pack",
+            "#",
+            "PRODUCT NAME",
             "MRP",
-            "Total Quantity",
-            "Base Unit",
-            "Invoice Count",
+            "TOTAL QUANTITY",
         ]
-        actual_headers = [ws.cell(row=6, column=col).value for col in range(1, 8)]
+        actual_headers = [ws.cell(row=6, column=col).value for col in range(1, 5)]
         self.assertEqual(actual_headers, expected_headers)
+        self.assertIsNone(ws.cell(row=6, column=5).value)
 
-        # All headers must be horizontally AND vertically centered
-        for col in range(1, 8):
+        # Verify no legacy columns (SKU, VARIANT / PACK, BASE QTY, INVOICES)
+        all_row6_values = [str(ws.cell(row=6, column=col).value).upper() for col in range(1, 10) if ws.cell(row=6, column=col).value]
+        for unexpected in ["SKU", "VARIANT / PACK", "VARIANT", "PACK", "BASE QTY", "BASE UNIT", "INVOICES", "INVOICE COUNT"]:
+            self.assertNotIn(unexpected, all_row6_values)
+
+        # All 4 headers must be horizontally AND vertically centered without text wrapping
+        for col in range(1, 5):
             align = ws.cell(row=6, column=col).alignment
             self.assertEqual(align.horizontal, "center")
             self.assertEqual(align.vertical, "center")
             self.assertFalse(align.wrap_text)
 
         # Check data row alignments and number formatting
-        row7_mrp = ws.cell(row=7, column=4)
-        self.assertEqual(row7_mrp.alignment.horizontal, "right")
-        self.assertEqual(row7_mrp.number_format, "#,##0.00")
+        row7_idx = ws.cell(row=7, column=1)
+        self.assertEqual(row7_idx.value, 1)
+        self.assertEqual(row7_idx.alignment.horizontal, "center")
 
-        row7_qty = ws.cell(row=7, column=5)
+        row7_prod = ws.cell(row=7, column=2)
+        self.assertEqual(row7_prod.value, "Yellow Banana Chips 200g")
+        self.assertEqual(row7_prod.alignment.horizontal, "left")
+
+        row7_mrp = ws.cell(row=7, column=3)
+        self.assertEqual(row7_mrp.alignment.horizontal, "right")
+        self.assertEqual(row7_mrp.number_format, '"₹"#,##0.00')
+
+        row7_qty = ws.cell(row=7, column=4)
         self.assertEqual(row7_qty.alignment.horizontal, "right")
 
-        row7_inv_count = ws.cell(row=7, column=7)
-        self.assertEqual(row7_inv_count.alignment.horizontal, "right")
-
         # Check column dimensions
-        self.assertGreaterEqual(ws.column_dimensions["A"].width, 30)
-        self.assertGreaterEqual(ws.column_dimensions["E"].width, 16)
-        self.assertGreaterEqual(ws.column_dimensions["G"].width, 14)
+        self.assertGreaterEqual(ws.column_dimensions["A"].width, 6)
+        self.assertGreaterEqual(ws.column_dimensions["B"].width, 40)
+        self.assertGreaterEqual(ws.column_dimensions["C"].width, 12)
+        self.assertGreaterEqual(ws.column_dimensions["D"].width, 20)
+
