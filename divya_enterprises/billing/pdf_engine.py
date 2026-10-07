@@ -16,7 +16,7 @@ from pathlib import Path
 
 from django.conf import settings
 from reportlab.lib.colors import HexColor, black, white, Color
-from reportlab.lib.pagesizes import A5, landscape
+from reportlab.lib.pagesizes import A4, A5, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
@@ -31,11 +31,32 @@ COLOR_TEXT = HexColor("#000000")
 COLOR_DRAFT = HexColor("#888888")
 COLOR_CANCELLED = HexColor("#C0392B")
 
-# --- A5 LANDSCAPE DIMENSIONS ---
+# --- A5 LANDSCAPE INVOICE CANVAS & LAYOUT DIMENSIONS ---
+# Existing StockBill invoice layout coordinates are based on A5 landscape.
 PAGE_WIDTH, PAGE_HEIGHT = landscape(A5)  # 595.275 pt, 419.528 pt (210 mm x 148 mm)
 MARGIN = 5 * mm  # 14.17 pt
 PRINTABLE_WIDTH = PAGE_WIDTH - (2 * MARGIN)  # ~566.94 pt
 PRINTABLE_HEIGHT = PAGE_HEIGHT - (2 * MARGIN)  # ~391.18 pt
+
+# --- A4 PORTRAIT CONTAINER & PRINTING GEOMETRY ---
+# PDF page container is A4 portrait (595.28 pt x 841.89 pt) without rotation.
+# The A5 landscape invoice is positioned near the top of the A4 page, mirroring
+# Marg ERP's proven physical printing geometry.
+A4_WIDTH, A4_HEIGHT = A4  # 595.276 pt x 841.890 pt (210 mm x 297 mm)
+
+# Target reference geometry: ~196 mm x 135 mm placed near top of A4 portrait
+INVOICE_SCALE = 0.98  # Outer border: 196.0 mm x 135.2 mm (555.59 pt x 383.36 pt)
+INVOICE_X_OFFSET = (A4_WIDTH - INVOICE_SCALE * PAGE_WIDTH) / 2  # 5.95 pt -> 7.0 mm side margins
+INVOICE_TOP_MARGIN = 18.0  # 6.35 mm from top of A4 sheet (matching Marg's 17.6 pt)
+INVOICE_Y_OFFSET = A4_HEIGHT - INVOICE_TOP_MARGIN - INVOICE_SCALE * (PAGE_HEIGHT - MARGIN)  # ~426.64 pt
+
+# Bounding box coordinates on the final A4 page for verification and testing
+INVOICE_BOX_X0 = INVOICE_X_OFFSET + INVOICE_SCALE * MARGIN  # 19.84 pt (7.0 mm)
+INVOICE_BOX_X1 = INVOICE_X_OFFSET + INVOICE_SCALE * (PAGE_WIDTH - MARGIN)  # 575.43 pt (7.0 mm right margin)
+INVOICE_BOX_Y0 = INVOICE_Y_OFFSET + INVOICE_SCALE * MARGIN  # 440.53 pt (bottom of invoice box)
+INVOICE_BOX_Y1 = INVOICE_Y_OFFSET + INVOICE_SCALE * (PAGE_HEIGHT - MARGIN)  # 823.89 pt (18.0 pt top margin)
+INVOICE_BOX_WIDTH = INVOICE_BOX_X1 - INVOICE_BOX_X0  # 555.59 pt (196.00 mm)
+INVOICE_BOX_HEIGHT = INVOICE_BOX_Y1 - INVOICE_BOX_Y0  # 383.36 pt (135.24 mm)
 
 
 def amount_to_words(amount) -> str:
@@ -173,10 +194,14 @@ class NumberedCanvas(canvas.Canvas):
         self.setLineWidth(0.5)
 
         if total_pages > 1:
+            self.saveState()
+            self.translate(INVOICE_X_OFFSET, INVOICE_Y_OFFSET)
+            self.scale(INVOICE_SCALE, INVOICE_SCALE)
             self.setFont("Helvetica", 6)
             self.setFillColor(COLOR_TEXT)
             page_text = f"Page {self._pageNumber} of {total_pages}"
             self.drawRightString(PAGE_WIDTH - MARGIN - 2, MARGIN + 2, page_text)
+            self.restoreState()
 
 
 def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=None) -> bytes:
@@ -264,7 +289,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             remaining = remaining[MAX_LINES_SUBSEQUENT:]
 
     total_pages = len(pages_chunks)
-    c = NumberedCanvas(buffer, pagesize=landscape(A5))
+    c = NumberedCanvas(buffer, pagesize=A4)
     c.setViewerPreference("PrintScaling", "None")
     logo_path = _resolve_logo_path()
 
@@ -284,6 +309,10 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         col_headers = ["Sr.", "Qty.", "Pack", "Product Description", "HSN", "MRP", "Rate / Piece", "Dis", "SGST", "CGST", "Amount"]
 
     for page_idx, page_lines in enumerate(pages_chunks):
+        c.saveState()
+        c.translate(INVOICE_X_OFFSET, INVOICE_Y_OFFSET)
+        c.scale(INVOICE_SCALE, INVOICE_SCALE)
+
         page_num = page_idx + 1
         is_first_page = (page_num == 1)
         is_last_page = (page_num == total_pages)
@@ -646,6 +675,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             c.setFont("Helvetica-Bold", 6)
             c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
 
+            c.restoreState()
             c.showPage()
             continue
 
@@ -823,6 +853,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.setFont("Helvetica-Bold", 6)
         c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
 
+        c.restoreState()
         c.showPage()
 
     c.save()

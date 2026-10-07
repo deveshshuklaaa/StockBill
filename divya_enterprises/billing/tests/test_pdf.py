@@ -376,17 +376,17 @@ class InvoicePdfGenerationTests(APITestCase):
         self.assertIsNotNone(logo_path)
         self.assertTrue(Path(logo_path).exists())
 
-    # 16. A5 page size is correct: Landscape 210 mm x 148 mm (595.28 pt x 419.53 pt)
-    def test_a5_page_size_is_correct(self):
+    # 16. Page size is correct: A4 Portrait 210 mm x 297 mm (595.28 pt x 841.89 pt)
+    def test_page_size_is_a4_portrait(self):
         pdf_bytes = build_invoice_a5_pdf(self.invoice)
         doc = pymupdf.open("pdf", pdf_bytes)
         rect = doc[0].rect
         width_mm = rect.width * 25.4 / 72
         height_mm = rect.height * 25.4 / 72
         self.assertAlmostEqual(width_mm, 210.0, delta=0.5)
-        self.assertAlmostEqual(height_mm, 148.0, delta=0.5)
+        self.assertAlmostEqual(height_mm, 297.0, delta=0.5)
         self.assertAlmostEqual(rect.width, 595.28, delta=0.5)
-        self.assertAlmostEqual(rect.height, 419.53, delta=0.5)
+        self.assertAlmostEqual(rect.height, 841.89, delta=0.5)
 
     def test_rate_shown_as_rate_per_piece(self):
         pdf_bytes = build_invoice_a5_pdf(self.invoice)
@@ -501,14 +501,14 @@ class InvoicePdfGenerationTests(APITestCase):
         for pattern in forbidden_patterns:
             self.assertNotIn(pattern, text, f"Forbidden placeholder '{pattern}' found in PDF")
 
-    # 21. Regression Test: Invoice PDF MediaBox is exact A5 Landscape with 0 rotation
-    def test_invoice_pdf_a5_landscape_dimensions_and_orientation(self):
-        """Verify the generated PDF strictly matches A5 Landscape physical specifications.
+    # 21. Regression Test: Invoice PDF MediaBox is exact A4 Portrait with 0 rotation
+    def test_invoice_pdf_a4_portrait_dimensions_and_orientation(self):
+        """Verify the generated PDF strictly matches A4 Portrait physical specifications.
 
         - Width: ~595.28 pt (210 mm)
-        - Height: ~419.53 pt (148 mm)
-        - Orientation: Landscape (width > height)
-        - Rotation: 0 degrees (no portrait or rotated coordinate space)
+        - Height: ~841.89 pt (297 mm)
+        - Orientation: Portrait (height > width)
+        - Rotation: 0 degrees (no landscape or rotated coordinate space)
         - ViewerPreferences: PrintScaling=None (forces Actual Size / 100% in print dialogs)
         """
         pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
@@ -518,8 +518,8 @@ class InvoicePdfGenerationTests(APITestCase):
         self.assertGreater(len(doc), 0)
         for page in doc:
             self.assertAlmostEqual(page.rect.width, 595.28, delta=0.5)
-            self.assertAlmostEqual(page.rect.height, 419.53, delta=0.5)
-            self.assertGreater(page.rect.width, page.rect.height, "Invoice must be Landscape orientation")
+            self.assertAlmostEqual(page.rect.height, 841.89, delta=0.5)
+            self.assertGreater(page.rect.height, page.rect.width, "Invoice must be Portrait orientation")
             self.assertEqual(page.rotation, 0, "Invoice page rotation must be 0 degrees")
 
         # PyPDF verification of MediaBox and ViewerPreferences
@@ -527,7 +527,7 @@ class InvoicePdfGenerationTests(APITestCase):
         for page in reader.pages:
             mb = page.mediabox
             self.assertAlmostEqual(float(mb.width), 595.28, delta=0.5)
-            self.assertAlmostEqual(float(mb.height), 419.53, delta=0.5)
+            self.assertAlmostEqual(float(mb.height), 841.89, delta=0.5)
             self.assertEqual(int(page.get("/Rotate", 0)), 0)
 
         catalog = reader.trailer["/Root"]
@@ -535,18 +535,21 @@ class InvoicePdfGenerationTests(APITestCase):
         self.assertIsNotNone(viewer_prefs, "ViewerPreferences dictionary must be present in catalog")
         self.assertEqual(viewer_prefs.get("/PrintScaling"), "/None", "PrintScaling must be set to /None")
 
+    # Alias to preserve backwards compatibility for any test runner targeting the old name
+    test_invoice_pdf_a5_landscape_dimensions_and_orientation = test_invoice_pdf_a4_portrait_dimensions_and_orientation
+
     # 22. Regression Test: Bounding box of content fits within page bounds without clipping
     def test_invoice_pdf_content_fits_page_bounds(self):
-        """Verify rendered visual content and drawing commands fit within the A5 page rectangle."""
+        """Verify rendered visual content and drawing commands fit within the top A5 area of A4 page rectangle."""
         pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
         doc = pymupdf.open("pdf", pdf_bytes)
         page = doc[0]
 
-        # Check all text blocks are within page bounds [0, 0, 595.28, 419.53]
+        # Check all text blocks are within page bounds [0, 0, 595.28, 841.89] and top A5 area
         text_page = page.get_text("blocks")
         for block in text_page:
             x0, y0, x1, y1, text, block_no, block_type = block
             self.assertGreaterEqual(x0, 0, f"Text block '{text[:20]}' exceeds left boundary: {x0}")
             self.assertLessEqual(x1, 595.5, f"Text block '{text[:20]}' exceeds right boundary: {x1}")
             self.assertGreaterEqual(y0, 0, f"Text block '{text[:20]}' exceeds top boundary: {y0}")
-            self.assertLessEqual(y1, 420.0, f"Text block '{text[:20]}' exceeds bottom boundary: {y1}")
+            self.assertLessEqual(y1, 425.0, f"Text block '{text[:20]}' exceeds A5 top section boundary: {y1}")

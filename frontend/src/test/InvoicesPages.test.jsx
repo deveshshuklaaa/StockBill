@@ -382,7 +382,7 @@ describe('InvoiceDetailPage', () => {
     expect(printSpy).toHaveBeenCalledWith(11, { copy: 'original', invoiceNumber: 'INV-20260912-1' })
   })
 
-  it('printInvoicePdf writes HTML print-wrapper with @page A5 landscape', async () => {
+  it('printInvoicePdf writes HTML print-wrapper with @page A4 portrait', async () => {
     const mockWin = {
       closed: false,
       document: {
@@ -403,7 +403,7 @@ describe('InvoiceDetailPage', () => {
     expect(mockWin.document.open).toHaveBeenCalled()
     expect(mockWin.document.write).toHaveBeenCalledTimes(1)
     const writtenHtml = mockWin.document.write.mock.calls[0][0]
-    expect(writtenHtml).toContain('@page{size:A5 landscape;margin:0;}')
+    expect(writtenHtml).toContain('@page{size:A4 portrait;margin:0;}')
     expect(writtenHtml).toContain('<embed src="blob:mock-url" type="application/pdf"')
     expect(mockWin.document.close).toHaveBeenCalled()
   })

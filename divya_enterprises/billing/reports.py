@@ -13,7 +13,7 @@ SALES SUMMARY — /api/reports/sales/
   gst           = Σ (cgst+sgst+igst) line amounts
   net_sales     = Σ invoice.total_amount (= taxable + gst)
   cogs          = Σ line cogs_amount (historical snapshot at posting)
-  gross_profit  = Σ (line_total − cogs) per line, aggregated
+  gross_profit  = taxable_sales − cogs (tax-exclusive operating profit)
 
 PURCHASE SUMMARY — /api/reports/purchases/
   Basis: POSTED PurchaseInvoice only, using header totals snapshotted at
@@ -37,6 +37,7 @@ PRODUCT SALES — /api/reports/products/
   Uses historical snapshots: taxable_value_snapshot, tax amounts,
   cogs_amount, cost_price_snapshot. Current product cost/WAC is NEVER
   read. Variant = product_name_snapshot.
+  gross_profit = taxable_sales_revenue − taxable_cogs.
 
 CUSTOMER SALES — /api/reports/customers/
   POSTED invoices grouped by customer (walk-in = customer null, identified
@@ -51,13 +52,13 @@ TAX SUMMARY — /api/reports/tax/
   not a GST return.
 
 PROFIT — /api/reports/profit/
-  POSTED lines only. revenue = Σ line_total, cogs = Σ cogs_amount
-  (historical snapshots), gross_profit = revenue − cogs.
+  POSTED lines only. revenue = Σ effective_taxable_revenue (tax-exclusive),
+  cogs = Σ effective_cogs (historical snapshots), gross_profit = revenue − cogs.
   Credit notes reduce revenue and COGS proportionally.
   Per-product and per-customer breakdowns aggregate the same terms.
 
 TOP PRODUCTS — /api/reports/top-products/
-  POSTED lines only, ranked by quantity / revenue / profit (historical
+  POSTED lines only, ranked by quantity / taxable revenue / gross profit (historical
   snapshots). Date range required.
 
 DASHBOARD — /api/reports/dashboard/
@@ -166,6 +167,26 @@ def _credit_note_total_subquery(field_name):
     )
 
 
+def _credit_note_taxable_subquery():
+    """Credit-note reversed taxable sales revenue (line_total - tax_amount) as a subquery."""
+    from django.db.models import ExpressionWrapper, F, OuterRef, Subquery
+
+    return Subquery(
+        CreditNoteLineItem.objects.filter(invoice_line_item=OuterRef("pk"))
+        .values("invoice_line_item")
+        .annotate(
+            total=Sum(
+                ExpressionWrapper(
+                    F("line_total") - F("tax_amount"),
+                    output_field=MONEY_FIELD,
+                )
+            )
+        )
+        .values("total")[:1],
+        output_field=MONEY_FIELD,
+    )
+
+
 def _posted_invoice_lines(from_date, to_date, customer=None, payment_type=None):
     """POSTED invoice lines in the inclusive date window.
 
@@ -240,7 +261,10 @@ class SalesSummaryReportView(APIView):
         )["total"]
 
         gst = (totals["cgst"] or ZERO_MONEY) + (totals["sgst"] or ZERO_MONEY) + (totals["igst"] or ZERO_MONEY)
-        revenue = totals["net_sales"] or ZERO_MONEY
+        net_sales = totals["net_sales"] or ZERO_MONEY
+        taxable_sales = totals["taxable_sales"] or ZERO_MONEY
+        cogs = totals["cogs"] or ZERO_MONEY
+        gross_profit = taxable_sales - cogs
         return Response(
             {
                 "from": from_date,
@@ -251,14 +275,17 @@ class SalesSummaryReportView(APIView):
                 "cancelled_invoice_value": cancelled_value,
                 "gross_sales": totals["gross_sales"],
                 "discounts": totals["discounts"],
-                "taxable_sales": totals["taxable_sales"],
+                "taxable_sales": taxable_sales,
+                "taxable_sales_revenue": taxable_sales,
                 "gst": gst,
+                "sales_gst": gst,
                 "cgst": totals["cgst"],
                 "sgst": totals["sgst"],
                 "igst": totals["igst"],
-                "net_sales": revenue,
-                "cogs": totals["cogs"],
-                "gross_profit": revenue - (totals["cogs"] or ZERO_MONEY),
+                "net_sales": net_sales,
+                "cogs": cogs,
+                "taxable_cogs": cogs,
+                "gross_profit": gross_profit,
             }
         )
 
@@ -619,17 +646,19 @@ class ProductSalesReportView(APIView):
                 sales_value=Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
                 cogs=Coalesce(Sum("cogs_amount"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
             )
-            .order_by("-sales_value")
+            .order_by("-taxable_sales", "product__name")
         )
         products = []
         total_cogs = ZERO_MONEY
-        total_revenue = ZERO_MONEY
+        total_taxable_revenue = ZERO_MONEY
+        total_sales_value = ZERO_MONEY
         for row in rows:
-            revenue = row["sales_value"] or ZERO_MONEY
+            taxable_revenue = row["taxable_sales"] or ZERO_MONEY
             cogs = row["cogs"] or ZERO_MONEY
-            profit = revenue - cogs
+            profit = taxable_revenue - cogs
             total_cogs += cogs
-            total_revenue += revenue
+            total_taxable_revenue += taxable_revenue
+            total_sales_value += (row["sales_value"] or ZERO_MONEY)
             products.append(
                 {
                     "product_id": row["product_id"],
@@ -639,14 +668,17 @@ class ProductSalesReportView(APIView):
                     "quantity_sold": row["quantity_sold"],
                     "gross_sales": row["gross_sales"],
                     "discounts": row["discounts"],
-                    "taxable_sales": row["taxable_sales"],
+                    "taxable_sales": taxable_revenue,
+                    "taxable_sales_revenue": taxable_revenue,
                     "gst": row["gst"],
-                    "sales_value": revenue,
+                    "sales_gst": row["gst"],
+                    "sales_value": row["sales_value"],
                     "cogs": cogs,
+                    "taxable_cogs": cogs,
                     "gross_profit": profit,
                     "margin_percent": (
-                        (profit / revenue * Decimal("100")).quantize(Decimal("0.1"))
-                        if revenue > 0
+                        (profit / taxable_revenue * Decimal("100")).quantize(Decimal("0.1"))
+                        if taxable_revenue > 0
                         else None
                     ),
                 }
@@ -655,11 +687,14 @@ class ProductSalesReportView(APIView):
             {
                 "from": from_date,
                 "to": to_date,
-                "rules": "POSTED lines only; COGS is the historical cogs_amount snapshot, never current cost or WAC.",
+                "rules": "POSTED lines only; taxable_sales_revenue is tax-exclusive revenue; COGS is the historical cogs_amount snapshot; gross_profit = taxable_sales_revenue − cogs.",
                 "products": products,
-                "total_revenue": total_revenue,
+                "total_revenue": total_taxable_revenue,
+                "total_taxable_sales": total_taxable_revenue,
+                "total_sales_value": total_sales_value,
                 "total_cogs": total_cogs,
-                "total_gross_profit": total_revenue - total_cogs,
+                "total_taxable_cogs": total_cogs,
+                "total_gross_profit": total_taxable_revenue - total_cogs,
             }
         )
 
@@ -793,8 +828,113 @@ class TaxSummaryReportView(APIView):
         )
 
 
+def get_profit_report_data(from_date, to_date):
+    """Authoritative Gross Profit data across POSTED invoice lines.
+
+    Accounting basis (Indian GST / standard trading margin):
+    - Tax-exclusive Sales Revenue: pre-tax taxable amount from POSTED invoice lines,
+      net of discounts and net of credit-note reversals.
+      Output GST collected from customers is a statutory liability, never revenue.
+    - Tax-exclusive COGS: historical cost of goods sold (base_quantity * WAC at posting),
+      net of credit-note returns.
+      Input GST paid on purchases is an ITC asset, excluded from WAC/inventory cost.
+    - Gross Profit: Taxable Sales Revenue - Taxable COGS.
+    """
+    lines = (
+        _posted_invoice_lines(from_date, to_date)
+        .annotate(
+            reversed_quantity=Coalesce(
+                _credit_note_total_subquery("quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD
+            ),
+            reversed_taxable=Coalesce(
+                _credit_note_taxable_subquery(), Value(ZERO_MONEY), output_field=MONEY_FIELD
+            ),
+            reversed_cogs=Coalesce(
+                _credit_note_total_subquery("quantity") * F("cost_price_snapshot"),
+                Value(ZERO_MONEY), output_field=MONEY_FIELD,
+            ),
+            reversed_tax=Coalesce(
+                _credit_note_total_subquery("tax_amount"), Value(ZERO_MONEY), output_field=MONEY_FIELD
+            ),
+            reversed_line_total=Coalesce(
+                _credit_note_total_subquery("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD
+            ),
+        )
+        .annotate(
+            effective_taxable_revenue=ExpressionWrapper(
+                F("taxable_value_snapshot") - F("reversed_taxable"), output_field=MONEY_FIELD
+            ),
+            effective_cogs=ExpressionWrapper(
+                F("cogs_amount") - F("reversed_cogs"), output_field=MONEY_FIELD
+            ),
+            effective_tax_amount=ExpressionWrapper(
+                F("tax_amount") - F("reversed_tax"), output_field=MONEY_FIELD
+            ),
+            effective_total_value=ExpressionWrapper(
+                F("line_total") - F("reversed_line_total"), output_field=MONEY_FIELD
+            ),
+        )
+    )
+    totals = lines.aggregate(
+        taxable_sales_revenue=Coalesce(Sum("effective_taxable_revenue"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+        taxable_cogs=Coalesce(Sum("effective_cogs"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+        sales_gst=Coalesce(Sum("effective_tax_amount"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+        total_sales_value=Coalesce(Sum("effective_total_value"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+    )
+    taxable_sales_revenue = totals["taxable_sales_revenue"] or ZERO_MONEY
+    taxable_cogs = totals["taxable_cogs"] or ZERO_MONEY
+    sales_gst = totals["sales_gst"] or ZERO_MONEY
+    total_sales_value = totals["total_sales_value"] or ZERO_MONEY
+    gross_profit = taxable_sales_revenue - taxable_cogs
+    gross_margin_percent = (
+        (gross_profit / taxable_sales_revenue * Decimal("100")).quantize(Decimal("0.1"))
+        if taxable_sales_revenue > 0
+        else None
+    )
+
+    by_product_rows = list(
+        lines.values("product_id", "product__name")
+        .annotate(
+            taxable_sales_revenue=Coalesce(Sum("effective_taxable_revenue"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+            taxable_cogs=Coalesce(Sum("effective_cogs"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+        )
+        .order_by("-taxable_sales_revenue", "product__name")
+    )
+    by_product = [
+        {
+            "product_id": row["product_id"],
+            "product_name": row["product__name"],
+            "revenue": row["taxable_sales_revenue"],
+            "taxable_sales_revenue": row["taxable_sales_revenue"],
+            "cogs": row["taxable_cogs"],
+            "taxable_cogs": row["taxable_cogs"],
+            "gross_profit": (row["taxable_sales_revenue"] or ZERO_MONEY) - (row["taxable_cogs"] or ZERO_MONEY),
+        }
+        for row in by_product_rows
+    ]
+
+    return {
+        "from": from_date,
+        "to": to_date,
+        "rules": (
+            "POSTED lines only. Revenue = taxable_sales_revenue (tax-exclusive), "
+            "COGS = historical cogs_amount snapshot (tax-exclusive). "
+            "Gross profit = taxable_sales_revenue − taxable_cogs. Credit notes reduce both proportionally."
+        ),
+        "revenue": taxable_sales_revenue,
+        "taxable_sales_revenue": taxable_sales_revenue,
+        "cogs": taxable_cogs,
+        "taxable_cogs": taxable_cogs,
+        "gross_profit": gross_profit,
+        "gross_margin_percent": gross_margin_percent,
+        "sales_gst": sales_gst,
+        "total_sales_value": total_sales_value,
+        "by_product": by_product,
+    }
+
+
 class ProfitReportView(APIView):
-    """Gross profit = POSTED revenue − historical COGS snapshots."""
+    """Gross profit = POSTED taxable revenue − historical COGS snapshots."""
 
     permission_classes = [IsAdminUser]
 
@@ -804,72 +944,7 @@ class ProfitReportView(APIView):
         except ValueError as error:
             return _bad_request(str(error))
 
-        # Credit-note reversals reduce the effective revenue and COGS.
-        lines = (
-            _posted_invoice_lines(from_date, to_date)
-            .annotate(
-                reversed_quantity=Coalesce(
-                    _credit_note_total_subquery("quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD
-                ),
-                reversed_revenue=Coalesce(
-                    _credit_note_total_subquery("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD
-                ),
-                reversed_cogs=Coalesce(
-                    _credit_note_total_subquery("quantity") * F("cost_price_snapshot"),
-                    Value(ZERO_MONEY), output_field=MONEY_FIELD,
-                ),
-            )
-            .annotate(
-                effective_revenue=ExpressionWrapper(
-                    F("line_total") - F("reversed_revenue"), output_field=MONEY_FIELD
-                ),
-                effective_cogs=ExpressionWrapper(
-                    F("cogs_amount") - F("reversed_cogs"), output_field=MONEY_FIELD
-                ),
-            )
-        )
-        totals = lines.aggregate(
-            revenue=Coalesce(Sum("effective_revenue"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
-            cogs=Coalesce(Sum("effective_cogs"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
-        )
-        revenue = totals["revenue"] or ZERO_MONEY
-        cogs = totals["cogs"] or ZERO_MONEY
-        gross_profit = revenue - cogs
-
-        by_product = list(
-            lines.values("product_id", "product__name")
-            .annotate(
-                revenue=Coalesce(Sum("effective_revenue"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
-                cogs=Coalesce(Sum("effective_cogs"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
-            )
-            .order_by("-revenue")
-        )
-
-        return Response(
-            {
-                "from": from_date,
-                "to": to_date,
-                "rules": "POSTED lines only. Revenue = Σ line_total, COGS = historical cogs_amount snapshot (never current cost/WAC). Credit notes reduce both proportionally.",
-                "revenue": revenue,
-                "cogs": cogs,
-                "gross_profit": gross_profit,
-                "gross_margin_percent": (
-                    (gross_profit / revenue * Decimal("100")).quantize(Decimal("0.1"))
-                    if revenue > 0
-                    else None
-                ),
-                "by_product": [
-                    {
-                        "product_id": row["product_id"],
-                        "product_name": row["product__name"],
-                        "revenue": row["revenue"],
-                        "cogs": row["cogs"],
-                        "gross_profit": (row["revenue"] or ZERO_MONEY) - (row["cogs"] or ZERO_MONEY),
-                    }
-                    for row in by_product
-                ],
-            }
-        )
+        return Response(get_profit_report_data(from_date, to_date))
 
 
 class TopProductsReportView(APIView):
@@ -897,7 +972,8 @@ class TopProductsReportView(APIView):
         }[sort_by]
         annotate = {
             "total_quantity": Coalesce(Sum("base_quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
-            "total_revenue": Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+            "total_revenue": Coalesce(Sum("taxable_value_snapshot"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+            "total_sales_value": Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
             "total_cogs": Coalesce(Sum("cogs_amount"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         }
         products = (
@@ -972,13 +1048,7 @@ class DashboardReportView(APIView):
             total_value=Coalesce(Sum(value_expr), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         )
 
-        profit_lines = _posted_invoice_lines(from_date, to_date)
-        profit = profit_lines.aggregate(
-            revenue=Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
-            cogs=Coalesce(Sum("cogs_amount"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
-        )
-        revenue = profit["revenue"] or ZERO_MONEY
-        cogs = profit["cogs"] or ZERO_MONEY
+        period_profit = get_profit_report_data(from_date, to_date)
 
         outstanding_total = ZERO_MONEY
         for customer in Customer.objects.filter(is_active=True):
@@ -1012,7 +1082,7 @@ class DashboardReportView(APIView):
             .values("product_id", "product__name")
             .annotate(
                 total_quantity=Coalesce(Sum("base_quantity"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
-                total_revenue=Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+                total_revenue=Coalesce(Sum("taxable_value_snapshot"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
             )
             .filter(total_quantity__gt=0)
             .order_by("-total_revenue")[:5]
@@ -1036,9 +1106,12 @@ class DashboardReportView(APIView):
                 "active_customers": active_customers,
                 "active_suppliers": active_suppliers,
                 "period": {
-                    "revenue": revenue,
-                    "cogs": cogs,
-                    "gross_profit": revenue - cogs,
+                    "revenue": period_profit["taxable_sales_revenue"],
+                    "taxable_sales_revenue": period_profit["taxable_sales_revenue"],
+                    "cogs": period_profit["taxable_cogs"],
+                    "taxable_cogs": period_profit["taxable_cogs"],
+                    "gross_profit": period_profit["gross_profit"],
+                    "gross_margin_percent": period_profit["gross_margin_percent"],
                 },
                 "low_stock": low_stock,
                 "recent_sales": recent_sales,

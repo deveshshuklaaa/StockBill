@@ -210,7 +210,8 @@ class SalesReportReconciliationTests(ReportTestBase):
         self.assertEqual(response.data["gst"], Decimal("25.20"))
         self.assertEqual(response.data["gross_sales"], Decimal("140.00"))
         self.assertEqual(response.data["cogs"], Decimal("76.00"))
-        self.assertEqual(response.data["gross_profit"], Decimal("89.20"))
+        # Tax-exclusive gross profit = taxable_sales (140.00) - cogs (76.00) = 64.00
+        self.assertEqual(response.data["gross_profit"], Decimal("64.00"))
 
     def test_draft_invoices_excluded(self):
         response = self.client.get(f"/api/reports/sales/?from={TODAY}&to={TODAY}")
@@ -432,17 +433,21 @@ class ProductSalesReportTests(ReportTestBase):
         self.assertEqual(rows["Report Product A"]["quantity_sold"], Decimal("10.000"))
         self.assertEqual(rows["Report Product A"]["sales_value"], Decimal("118.00"))
         self.assertEqual(rows["Report Product B"]["quantity_sold"], Decimal("2.000"))
-        self.assertEqual(response.data["total_revenue"], Decimal("165.20"))
+        # total_revenue is the tax-exclusive taxable sales revenue: 100.00 + 40.00 = 140.00
+        self.assertEqual(response.data["total_revenue"], Decimal("140.00"))
+        self.assertEqual(response.data["total_sales_value"], Decimal("165.20"))
 
     def test_historical_cogs_not_current_cost(self):
         # Historical COGS: 10 × 6 = 60 (WAC at sale time).
+        # Tax-exclusive revenue: 100.00. Tax-exclusive profit: 100.00 - 60.00 = 40.00.
+        # Margin %: 40.00 / 100.00 = 40.0%.
         response = self.client.get(
             f"/api/reports/products/?from={TODAY}&to={TODAY}"
         ).data
         rows = {row["product_name"]: row for row in response["products"]}
         self.assertEqual(rows["Report Product A"]["cogs"], Decimal("60.00"))
-        self.assertEqual(rows["Report Product A"]["gross_profit"], Decimal("58.00"))
-        self.assertEqual(rows["Report Product A"]["margin_percent"], Decimal("49.2"))
+        self.assertEqual(rows["Report Product A"]["gross_profit"], Decimal("40.00"))
+        self.assertEqual(rows["Report Product A"]["margin_percent"], Decimal("40.0"))
 
     def test_no_current_cost_contamination_after_wac_change(self):
         # Receive more stock at a different rate so the WAC moves.
@@ -463,7 +468,7 @@ class ProductSalesReportTests(ReportTestBase):
         # COGS for the earlier sale is STILL 60.00 — the ₹20 receipt must not
         # retroactively recalculate last sale's cost.
         self.assertEqual(rows["Report Product A"]["cogs"], Decimal("60.00"))
-        self.assertEqual(rows["Report Product A"]["gross_profit"], Decimal("58.00"))
+        self.assertEqual(rows["Report Product A"]["gross_profit"], Decimal("40.00"))
 
         # Changing Product.cost_price directly must not contaminate either.
         Product.objects.filter(pk=self.product_a.pk).update(
@@ -624,18 +629,21 @@ class ProfitReportTests(ReportTestBase):
             f"/api/reports/profit/?from={TODAY}&to={TODAY}"
         )
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["revenue"], Decimal("165.20"))
+        # Tax-exclusive revenue: 100.00 + 40.00 = 140.00
+        self.assertEqual(response.data["revenue"], Decimal("140.00"))
         self.assertEqual(response.data["cogs"], Decimal("76.00"))
-        self.assertEqual(response.data["gross_profit"], Decimal("89.20"))
-        self.assertEqual(response.data["gross_margin_percent"], Decimal("54.0"))
+        # Gross profit: 140.00 - 76.00 = 64.00
+        self.assertEqual(response.data["gross_profit"], Decimal("64.00"))
+        # Gross margin %: (64.00 / 140.00) * 100 = 45.714...% -> 45.7%
+        self.assertEqual(response.data["gross_margin_percent"], Decimal("45.7"))
 
     def test_cancelled_invoices_excluded(self):
-        # The cancelled sale (3 × A) would add 35.40 revenue / 18 COGS.
+        # The cancelled sale (3 × A) would add 30.00 taxable revenue / 18 COGS.
         response = self.client.get(
             f"/api/reports/profit/?from={TODAY}&to={TODAY}"
         ).data
-        self.assertNotEqual(response["revenue"], Decimal("202.00"))
-        self.assertEqual(response["revenue"], Decimal("165.20"))
+        self.assertNotEqual(response["revenue"], Decimal("170.00"))
+        self.assertEqual(response["revenue"], Decimal("140.00"))
         self.assertEqual(response["cogs"], Decimal("76.00"))
 
     def test_product_breakdown_sums_to_total(self):
@@ -662,7 +670,7 @@ class ProfitReportTests(ReportTestBase):
             f"/api/reports/profit/?from={TODAY}&to={TODAY}"
         ).data
         self.assertEqual(response["cogs"], Decimal("76.00"))
-        self.assertEqual(response["gross_profit"], Decimal("89.20"))
+        self.assertEqual(response["gross_profit"], Decimal("64.00"))
 
     def test_credit_note_reduces_revenue_and_cogs(self):
         from billing.models import CreditNoteLineItem
@@ -680,11 +688,12 @@ class ProfitReportTests(ReportTestBase):
         response = self.client.get(
             f"/api/reports/profit/?from={TODAY}&to={TODAY}"
         ).data
-        # Revenue: 165.20 − (2×10×1.18)=23.60 → 141.60
-        self.assertEqual(response["revenue"], Decimal("141.60"))
+        # Tax-exclusive revenue: 140.00 − (2×10)=20.00 → 120.00
+        self.assertEqual(response["revenue"], Decimal("120.00"))
         # COGS: 76 − (2×6)=12 → 64
         self.assertEqual(response["cogs"], Decimal("64.00"))
-        self.assertEqual(response["gross_profit"], Decimal("77.60"))
+        # Gross profit: 120.00 - 64.00 = 56.00
+        self.assertEqual(response["gross_profit"], Decimal("56.00"))
 
 
 class TopProductsReportTests(ReportTestBase):
