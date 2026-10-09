@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
 import { fetchCustomerMRPPricing } from '../api/customers'
-import { amendInvoice, fetchInvoice, updateDraftInvoice } from '../api/invoices'
+import { amendInvoice, fetchInvoice, postInvoice, updateDraftInvoice } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatQuantityWithUnit, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 
@@ -76,6 +76,7 @@ export default function NewInvoicePage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [posting, setPosting] = useState(false)
 
   // Amendment-only
   const [amendReason, setAmendReason] = useState('')
@@ -96,13 +97,27 @@ export default function NewInvoicePage() {
 
     fetchInvoice(sourceId)
       .then(async (inv) => {
+        if (isEditMode && inv.state !== 'DRAFT') {
+          setError(`Only draft invoices can be edited. This invoice is ${inv.state.toLowerCase()}.`)
+          setLoading(false)
+          return
+        }
+
         if (isAmendMode) setOriginalInvoice(inv)
         if (inv.customer) {
           try {
             const { data: cust } = await api.get(`/customers/${inv.customer}/`)
             setCustomer(cust)
             setPlaceOfSupply(cust.state_code || inv.place_of_supply || '')
-          } catch { setCustomer(WALK_IN) }
+          } catch {
+            setCustomer({
+              id: inv.customer,
+              name: inv.customer_name_snapshot || inv.customer_name || `Customer #${inv.customer}`,
+              state_code: inv.customer_state_code_snapshot || inv.place_of_supply || '',
+              gstin: inv.customer_gstin_snapshot || '',
+            })
+            setPlaceOfSupply(inv.customer_state_code_snapshot || inv.place_of_supply || '')
+          }
         } else {
           setCustomer(WALK_IN)
         }
@@ -116,17 +131,39 @@ export default function NewInvoicePage() {
             try {
               const { data: product } = await api.get(`/products/${line.product}/`)
               return {
-                key: `${line.product}-${Math.random()}`,
+                key: line.id || `${line.product}-${Math.random()}`,
                 product: line.product,
                 productData: product,
                 quantity: Number(line.quantity),
                 salesUnit: line.sales_unit_name || 'piece',
                 conversionFactor: Number(line.conversion_factor || 1),
                 rate_charged: Number(line.rate_charged),
+                hasCustomerPrice: false,
+                isManualRate: true,
+                discount_amount: Number(line.discount_amount || 0),
+                tax_rate: Number(line.tax_rate ?? product.tax_rate ?? 0),
+              }
+            } catch {
+              return {
+                key: line.id || `${line.product}-${Math.random()}`,
+                product: line.product,
+                productData: {
+                  id: line.product,
+                  name: line.product_name_snapshot || line.product_name || `Product #${line.product}`,
+                  sku: line.sku_snapshot || '',
+                  mrp: line.mrp_snapshot ?? null,
+                  tax_rate: Number(line.tax_rate || 0),
+                },
+                quantity: Number(line.quantity),
+                salesUnit: line.sales_unit_name || 'piece',
+                conversionFactor: Number(line.conversion_factor || 1),
+                rate_charged: Number(line.rate_charged),
+                hasCustomerPrice: false,
+                isManualRate: true,
                 discount_amount: Number(line.discount_amount || 0),
                 tax_rate: Number(line.tax_rate || 0),
               }
-            } catch { return null }
+            }
           })
         )
         setLines(lineDetails.filter(Boolean))
@@ -286,9 +323,9 @@ export default function NewInvoicePage() {
     setLines(lines.filter((line) => line.key !== key))
   }
 
-  async function submit(event, asDraft = false) {
+  async function submit(event, asDraft = false, postDirectly = false) {
     if (event) event.preventDefault()
-    if (submitting) return
+    if (submitting || posting) return
     setError('')
     if (!lines.length) {
       setError('Add at least one product before creating the invoice.')
@@ -298,7 +335,11 @@ export default function NewInvoicePage() {
       setError('A correction reason is required before submitting.')
       return
     }
-    setSubmitting(true)
+    if (postDirectly) {
+      setPosting(true)
+    } else {
+      setSubmitting(true)
+    }
 
     const lineItems = lines.map((line) => ({
       product: line.product,
@@ -322,6 +363,11 @@ export default function NewInvoicePage() {
           line_items: lineItems,
         }
         const data = await updateDraftInvoice(editDraftId, payload)
+        if (postDirectly) {
+          const posted = await postInvoice(editDraftId)
+          navigate(`/invoices/${posted.id || editDraftId}`)
+          return
+        }
         navigate(`/invoices/${data.id}`)
         return
       }
@@ -360,18 +406,50 @@ export default function NewInvoicePage() {
       })
       navigate(`/invoices/${data.id}`)
     } catch (err) {
-      setError(apiErrorMessage(err, { action: isEditMode ? 'saving draft' : isAmendMode ? 'correcting invoice' : asDraft ? 'saving draft' : 'creating invoice' }))
+      setError(
+        apiErrorMessage(err, {
+          action: isEditMode
+            ? postDirectly
+              ? 'posting invoice'
+              : 'saving draft'
+            : isAmendMode
+              ? 'correcting invoice'
+              : asDraft
+                ? 'saving draft'
+                : 'creating invoice',
+        })
+      )
     } finally {
       setSubmitting(false)
+      setPosting(false)
     }
   }
 
   if (loading) return <section className="page-section"><div className="empty-state">Loading invoice workspace...</div></section>
 
+  if (isEditMode && error && !lines.length) {
+    return (
+      <section className="page-section invoice-page">
+        <header className="page-header invoice-header">
+          <div>
+            <p className="eyebrow">Billing / edit draft</p>
+            <h1>Edit draft invoice</h1>
+          </div>
+          <Link className="quiet-button" to="/invoices">Back to invoices</Link>
+        </header>
+        <StatusMessage>{error}</StatusMessage>
+      </section>
+    )
+  }
+
   const pageTitle    = isEditMode ? 'Edit draft invoice' : isAmendMode ? 'Correct invoice' : 'New invoice'
   const pageEyebrow  = isEditMode ? 'Billing / edit draft' : isAmendMode ? `Billing / correct ${originalInvoice?.invoice_number || ''}` : 'Billing / new transaction'
-  const submitLabel  = isEditMode ? 'Save draft' : isAmendMode ? 'Create correction' : 'Create invoice'
-  const submitNote   = isEditMode ? 'Draft saved without stock movement.' : isAmendMode ? 'Original cancelled + replacement created atomically.' : 'Server evaluates taxes with determinism upon submission. Deducts stock immediately.'
+  const submitLabel  = isEditMode ? 'Save changes' : isAmendMode ? 'Create correction' : 'Create invoice'
+  const submitNote   = isEditMode
+    ? 'Changes are saved to draft. Stock is not affected until posted.'
+    : isAmendMode
+      ? 'Original cancelled + replacement created atomically.'
+      : 'Server evaluates taxes with determinism upon submission. Deducts stock immediately.'
 
   return (
     <section className="page-section invoice-page">
@@ -380,7 +458,7 @@ export default function NewInvoicePage() {
           <p className="eyebrow">{pageEyebrow}</p>
           <h1>{pageTitle}</h1>
           <p className="page-subtitle">
-            {isEditMode && 'Changes are saved to draft. Stock is not affected until posted.'}
+            {isEditMode && `Editing draft invoice #${editDraftId}. Changes are saved to draft. Stock is not affected until posted.`}
             {isAmendMode && 'The original invoice will be cancelled and replaced atomically. Rate is always per piece/base unit.'}
             {!isEditMode && !isAmendMode && 'Exact GST splits are computed deterministically when saved.'}
           </p>
@@ -669,13 +747,52 @@ export default function NewInvoicePage() {
             <div className="summary-tax"><span>Total tax preview</span><strong>{money(totals.tax)}</strong></div>
           </div>
           <div className="grand-total"><span>Grand total (Est.)</span><strong>{money(totals.total)}</strong></div>
-          <button type="button" id="submit-invoice-btn" className="primary-button submit-invoice" onClick={(e) => submit(e, false)} disabled={submitting || !lines.length}>
-            {submitting ? 'Saving...' : submitLabel}
-          </button>
-          {!isEditMode && !isAmendMode && (
-            <button type="button" id="save-draft-btn" className="quiet-button submit-invoice" style={{ marginTop: 8 }} onClick={(e) => submit(e, true)} disabled={submitting || !lines.length}>
-              Save as draft
-            </button>
+          {isEditMode ? (
+            <>
+              <button
+                type="button"
+                id="submit-invoice-btn"
+                className="quiet-button submit-invoice"
+                onClick={(e) => submit(e, false, false)}
+                disabled={submitting || posting || !lines.length}
+              >
+                {submitting && !posting ? 'Saving changes...' : 'Save changes'}
+              </button>
+              <button
+                type="button"
+                id="post-invoice-btn"
+                className="primary-button submit-invoice"
+                style={{ marginTop: 8 }}
+                onClick={(e) => submit(e, false, true)}
+                disabled={submitting || posting || !lines.length}
+              >
+                {posting ? 'Posting invoice...' : 'Post invoice'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                id="submit-invoice-btn"
+                className="primary-button submit-invoice"
+                onClick={(e) => submit(e, false)}
+                disabled={submitting || !lines.length}
+              >
+                {submitting ? 'Saving...' : submitLabel}
+              </button>
+              {!isAmendMode && (
+                <button
+                  type="button"
+                  id="save-draft-btn"
+                  className="quiet-button submit-invoice"
+                  style={{ marginTop: 8 }}
+                  onClick={(e) => submit(e, true)}
+                  disabled={submitting || !lines.length}
+                >
+                  Save as draft
+                </button>
+              )}
+            </>
           )}
           <p className="summary-note">{submitNote}</p>
         </aside>

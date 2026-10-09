@@ -10,6 +10,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import InvoicesPage from '../pages/InvoicesPage'
 import InvoiceDetailPage from '../pages/InvoiceDetailPage'
+import NewInvoicePage from '../pages/NewInvoicePage'
 import * as invoicesApi from '../api/invoices'
 import * as client from '../api/client'
 
@@ -50,6 +51,45 @@ const PAGE_1 = {
       payment_status: 'credit',
       state: 'CANCELLED',
       total_amount: '118.00',
+    },
+  ],
+}
+
+const PAGE_WITH_DRAFT = {
+  count: 3,
+  next: null,
+  previous: null,
+  results: [
+    {
+      id: 21,
+      invoice_number: 'INV-DRAFT-1',
+      invoice_date: '2026-09-12',
+      customer_name: 'Draft Customer',
+      payment_type: 'credit',
+      payment_status: 'credit',
+      state: 'DRAFT',
+      total_amount: '500.00',
+      created_by: 1,
+    },
+    {
+      id: 22,
+      invoice_number: 'INV-POSTED-1',
+      invoice_date: '2026-09-12',
+      customer_name: 'Posted Customer',
+      payment_type: 'cash',
+      payment_status: 'paid',
+      state: 'POSTED',
+      total_amount: '400.00',
+    },
+    {
+      id: 23,
+      invoice_number: 'INV-CANCELLED-1',
+      invoice_date: '2026-09-12',
+      customer_name: 'Cancelled Customer',
+      payment_type: 'credit',
+      payment_status: 'credit',
+      state: 'CANCELLED',
+      total_amount: '300.00',
     },
   ],
 }
@@ -103,6 +143,7 @@ function mountPage(ui, { role = 'admin', route = '/invoices' } = {}) {
       <Routes>
         <Route path="/invoices" element={ui === 'list' ? <InvoicesPage /> : undefined} />
         <Route path="/invoices/:id" element={ui === 'detail' ? <InvoiceDetailPage /> : undefined} />
+        <Route path="/invoices/new" element={ui === 'editor' ? <NewInvoicePage /> : undefined} />
       </Routes>
     </MemoryRouter>
   )
@@ -409,45 +450,6 @@ describe('InvoiceDetailPage', () => {
   })
 
   describe('Delete Draft Invoice', () => {
-    const PAGE_WITH_DRAFT = {
-      count: 3,
-      next: null,
-      previous: null,
-      results: [
-        {
-          id: 21,
-          invoice_number: 'INV-DRAFT-1',
-          invoice_date: '2026-09-12',
-          customer_name: 'Draft Customer',
-          payment_type: 'credit',
-          payment_status: 'credit',
-          state: 'DRAFT',
-          total_amount: '500.00',
-          created_by: 1,
-        },
-        {
-          id: 22,
-          invoice_number: 'INV-POSTED-1',
-          invoice_date: '2026-09-12',
-          customer_name: 'Posted Customer',
-          payment_type: 'cash',
-          payment_status: 'paid',
-          state: 'POSTED',
-          total_amount: '400.00',
-        },
-        {
-          id: 23,
-          invoice_number: 'INV-CANCELLED-1',
-          invoice_date: '2026-09-12',
-          customer_name: 'Cancelled Customer',
-          payment_type: 'credit',
-          payment_status: 'credit',
-          state: 'CANCELLED',
-          total_amount: '300.00',
-        },
-      ],
-    }
-
     const DRAFT_DETAIL = {
       ...DETAIL,
       id: 21,
@@ -545,6 +547,173 @@ describe('InvoiceDetailPage', () => {
         expect(screen.getByText(/You do not have permission to perform this action/i)).toBeInTheDocument()
       })
       expect(screen.getByText('INV-DRAFT-1')).toBeInTheDocument()
+    })
+  })
+
+  describe('Draft Invoice Reopen, Edit, and Post Flow', () => {
+    const DRAFT_DETAIL = {
+      ...DETAIL,
+      id: 21,
+      customer: 42,
+      customer_name: 'J K Traders',
+      invoice_number: 'INV-DRAFT-1',
+      notes: 'Urgent delivery draft note',
+      state: 'DRAFT',
+      created_by: 1,
+      line_items: [
+        {
+          ...DETAIL.line_items[0],
+          product: 1,
+          quantity: '20.000',
+          rate_charged: '50.00',
+          sales_unit_name: 'piece',
+          conversion_factor: '1.000',
+        },
+      ],
+    }
+
+    it('shows View / Edit link and clickable invoice number for DRAFT rows on list', async () => {
+      vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue(PAGE_WITH_DRAFT)
+      mountPage('list')
+      await screen.findByText('INV-DRAFT-1')
+
+      // Draft row has View / Edit action pointing to /invoices/new?edit=21
+      const viewEditLink = screen.getByRole('link', { name: /View \/ Edit draft invoice INV-DRAFT-1/i })
+      expect(viewEditLink).toBeInTheDocument()
+      expect(viewEditLink.getAttribute('href')).toBe('/invoices/new?edit=21')
+
+      // Clickable invoice number links to draft editor for DRAFT
+      const draftNumberLink = screen.getByRole('link', { name: 'INV-DRAFT-1' })
+      expect(draftNumberLink.getAttribute('href')).toBe('/invoices/new?edit=21')
+
+      // Non-draft rows have View link and link to detail page
+      const viewLinks = screen.getAllByRole('link', { name: 'View' })
+      expect(viewLinks.length).toBe(2)
+      const postedNumberLink = screen.getByRole('link', { name: 'INV-POSTED-1' })
+      expect(postedNumberLink.getAttribute('href')).toBe('/invoices/22')
+    })
+
+    it('shows View / Edit draft link on detail page for DRAFT', async () => {
+      vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
+      mountPage('detail', { route: '/invoices/21' })
+      await screen.findByText('INV-DRAFT-1')
+      const editLink = screen.getByRole('link', { name: 'View / Edit draft' })
+      expect(editLink).toBeInTheDocument()
+      expect(editLink.getAttribute('href')).toBe('/invoices/new?edit=21')
+    })
+
+    it('reopens draft invoice in editor and loads customer, notes, lines, and rates', async () => {
+      vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
+      vi.spyOn(client.default, 'get').mockImplementation((url) => {
+        if (url === '/customers/') return Promise.resolve({ data: { results: [] } })
+        if (url === '/customers/42/') return Promise.resolve({ data: { id: 42, name: 'J K Traders', state_code: '27' } })
+        if (url === '/customers/42/report/') return Promise.resolve({ data: { outstanding_balance: '0.00' } })
+        if (url === '/products/1/') return Promise.resolve({
+          data: {
+            id: 1,
+            name: "Chheda's 3 in 1 Chikki",
+            mrp: '60.00',
+            tax_rate: '5.00',
+            attributes: { units_per_master_box: 100 },
+          },
+        })
+        return Promise.resolve({ data: {} })
+      })
+
+      mountPage('editor', { route: '/invoices/new?edit=21' })
+
+      await screen.findByText('Edit draft invoice')
+      expect(screen.getByText(/Editing draft invoice #21/i)).toBeInTheDocument()
+
+      // Customer restored
+      expect(screen.getAllByText('J K Traders').length).toBeGreaterThanOrEqual(1)
+
+      // Notes restored
+      expect(screen.getByDisplayValue('Urgent delivery draft note')).toBeInTheDocument()
+
+      // Line item restored
+      expect(screen.getByText("Chheda's 3 in 1 Chikki")).toBeInTheDocument()
+      expect(screen.getByDisplayValue('20')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('50')).toBeInTheDocument()
+    })
+
+    it('modifies draft invoice and saves changes via updateDraftInvoice', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
+      const updateSpy = vi.spyOn(invoicesApi, 'updateDraftInvoice').mockResolvedValue({ id: 21, invoice_number: 'INV-DRAFT-1' })
+      vi.spyOn(client.default, 'get').mockImplementation((url) => {
+        if (url === '/customers/') return Promise.resolve({ data: { results: [] } })
+        if (url === '/customers/42/') return Promise.resolve({ data: { id: 42, name: 'J K Traders', state_code: '27' } })
+        if (url === '/customers/42/report/') return Promise.resolve({ data: { outstanding_balance: '0.00' } })
+        if (url === '/products/1/') return Promise.resolve({
+          data: {
+            id: 1,
+            name: "Chheda's 3 in 1 Chikki",
+            mrp: '60.00',
+            tax_rate: '5.00',
+            attributes: { units_per_master_box: 100 },
+          },
+        })
+        return Promise.resolve({ data: {} })
+      })
+
+      mountPage('editor', { route: '/invoices/new?edit=21' })
+      await screen.findByText('Edit draft invoice')
+
+      const saveBtn = screen.getByRole('button', { name: 'Save changes' })
+      await user.click(saveBtn)
+
+      expect(updateSpy).toHaveBeenCalledWith('21', expect.objectContaining({
+        notes: 'Urgent delivery draft note',
+        line_items: expect.arrayContaining([
+          expect.objectContaining({
+            product: 1,
+            quantity: 20,
+            rate_charged: 50,
+          }),
+        ]),
+      }))
+    })
+
+    it('posts draft invoice directly from reopened editor', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
+      const updateSpy = vi.spyOn(invoicesApi, 'updateDraftInvoice').mockResolvedValue({ id: 21, invoice_number: 'INV-DRAFT-1' })
+      const postSpy = vi.spyOn(invoicesApi, 'postInvoice').mockResolvedValue({ id: 21, state: 'POSTED' })
+      vi.spyOn(client.default, 'get').mockImplementation((url) => {
+        if (url === '/customers/') return Promise.resolve({ data: { results: [] } })
+        if (url === '/customers/42/') return Promise.resolve({ data: { id: 42, name: 'J K Traders', state_code: '27' } })
+        if (url === '/customers/42/report/') return Promise.resolve({ data: { outstanding_balance: '0.00' } })
+        if (url === '/products/1/') return Promise.resolve({
+          data: {
+            id: 1,
+            name: "Chheda's 3 in 1 Chikki",
+            mrp: '60.00',
+            tax_rate: '5.00',
+            attributes: { units_per_master_box: 100 },
+          },
+        })
+        return Promise.resolve({ data: {} })
+      })
+
+      mountPage('editor', { route: '/invoices/new?edit=21' })
+      await screen.findByText('Edit draft invoice')
+
+      const postBtn = screen.getByRole('button', { name: 'Post invoice' })
+      await user.click(postBtn)
+
+      expect(updateSpy).toHaveBeenCalledWith('21', expect.anything())
+      expect(postSpy).toHaveBeenCalledWith('21')
+    })
+
+    it('blocks editing non-draft invoice and displays informative error', async () => {
+      vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DETAIL) // state is POSTED
+      vi.spyOn(client.default, 'get').mockResolvedValue({ data: { results: [] } })
+
+      mountPage('editor', { route: '/invoices/new?edit=11' })
+
+      await screen.findByText('Only draft invoices can be edited. This invoice is posted.')
+      expect(screen.queryByText('Save changes')).not.toBeInTheDocument()
     })
   })
 })

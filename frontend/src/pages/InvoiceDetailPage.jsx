@@ -139,7 +139,7 @@ export default function InvoiceDetailPage() {
         </>}
         {/* DRAFT: Edit, Post, and Delete buttons */}
         {invoice.state === 'DRAFT' && <>
-          <Link id="edit-draft-btn" className="quiet-button" to={`/invoices/new?edit=${id}`} style={{ fontWeight: 600 }}>Edit draft</Link>
+          <Link id="edit-draft-btn" className="quiet-button" to={`/invoices/new?edit=${id}`} style={{ fontWeight: 600 }}>View / Edit draft</Link>
           <button id="post-draft-btn" className="primary-button" onClick={handlePostDraft} disabled={busy || deleting}>
             {busy ? 'Posting...' : 'Post invoice'}
           </button>

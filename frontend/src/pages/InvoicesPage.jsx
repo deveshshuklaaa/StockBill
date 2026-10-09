@@ -206,7 +206,14 @@ export default function InvoicesPage() {
               title={invoice.state !== 'POSTED' ? 'Only posted invoices can be selected for item summary' : ''}
             />
           </td>
-          <td><strong>{invoice.invoice_number}</strong></td>
+          <td>
+            <Link
+              className="text-button"
+              to={invoice.state === 'DRAFT' ? `/invoices/new?edit=${invoice.id}` : `/invoices/${invoice.id}`}
+            >
+              <strong>{invoice.invoice_number || `Draft #${invoice.id}`}</strong>
+            </Link>
+          </td>
           <td>{invoice.invoice_date}</td>
           <td>{invoice.customer_name || 'Walk-in'}</td>
           <td><span className="type-chip">{invoice.payment_type}</span></td>
@@ -215,10 +222,15 @@ export default function InvoicesPage() {
           <td><span className={STATE_BADGE[invoice.state] || 'type-chip'}>{invoice.state}</span></td>
           <td>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <Link className="text-button" to={`/invoices/${invoice.id}`}>View</Link>
-              {invoice.state === 'DRAFT' && (
+              {invoice.state === 'DRAFT' ? (
                 <>
-                  <Link className="text-button" to={`/invoices/new?edit=${invoice.id}`} aria-label={`Edit draft invoice ${invoice.invoice_number}`}>Edit</Link>
+                  <Link
+                    className="text-button"
+                    to={`/invoices/new?edit=${invoice.id}`}
+                    aria-label={`View / Edit draft invoice ${invoice.invoice_number}`}
+                  >
+                    View / Edit
+                  </Link>
                   {canDeleteDraft(invoice) && (
                     <button
                       type="button"
@@ -231,6 +243,8 @@ export default function InvoicesPage() {
                     </button>
                   )}
                 </>
+              ) : (
+                <Link className="text-button" to={`/invoices/${invoice.id}`}>View</Link>
               )}
               {invoice.state === 'POSTED' && <>
                 <button className="text-button" onClick={() => handlePrint(invoice.id, 'original', invoice.invoice_number)} aria-label={`Print original invoice ${invoice.invoice_number}`}>Original</button>
