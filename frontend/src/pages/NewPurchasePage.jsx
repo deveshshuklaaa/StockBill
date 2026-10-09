@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
-import { fetchNextPurchaseNumber, fetchWarehouses, searchPurchaseProducts } from '../api/purchases'
+import {
+  fetchNextPurchaseNumber,
+  fetchPurchase,
+  fetchWarehouses,
+  postPurchase,
+  searchPurchaseProducts,
+  updatePurchase,
+} from '../api/purchases'
 import { fetchActiveSuppliers, fetchSupplierPricing } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatStockWithBoxes, masterBoxSize } from '../utils/format'
@@ -44,6 +51,10 @@ function calculateLine(line, taxMode) {
 
 export default function NewPurchasePage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const editDraftId = searchParams.get('edit')
+  const isEditMode = Boolean(editDraftId)
+
   const [warehouses, setWarehouses] = useState([])
   const [supplier, setSupplier] = useState(null)
   const [supplierSearch, setSupplierSearch] = useState('')
@@ -70,11 +81,106 @@ export default function NewPurchasePage() {
     fetchWarehouses({ is_active: 'true' })
       .then((warehouseRows) => {
         setWarehouses(warehouseRows)
-        if (warehouseRows.length === 1) setWarehouseId(String(warehouseRows[0].id))
+        if (!isEditMode && warehouseRows.length === 1) setWarehouseId(String(warehouseRows[0].id))
       })
       .catch((err) => setError(apiErrorMessage(err)))
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => {
+        if (!isEditMode) setLoading(false)
+      })
+  }, [isEditMode])
+
+  // Preload draft for edit mode
+  useEffect(() => {
+    if (!editDraftId) return
+    let cancelled = false
+    setLoading(true)
+    fetchPurchase(editDraftId)
+      .then(async (draft) => {
+        if (cancelled) return
+        if (draft.state !== 'DRAFT') {
+          setError('Only draft purchases can be edited. This purchase is ' + draft.state.toLowerCase() + '.')
+          setLoading(false)
+          return
+        }
+        setInvoiceDate(draft.invoice_date || today())
+        setSupplierInvoiceNo(draft.supplier_invoice_no || '')
+        if (draft.warehouse) setWarehouseId(String(draft.warehouse))
+        setTaxMode(draft.tax_mode || 'exclusive')
+        setNotes(draft.notes || '')
+
+        if (draft.supplier) {
+          try {
+            const { data: sup } = await api.get(`/suppliers/${draft.supplier}/`)
+            if (!cancelled) setSupplier(sup)
+          } catch {
+            if (!cancelled) {
+              setSupplier({
+                id: draft.supplier,
+                name: draft.supplier_name_snapshot || draft.supplier_name,
+                gstin: draft.supplier_gstin_snapshot || '',
+                state: draft.supplier_state_snapshot || '',
+                state_code: draft.supplier_state_code_snapshot || '',
+              })
+            }
+          }
+        }
+
+        const loadedLines = await Promise.all(
+          (draft.line_items || []).map(async (line) => {
+            try {
+              const { data: product } = await api.get(`/products/${line.product}/`)
+              return {
+                key: line.id || `${line.product}-${Math.random()}`,
+                product: line.product,
+                productData: product,
+                quantity: Number(line.quantity),
+                purchaseUnit: line.purchase_unit_name || 'piece',
+                conversionFactor: Number(line.conversion_factor || 1),
+                rate: Number(line.rate),
+                hasSupplierPrice: false,
+                isManualRate: true,
+                discountAmount: Number(line.discount_amount || 0) || '',
+                taxRate: Number(line.tax_rate ?? product.tax_rate ?? 0),
+              }
+            } catch {
+              return {
+                key: line.id || `${line.product}-${Math.random()}`,
+                product: line.product,
+                productData: {
+                  id: line.product,
+                  name: line.product_name_snapshot || `Product #${line.product}`,
+                  mrp: null,
+                  sku: line.sku_snapshot || '',
+                  base_unit: line.base_unit_snapshot || 'piece',
+                  tax_rate: Number(line.tax_rate || 0),
+                },
+                quantity: Number(line.quantity),
+                purchaseUnit: line.purchase_unit_name || 'piece',
+                conversionFactor: Number(line.conversion_factor || 1),
+                rate: Number(line.rate),
+                hasSupplierPrice: false,
+                isManualRate: true,
+                discountAmount: Number(line.discount_amount || 0) || '',
+                taxRate: Number(line.tax_rate || 0),
+              }
+            }
+          })
+        )
+        if (!cancelled) {
+          setLines(loadedLines)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(apiErrorMessage(err))
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [editDraftId])
 
   // Server-side supplier search, debounced; only active suppliers are
   // offered because the backend rejects inactive ones for new purchases.
@@ -183,7 +289,7 @@ export default function NewPurchasePage() {
       const hasSupplierPrice = supplierRate !== null
 
       setLines((current) => [...current, {
-        key: product.id,
+        key: `${product.id}-${Date.now()}`,
         product: product.id,
         productData: product,
         quantity: 1,
@@ -245,6 +351,14 @@ export default function NewPurchasePage() {
     if (post) { setPosting(true) } else { setSaving(true) }
     setError('')
     try {
+      const lineItems = lines.map((line) => ({
+        product: line.product,
+        quantity: Number(line.quantity),
+        purchase_unit_name: line.purchaseUnit,
+        conversion_factor: Number(line.conversionFactor),
+        rate: Number(line.rate),
+        discount_amount: Number(line.discount_amount || line.discountAmount || 0),
+      }))
       const payload = {
         supplier: supplier.id,
         warehouse: Number(warehouseId),
@@ -252,27 +366,31 @@ export default function NewPurchasePage() {
         invoice_date: invoiceDate,
         tax_mode: taxMode,
         notes,
-        post,
-        line_items: lines.map((line) => ({
-          product: line.product,
-          quantity: Number(line.quantity),
-          purchase_unit_name: line.purchaseUnit,
-          conversion_factor: Number(line.conversionFactor),
-          rate: Number(line.rate),
-          discount_amount: Number(line.discount_amount || line.discountAmount || 0),
-        })),
+        line_items: lineItems,
       }
-      const idempotencyKey = `purchase-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-      const { data } = await api.post('/purchase-invoices/', payload, {
-        headers: { 'Idempotency-Key': idempotencyKey },
-      })
-      navigate(`/purchases/${data.id}`)
+
+      if (isEditMode) {
+        await updatePurchase(editDraftId, payload)
+        if (post) {
+          const posted = await postPurchase(editDraftId)
+          navigate(`/purchases/${posted.id || editDraftId}`)
+        } else {
+          navigate(`/purchases/${editDraftId}`)
+        }
+      } else {
+        const createPayload = { ...payload, post }
+        const idempotencyKey = `purchase-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+        const { data } = await api.post('/purchase-invoices/', createPayload, {
+          headers: { 'Idempotency-Key': idempotencyKey },
+        })
+        navigate(`/purchases/${data.id}`)
+      }
     } catch (err) {
       setError(
         apiForbiddenMessage(
           err,
-          post ? 'post purchases' : 'save purchase drafts',
-          post ? 'posting purchase' : 'saving purchase draft',
+          post ? 'post purchases' : (isEditMode ? 'update purchase drafts' : 'save purchase drafts'),
+          post ? 'posting purchase' : (isEditMode ? 'updating purchase draft' : 'saving purchase draft'),
         ),
       )
     } finally {
@@ -284,10 +402,19 @@ export default function NewPurchasePage() {
 
   return <section className="page-section invoice-page">
     <header className="page-header invoice-header">
-      <div><p className="eyebrow">Purchasing / goods inward</p><h1>New purchase</h1><p className="page-subtitle">Next number on posting: <strong>{nextNumber || '—'}</strong></p></div>
+      <div>
+        <p className="eyebrow">Purchasing / goods inward</p>
+        <h1>{isEditMode ? 'Edit draft purchase' : 'New purchase'}</h1>
+        <p className="page-subtitle">
+          {isEditMode
+            ? <>Editing draft purchase <strong>#{editDraftId}</strong> · Next number on posting: <strong>{nextNumber || '—'}</strong></>
+            : <>Next number on posting: <strong>{nextNumber || '—'}</strong></>}
+        </p>
+      </div>
       <Link className="quiet-button" to="/purchases">Back to purchases</Link>
     </header>
     <StatusMessage>{error}</StatusMessage>
+
 
     <div className="invoice-layout">
       <div className="invoice-workspace">
@@ -472,7 +599,7 @@ export default function NewPurchasePage() {
           <div className="summary-tax"><span>GST</span><strong>{money(totals.tax)}</strong></div>
         </div>
         <div className="grand-total"><span>Bill total (est.)</span><strong>{money(totals.total)}</strong></div>
-        <button type="button" className="quiet-button submit-invoice" onClick={() => submit(false)} disabled={saving || posting}>{saving ? 'Saving draft...' : 'Save draft'}</button>
+        <button type="button" className="quiet-button submit-invoice" onClick={() => submit(false)} disabled={saving || posting}>{saving ? (isEditMode ? 'Saving changes...' : 'Saving draft...') : (isEditMode ? 'Save changes' : 'Save draft')}</button>
         <button type="button" className="primary-button submit-invoice" onClick={() => submit(true)} disabled={saving || posting}>{posting ? 'Receiving stock...' : 'Post & receive stock'}</button>
         <p className="summary-note">Posting receives stock, updates the weighted-average cost, and writes the stock ledger. Drafts affect nothing until posted.</p>
       </aside>

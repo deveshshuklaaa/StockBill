@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
-import { fetchPurchase } from '../api/purchases'
+import { deletePurchase, fetchPurchase } from '../api/purchases'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 import { formatQuantity } from '../utils/format'
@@ -10,12 +10,14 @@ function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', 
 
 export default function PurchaseDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const [purchase, setPurchase] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [showCancel, setShowCancel] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
   const [reason, setReason] = useState('')
 
   function load() {
@@ -48,6 +50,17 @@ export default function PurchaseDetailPage() {
     } finally { setBusy(false) }
   }
 
+  async function handleDeleteDraft() {
+    setBusy(true); setError('')
+    try {
+      await deletePurchase(id)
+      navigate('/purchases')
+    } catch (err) {
+      setError(apiErrorMessage(err))
+      setShowDelete(false)
+    } finally { setBusy(false) }
+  }
+
   if (error && !purchase) return <section className="page-section"><StatusMessage>{error}</StatusMessage><Link className="quiet-button" to="/purchases">Back to purchases</Link></section>
   if (!purchase) return <section className="page-section"><div className="empty-state">Loading purchase...</div></section>
 
@@ -58,11 +71,24 @@ export default function PurchaseDetailPage() {
     <header className="detail-toolbar">
       <Link className="quiet-button" to="/purchases">← Purchases</Link>
       {isAdmin && purchase.state !== 'CANCELLED' && <div className="detail-actions">
-        {isDraft && <button className="primary-button" onClick={post} disabled={busy}>{busy ? 'Receiving...' : 'Post & receive stock'}</button>}
+        {isDraft && <>
+          <Link className="quiet-button" to={`/purchases/new?edit=${purchase.id}`}>Edit Draft</Link>
+          <button className="quiet-button" style={{ color: 'var(--red)' }} onClick={() => setShowDelete(true)} disabled={busy}>Delete Draft</button>
+          <button className="primary-button" onClick={post} disabled={busy}>{busy ? 'Receiving...' : 'Post & receive stock'}</button>
+        </>}
         {isPosted && <button className="quiet-button" style={{ color: 'var(--red)' }} onClick={() => setShowCancel(true)} disabled={busy}>Cancel purchase</button>}
       </div>}
     </header>
     <StatusMessage>{error}</StatusMessage>
+
+    {showDelete && <div className="record-form">
+      <div className="form-heading"><div><p className="eyebrow">Delete Draft</p><h2>Delete draft purchase {purchase.purchase_number || `#${purchase.id}`}</h2></div></div>
+      <p className="field-help" style={{ marginBottom: 10 }}>This will permanently remove the draft purchase. This action cannot be undone.</p>
+      <div className="form-actions">
+        <button type="button" className="quiet-button" onClick={() => setShowDelete(false)} disabled={busy}>Cancel</button>
+        <button type="button" className="primary-button" style={{ background: 'var(--red)' }} onClick={handleDeleteDraft} disabled={busy}>{busy ? 'Deleting...' : 'Delete draft'}</button>
+      </div>
+    </div>}
 
     {showCancel && <div className="record-form">
       <div className="form-heading"><div><p className="eyebrow">Cancellation</p><h2>Cancel purchase {purchase.purchase_number}</h2></div></div>

@@ -30,3 +30,24 @@ export async function fetchNextPurchaseNumber(invoiceDate) {
 export function searchPurchaseProducts(query) {
   return api.get('/products/', { params: { search: query, is_active: 'true', page: 1 } })
 }
+
+export async function updatePurchase(id, payload) {
+  const { data } = await api.patch(`/purchase-invoices/${id}/`, payload)
+  return data
+}
+
+export async function deletePurchase(id) {
+  const { data } = await api.delete(`/purchase-invoices/${id}/`)
+  return data
+}
+
+export async function postPurchase(id) {
+  const { data } = await api.post(`/purchase-invoices/${id}/post/`)
+  return data
+}
+
+export async function cancelPurchase(id, reason) {
+  const { data } = await api.post(`/purchase-invoices/${id}/cancel/`, { reason })
+  return data
+}
+

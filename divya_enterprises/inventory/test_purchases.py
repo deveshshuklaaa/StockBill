@@ -303,6 +303,68 @@ class PurchaseLifecycleTests(PurchaseAPITestBase):
         self.assertEqual(patched.status_code, 400, patched.data)
         self.assertIn("state", patched.data)
 
+    def test_draft_modify_and_subsequently_post(self):
+        created = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", self.purchase_payload(), format="json"
+        )
+        purchase_id = created.data["id"]
+        # Update draft lines and supplier invoice number
+        updated = self.client_as(self.admin).patch(
+            f"/api/purchase-invoices/{purchase_id}/",
+            {
+                "supplier_invoice_no": "MODIFIED-BILL-99",
+                "notes": "Updated notes",
+                "line_items": [
+                    {
+                        "product": self.product.pk,
+                        "quantity": "25",
+                        "rate": "8.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data["supplier_invoice_no"], "MODIFIED-BILL-99")
+        self.assertEqual(updated.data["state"], "DRAFT")
+
+        # Now post the modified draft
+        posted = self.client_as(self.admin).post(
+            f"/api/purchase-invoices/{purchase_id}/post/",
+            format="json",
+        )
+        self.assertEqual(posted.status_code, 200)
+        self.assertEqual(posted.data["state"], "POSTED")
+        self.assertTrue(posted.data["purchase_number"].startswith("PI/"))
+
+        # Inventory must be received with modified quantities
+        balance = InventoryBalance.objects.get(
+            product=self.product, warehouse=self.warehouse
+        )
+        self.assertEqual(balance.quantity_on_hand, Decimal("25.000"))
+        self.assertEqual(balance.average_cost, Decimal("8.00"))
+
+    def test_cancelled_purchase_is_immutable_via_patch(self):
+        payload = self.purchase_payload()
+        payload["post"] = True
+        created = self.client_as(self.admin).post(
+            "/api/purchase-invoices/", payload, format="json"
+        )
+        purchase_id = created.data["id"]
+        self.client_as(self.admin).post(
+            f"/api/purchase-invoices/{purchase_id}/cancel/",
+            {"reason": "Mistake"},
+            format="json",
+        )
+        patched = self.client_as(self.admin).patch(
+            f"/api/purchase-invoices/{purchase_id}/",
+            {"supplier_invoice_no": "AFTER-CANCEL"},
+            format="json",
+        )
+        self.assertEqual(patched.status_code, 400)
+        self.assertIn("state", patched.data)
+
+
     def test_cancel_posted_purchase_reverses_stock_and_average(self):
         payload = self.purchase_payload()
         payload["post"] = True
