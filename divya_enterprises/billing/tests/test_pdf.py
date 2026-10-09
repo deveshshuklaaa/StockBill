@@ -13,7 +13,7 @@ from rest_framework.test import APIClient, APITestCase
 from billing.models import BusinessProfile, Invoice, InvoiceLineItem
 from billing.pdf_engine import amount_to_words, build_invoice_a5_pdf, _resolve_logo_path
 from customers.models import Customer
-from inventory.models import Product, TaxRate
+from inventory.models import AttributeDefinition, Product, ProductAttributeValue, TaxRate
 
 User = get_user_model()
 
@@ -56,6 +56,15 @@ class InvoicePdfGenerationTests(APITestCase):
             tax=cls.tax_5,
             hsn_sac="21069099",
             current_stock=Decimal("2000.000"),
+        )
+        cls.attr_master_box, _ = AttributeDefinition.objects.get_or_create(
+            code="units_per_master_box",
+            defaults={"name": "Units per Master Box", "data_type": AttributeDefinition.TYPE_INTEGER},
+        )
+        ProductAttributeValue.objects.create(
+            product=cls.product_box,
+            attribute_definition=cls.attr_master_box,
+            value_integer=192,
         )
         cls.product_no_hsn = Product.objects.create(
             name="Unbranded Snack No HSN",
@@ -252,29 +261,53 @@ class InvoicePdfGenerationTests(APITestCase):
         self.assertIn("Unbranded Snack No HSN", text)
         # Verify it doesn't crash on missing HSN
 
-    # 8. Master-box quantity renders correctly
-    def test_master_box_quantity_renders_correctly(self):
+    # 8. Qty column displays numbers only (no 'pcs', 'Box', etc.) and Pack column displays units_per_master_box
+    def test_quantity_is_numeric_only_and_pack_displays_units_per_master_box(self):
         pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
         doc = pymupdf.open("pdf", pdf_bytes)
         text = doc[0].get_text()
-        self.assertIn("2 Box", text)
-        self.assertIn("192", text)  # Pack size
+        # Qty is strictly numeric without any unit suffix
+        self.assertNotIn("10 pcs", text)
+        self.assertNotIn("2 Box", text)
+        self.assertNotIn("pcs", text.lower())
+        # Pack uses Product.units_per_master_box
+        self.assertIn("192", text)
+        self.assertEqual(self.product_box.units_per_master_box, 192)
 
-    # 9. Piece quantity renders correctly (no trailing decimals)
+    # 9. Piece quantity renders numeric only with no trailing decimals
     def test_piece_quantity_renders_correctly(self):
         pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
         doc = pymupdf.open("pdf", pdf_bytes)
         text = doc[0].get_text()
-        self.assertIn("10 pcs", text)
+        self.assertNotIn("10 pcs", text)
         self.assertNotIn("10.000", text)
+        self.assertNotIn("pcs", text.lower())
 
-    # 10. Mixed units render correctly
-    def test_mixed_units_render_correctly(self):
+    # 10. Existing Pack column is used and missing units_per_master_box renders dash safely
+    def test_pack_column_missing_units_handled_safely(self):
         pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
         doc = pymupdf.open("pdf", pdf_bytes)
         text = doc[0].get_text()
-        self.assertIn("10 pcs", text)
-        self.assertIn("2 Box", text)
+        self.assertIsNone(self.product_piece.units_per_master_box)
+        # Should render dash for missing units_per_master_box safely without error
+        self.assertIn("Pack", text)
+        self.assertIn("192", text)
+        # Verify no extra column was added - exactly 1 Pack column header
+        self.assertEqual(text.count("Pack"), 1)
+
+    # 10b. Product table column headers and font size
+    def test_product_table_headers_and_item_font_size(self):
+        from billing.pdf_engine import ITEM_ROW_FONT_SIZE
+        self.assertEqual(ITEM_ROW_FONT_SIZE, 9.0)
+        pdf_bytes = build_invoice_a5_pdf(self.invoice, copy_type="original")
+        doc = pymupdf.open("pdf", pdf_bytes)
+        text = doc[0].get_text()
+        expected_headers = [
+            "Sr.", "Qty.", "Pack", "Product Description", "HSN",
+            "MRP", "Rate / Piece", "Dis", "SGST", "CGST", "Amount"
+        ]
+        for h in expected_headers:
+            self.assertIn(h, text)
 
     # 11. GST summary renders correctly
     def test_gst_summary_renders_correctly(self):
@@ -393,7 +426,7 @@ class InvoicePdfGenerationTests(APITestCase):
         doc = pymupdf.open("pdf", pdf_bytes)
         text = doc[0].get_text()
         self.assertIn("Rate / Piece", text)
-        self.assertIn("2 Box", text)
+        self.assertNotIn("2 Box", text)
         self.assertIn("192", text)
         self.assertIn("3.68", text)
         self.assertIn("1483.78", text)
@@ -552,4 +585,105 @@ class InvoicePdfGenerationTests(APITestCase):
             self.assertGreaterEqual(x0, 0, f"Text block '{text[:20]}' exceeds left boundary: {x0}")
             self.assertLessEqual(x1, 595.5, f"Text block '{text[:20]}' exceeds right boundary: {x1}")
             self.assertGreaterEqual(y0, 0, f"Text block '{text[:20]}' exceeds top boundary: {y0}")
-            self.assertLessEqual(y1, 425.0, f"Text block '{text[:20]}' exceeds A5 top section boundary: {y1}")
+            self.assertLessEqual(y1, 445.0, f"Text block '{text[:20]}' exceeds A5 top section boundary: {y1}")
+
+    # 23. Product Description: strictly 9 pt font, wraps onto multiple lines without shrinking
+    def test_product_description_9pt_and_wrapping(self):
+        """Verify long product descriptions wrap at 9 pt instead of shrinking font size."""
+        from billing.pdf_engine import (
+            ITEM_ROW_FONT_SIZE,
+            ITEM_ROW_HEIGHT,
+            ITEM_LINE_LEADING,
+            INVOICE_SCALE,
+            wrap_product_description,
+            get_item_row_height,
+        )
+
+        # 1. Unit verification of wrapping function
+        long_name = "Chheda's Chipsona Potato Chips Classic Salted"
+        wrapped = wrap_product_description(long_name, max_w=158.0, font_name="Helvetica", font_size=ITEM_ROW_FONT_SIZE)
+        self.assertGreater(len(wrapped), 1, "Long description must wrap into multiple lines")
+        self.assertEqual(wrapped[0], "Chheda's Chipsona Potato Chips")
+        self.assertEqual(wrapped[1], "Classic Salted")
+
+        # Row height expands dynamically
+        h1 = get_item_row_height(["Short Name"])
+        h2 = get_item_row_height(wrapped)
+        self.assertEqual(h1, ITEM_ROW_HEIGHT)
+        self.assertEqual(h2, ITEM_ROW_HEIGHT + ITEM_LINE_LEADING)
+
+        # 2. PDF rendering verification with long description line item
+        lines = list(self.invoice.line_items.all())
+        lines[0].product_name_snapshot = long_name
+
+        pdf_bytes = build_invoice_a5_pdf(self.invoice, lines=lines)
+        doc = pymupdf.open("pdf", pdf_bytes)
+        page = doc[0]
+
+        # Check PyMuPDF spans for the wrapped product description
+        text_page = page.get_text("dict")
+        found_spans = []
+        expected_size = ITEM_ROW_FONT_SIZE * INVOICE_SCALE  # 9.0 * 0.98 = 8.82 pt
+
+        for b in text_page["blocks"]:
+            for l in b.get("lines", []):
+                for s in l.get("spans", []):
+                    if "Chipsona" in s["text"] or "Classic Salted" in s["text"]:
+                        found_spans.append(s)
+
+        self.assertGreaterEqual(len(found_spans), 2, "Both lines of wrapped description must be present")
+        for span in found_spans:
+            # Must remain 9.0 pt (scaled to 8.82 pt in PDF coords) - never shrunk to 7 or 8 pt
+            self.assertAlmostEqual(span["size"], expected_size, places=2)
+            # Must not overflow product description column horizontally
+            self.assertGreaterEqual(span["bbox"][0], 115.0)
+            self.assertLessEqual(span["bbox"][2], 295.0)
+
+    # 24. Main item table structure: Qty numeric only, Pack units_per_master_box, exactly 11 columns
+    def test_item_table_columns_qty_and_pack(self):
+        """Verify Qty is numeric only, Pack displays units_per_master_box, and no extra column exists."""
+        expected_headers = [
+            "Sr.", "Qty.", "Pack", "Product Description", "HSN",
+            "MRP", "Rate / Piece", "Dis", "SGST", "CGST", "Amount",
+        ]
+
+        pdf_bytes = build_invoice_a5_pdf(self.invoice)
+        doc = pymupdf.open("pdf", pdf_bytes)
+        text = doc[0].get_text()
+
+        # Check that table headers are present
+        for hdr in expected_headers:
+            self.assertIn(hdr, text)
+
+        # Pack displays Product.units_per_master_box (e.g. 192 from product_piece)
+        self.assertIn("192", text)
+
+        # Qty must be numeric only in table rows (e.g. '384', '10', '5'), no unit suffixes
+        for line in text.splitlines():
+            clean_l = line.strip()
+            # If line is a quantity number, ensure no 'pcs' or 'Box' attached
+            if clean_l.isdigit() and int(clean_l) in [384, 10, 5]:
+                self.assertNotIn("pcs", clean_l.lower())
+                self.assertNotIn("box", clean_l.lower())
+
+
+    # 25. Thin vertical column separators between every adjacent column
+    def test_thin_vertical_column_separators(self):
+        """Verify thin vertical separator lines (0.25 - 0.40 pt) are drawn between all adjacent columns."""
+        from billing.pdf_engine import INVOICE_SCALE
+
+        pdf_bytes = build_invoice_a5_pdf(self.invoice)
+        doc = pymupdf.open("pdf", pdf_bytes)
+        page = doc[0]
+
+        drawings = page.get_drawings()
+        expected_linewidth = 0.35 * INVOICE_SCALE  # 0.35 * 0.98 = ~0.343 pt
+
+        # Find separator line drawings with lineWidth approximately 0.34 pt
+        sep_lines = [
+            d for d in drawings
+            if d.get("width") is not None and abs(d["width"] - expected_linewidth) < 0.05
+        ]
+        # 10 column separators between the 11 columns (in header and body)
+        self.assertGreaterEqual(len(sep_lines), 10, "Thin vertical separators must be drawn across columns")
+

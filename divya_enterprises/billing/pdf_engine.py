@@ -18,6 +18,7 @@ from django.conf import settings
 from reportlab.lib.colors import HexColor, black, white, Color
 from reportlab.lib.pagesizes import A4, A5, landscape
 from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from .models import BusinessProfile, Invoice
@@ -144,16 +145,22 @@ def _resolve_logo_path() -> str | None:
     return None
 
 
+# Item row styling constants
+ITEM_ROW_FONT_SIZE = 9.0   # Visually prominent ERP item font size (9.0 pt strictly maintained)
+ITEM_ROW_HEIGHT = 13.0     # Standard single-line row height
+ITEM_LINE_LEADING = 10.0   # Vertical spacing for wrapped 9 pt lines
+
+
 def format_qty_presentation(line) -> tuple[str, str]:
     """Format quantity and pack strings according to StockBill unit rules.
+
+    - Qty column: displays only numeric quantity (no 'pcs', 'Box', etc.).
+    - Pack column: displays the product's units_per_master_box, or '-' if not configured.
 
     Returns:
         (qty_display, pack_display)
     """
-    sales_unit = str(getattr(line, "sales_unit_name", "") or "").strip().lower()
-    conversion = getattr(line, "conversion_factor", None) or Decimal("1.000")
     raw_qty = getattr(line, "quantity", Decimal("0"))
-    base_qty = getattr(line, "base_quantity", None) or (raw_qty * conversion)
 
     def clean_num(d):
         d = Decimal(str(d))
@@ -161,13 +168,105 @@ def format_qty_presentation(line) -> tuple[str, str]:
             return str(int(d))
         return f"{d:.3f}".rstrip("0").rstrip(".")
 
-    if sales_unit == "master box":
-        box_str = clean_num(raw_qty)
-        pack_str = clean_num(conversion)
-        return f"{box_str} Box", pack_str
+    qty_str = clean_num(raw_qty) if raw_qty is not None else "0"
+
+    product = getattr(line, "product", None)
+    pack_val = None
+    if product is not None:
+        pack_val = getattr(product, "units_per_master_box", None)
+        if callable(pack_val):
+            pack_val = pack_val()
+
+    # Fallback to direct attribute lookup if product doesn't have the property or returned None
+    if pack_val is None and product is not None and hasattr(product, "attribute_values"):
+        try:
+            from inventory.models import ProductAttributeValue
+            attr_val = (
+                ProductAttributeValue.objects.filter(
+                    product=product,
+                    attribute_definition__code="units_per_master_box",
+                    attribute_definition__is_active=True,
+                )
+                .values_list("value_integer", flat=True)
+                .first()
+            )
+            if attr_val and attr_val > 0:
+                pack_val = attr_val
+        except Exception:
+            pass
+
+    if pack_val is not None and pack_val > 0:
+        pack_disp = clean_num(pack_val)
     else:
-        qty_str = clean_num(raw_qty)
-        return f"{qty_str} pcs", "-"
+        pack_disp = "-"
+
+    return qty_str, pack_disp
+
+
+def wrap_product_description(
+    text: str,
+    max_w: float,
+    font_name: str = "Helvetica",
+    font_size: float = ITEM_ROW_FONT_SIZE,
+) -> list[str]:
+    """Wrap product description words into 9 pt lines that each fit within max_w.
+
+    Never auto-scales or reduces the font below 9 pt.
+    """
+    text = str(text or "").strip()
+    if not text:
+        return []
+    words = text.split()
+    lines = []
+    curr = []
+    for w in words:
+        test = " ".join(curr + [w]) if curr else w
+        if stringWidth(test, font_name, font_size) <= max_w:
+            curr.append(w)
+        else:
+            if curr:
+                lines.append(" ".join(curr))
+                curr = []
+            if stringWidth(w, font_name, font_size) <= max_w:
+                curr = [w]
+            else:
+                chunk = ""
+                for char in w:
+                    if stringWidth(chunk + char, font_name, font_size) <= max_w:
+                        chunk += char
+                    else:
+                        if chunk:
+                            lines.append(chunk)
+                        chunk = char
+                if chunk:
+                    curr = [chunk]
+    if curr:
+        lines.append(" ".join(curr))
+    return lines
+
+
+def get_item_row_height(desc_lines: list[str]) -> float:
+    """Calculate row height: 13.0 pt for single-line, expanding for multi-line."""
+    num_lines = max(1, len(desc_lines))
+    if num_lines == 1:
+        return ITEM_ROW_HEIGHT
+    return ITEM_ROW_HEIGHT + (num_lines - 1) * ITEM_LINE_LEADING
+
+
+def draw_product_description(
+    c,
+    lines: list[str],
+    x: float,
+    curr_row_top: float,
+    leading: float = ITEM_LINE_LEADING,
+    font_size: float = ITEM_ROW_FONT_SIZE,
+):
+    """Draw wrapped product description lines strictly at 9 pt."""
+    c.setFont("Helvetica", font_size)
+    y = curr_row_top - 9.5
+    for line in lines:
+        c.drawString(x + 4, y, line)
+        y -= leading
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -269,7 +368,11 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
     copy_badge = copy_labels.get(str(copy_type).lower().strip(), "ORIGINAL")
 
     if lines is None:
-        lines = list(invoice.line_items.select_related("product").all())
+        lines = list(
+            invoice.line_items.select_related("product")
+            .prefetch_related("product__attribute_values__attribute_definition")
+            .all()
+        )
     else:
         lines = list(lines)
 
@@ -367,11 +470,11 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
                 text_start_x = left_x + 4
 
         cur_y = top_y - 11
-        c.setFont("Helvetica-Bold", 10)
+        c.setFont("Helvetica-Bold", 11)
         c.setFillColor(COLOR_TEXT)
         c.drawString(text_start_x, cur_y, co_name.upper()[:40])
 
-        c.setFont("Helvetica", 6)
+        c.setFont("Helvetica", 7)
         cur_y -= 9
         # Multi-line address — prefer newline splits (database format), fall back to comma grouping
         if "\n" in co_address:
@@ -384,7 +487,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
                 addr_lines = [", ".join(addr_parts)]
         for addr_line in addr_lines[:2]:  # max 2 lines in header
             c.drawString(text_start_x, cur_y, addr_line[:60])
-            cur_y -= 8
+            cur_y -= 8.5
 
         contact_line = ""
         if co_phone:
@@ -393,9 +496,9 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             contact_line += f" | E-Mail: {co_email}"
         if contact_line:
             c.drawString(text_start_x, cur_y, contact_line[:60])
-            cur_y -= 8
+            cur_y -= 8.5
 
-        c.setFont("Helvetica-Bold", 6.5)
+        c.setFont("Helvetica-Bold", 7.5)
         c.drawString(text_start_x, cur_y, f"GSTIN: {co_gstin} | State: {co_state} ({co_state_code})")
 
         # Right side: Invoice Title + Copy Badge + Meta
@@ -403,7 +506,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.setFillColor(COLOR_HEADER_BG)
         c.rect(meta_x, top_y - title_box_h, meta_w, title_box_h, fill=1, stroke=1)
         c.setFillColor(COLOR_TEXT)
-        c.setFont("Helvetica-Bold", 8.5)
+        c.setFont("Helvetica-Bold", 9)
         if invoice.state == Invoice.STATE_CANCELLED:
             c.drawString(meta_x + 6, top_y - 11, "CANCELLED INVOICE")
             c.drawRightString(right_x - 6, top_y - 11, "[ CANCELLED ]")
@@ -415,27 +518,29 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             c.drawRightString(right_x - 6, top_y - 11, f"[ {copy_badge} ]")
 
         meta_y = top_y - title_box_h - 10
-        c.setFont("Helvetica-Bold", 7.5)
+        c.setFont("Helvetica-Bold", 8)
         c.drawString(meta_x + 6, meta_y, "Invoice No:")
-        c.drawString(meta_x + 60, meta_y, str(invoice.invoice_number))
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(meta_x + 56, meta_y, str(invoice.invoice_number))
 
-        c.setFont("Helvetica", 6.5)
-        c.drawString(meta_x + 140, meta_y, "Date:")
-        c.setFont("Helvetica-Bold", 6.5)
-        c.drawString(meta_x + 165, meta_y, invoice.invoice_date.strftime("%d-%m-%Y"))
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawRightString(right_x - 58, meta_y, "Date:")
+        c.setFont("Helvetica-Bold", 8)
+        c.drawRightString(right_x - 6, meta_y, invoice.invoice_date.strftime("%d-%m-%Y"))
 
         meta_y -= 12
-        c.setFont("Helvetica", 6.5)
+        c.setFont("Helvetica-Bold", 7.5)
         c.drawString(meta_x + 6, meta_y, "Payment:")
-        c.setFont("Helvetica-Bold", 6.5)
-        c.drawString(meta_x + 60, meta_y, f"{invoice.payment_type.title()} ({invoice.payment_status.title()})")
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(meta_x + 56, meta_y, f"{invoice.payment_type.title()} ({invoice.payment_status.title()})")
 
-        c.setFont("Helvetica", 6.5)
-        c.drawString(meta_x + 140, meta_y, "Due Date:")
-        c.drawString(meta_x + 180, meta_y, invoice.invoice_date.strftime("%d-%m-%Y"))
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawRightString(right_x - 58, meta_y, "Due Date:")
+        c.setFont("Helvetica", 7.5)
+        c.drawRightString(right_x - 6, meta_y, invoice.invoice_date.strftime("%d-%m-%Y"))
 
         meta_y -= 12
-        c.setFont("Helvetica-Bold", 6.5)
+        c.setFont("Helvetica-Bold", 7.5)
         c.drawString(meta_x + 6, meta_y, f"Place of Supply: {pos} - {cust_state}")
 
         # ------------------------------------------------------------------
@@ -452,43 +557,45 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
         # Left: Customer Details
         cy = header_bottom - 9
-        c.setFont("Helvetica-Bold", 6.5)
-        c.drawString(left_x + 6, cy, "Bill To / Recipient:")
         c.setFont("Helvetica-Bold", 7.5)
-        c.drawString(left_x + 75, cy, cust_name[:45])
+        c.drawString(left_x + 6, cy, "Bill To / Recipient:")
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(left_x + 78, cy, cust_name[:45])
 
         cy -= 9
-        c.setFont("Helvetica", 6)
+        c.setFont("Helvetica", 7.5)
         addr_line = cust_address[:75]
         c.drawString(left_x + 6, cy, f"Address: {addr_line}" if addr_line else "Address: -")
 
-        cy -= 8
+        cy -= 8.5
+        c.setFont("Helvetica-Bold", 7.5)
         c.drawString(left_x + 6, cy, f"GSTIN: {cust_gstin} | State: {cust_state} ({cust_state_code})" + (f" | Phone: {cust_phone}" if cust_phone else ""))
 
         # Right: Transport / Notes / Status
         cy_r = header_bottom - 9
-        c.setFont("Helvetica", 6)
+        c.setFont("Helvetica", 7)
         c.drawString(cust_col2_x + 6, cy_r, "Reverse Charge:")
-        c.setFont("Helvetica-Bold", 6)
-        c.drawString(cust_col2_x + 70, cy_r, "No")
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(cust_col2_x + 72, cy_r, "No")
 
         cy_r -= 9
-        c.setFont("Helvetica", 6)
+        c.setFont("Helvetica", 7)
         c.drawString(cust_col2_x + 6, cy_r, "Transport / Vehicle:")
-        c.drawString(cust_col2_x + 75, cy_r, "-")
+        c.drawString(cust_col2_x + 78, cy_r, "-")
 
-        cy_r -= 8
+        cy_r -= 8.5
         if invoice.state == Invoice.STATE_CANCELLED:
-            c.setFont("Helvetica-Bold", 6)
+            c.setFont("Helvetica-Bold", 7)
             c.setFillColor(COLOR_CANCELLED)
             c.drawString(cust_col2_x + 6, cy_r, f"Cancelled: {invoice.cancellation_reason or 'No reason provided'}"[:38])
             c.setFillColor(COLOR_TEXT)
         elif invoice.state == Invoice.STATE_DRAFT:
-            c.setFont("Helvetica-Bold", 6)
+            c.setFont("Helvetica-Bold", 7)
             c.setFillColor(COLOR_DRAFT)
             c.drawString(cust_col2_x + 6, cy_r, "DRAFT - NOT FOR TAX PURPOSES")
             c.setFillColor(COLOR_TEXT)
         elif invoice.notes:
+            c.setFont("Helvetica", 7)
             c.drawString(cust_col2_x + 6, cy_r, f"Notes: {invoice.notes[:35]}")
 
         # ------------------------------------------------------------------
@@ -502,7 +609,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.rect(left_x, th_bottom, usable_w, th_height, fill=1, stroke=1)
 
         c.setFillColor(COLOR_TEXT)
-        c.setFont("Helvetica-Bold", 6.5)
+        c.setFont("Helvetica-Bold", 7.5)
         x_curr = left_x
         for i, (h_title, w) in enumerate(zip(col_headers, col_widths)):
             if i == 3:  # Product Description
@@ -514,17 +621,21 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
             x_curr += w
             if i < len(col_widths) - 1:
+                c.saveState()
+                c.setStrokeColor(HexColor("#555555"))
+                c.setLineWidth(0.35)
                 c.line(x_curr, tbl_top, x_curr, th_bottom)
+                c.restoreState()
 
         # ------------------------------------------------------------------
         # 4. PRODUCT TABLE ROWS
         # ------------------------------------------------------------------
-        row_height = 12.5
         curr_row_top = th_bottom
 
         if not is_first_page:
-            bf_bottom = curr_row_top - row_height
-            c.setFont("Helvetica-Bold", 6.5)
+            bf_row_h = ITEM_ROW_HEIGHT
+            bf_bottom = curr_row_top - bf_row_h
+            c.setFont("Helvetica-Bold", 8.0)
             c.drawString(left_x + col_widths[0] + col_widths[1] + col_widths[2] + 4, bf_bottom + 3.5, "TOTAL B/F")
             c.drawRightString(right_x - 4, bf_bottom + 3.5, f"{cumulative_amount:.2f}")
             c.line(left_x, bf_bottom, right_x, bf_bottom)
@@ -533,8 +644,11 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         page_subtotal = Decimal("0.00")
 
         for line in page_lines:
-            row_bottom = curr_row_top - row_height
             p_name = line.product_name_snapshot or (line.product.name if line.product else "Item")
+            desc_lines = wrap_product_description(p_name, col_widths[3] - 8.0, font_name="Helvetica", font_size=ITEM_ROW_FONT_SIZE)
+            row_height = get_item_row_height(desc_lines)
+            row_bottom = curr_row_top - row_height
+
             qty_disp, pack_disp = format_qty_presentation(line)
             hsn_disp = line.hsn_sac_snapshot or "-"
             mrp_val = getattr(line, "mrp_snapshot", None) or getattr(line.product, "mrp", Decimal("0.00")) or Decimal("0.00")
@@ -548,64 +662,57 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             page_subtotal += line_total_val
             cumulative_amount += line_total_val
 
-            c.setFont("Helvetica", 6.5)
+            row_baseline = curr_row_top - 9.5
+            c.setFont("Helvetica", ITEM_ROW_FONT_SIZE)
             x_curr = left_x
 
             # Sr.
-            c.drawCentredString(x_curr + (col_widths[0] / 2), row_bottom + 3.5, str(running_sr))
+            c.drawCentredString(x_curr + (col_widths[0] / 2), row_baseline, str(running_sr))
             x_curr += col_widths[0]
 
             # Qty.
-            c.drawRightString(x_curr + col_widths[1] - 4, row_bottom + 3.5, qty_disp)
+            c.drawRightString(x_curr + col_widths[1] - 4, row_baseline, qty_disp)
             x_curr += col_widths[1]
 
             # Pack
-            c.drawCentredString(x_curr + (col_widths[2] / 2), row_bottom + 3.5, pack_disp)
+            c.drawCentredString(x_curr + (col_widths[2] / 2), row_baseline, pack_disp)
             x_curr += col_widths[2]
 
-            # Product Description
-            c.drawString(x_curr + 4, row_bottom + 3.5, p_name[:36])
+            # Product Description (strictly 9 pt, wrapped naturally into lines)
+            draw_product_description(c, desc_lines, x_curr, curr_row_top, leading=ITEM_LINE_LEADING, font_size=ITEM_ROW_FONT_SIZE)
             x_curr += col_widths[3]
 
             # HSN
-            c.drawCentredString(x_curr + (col_widths[4] / 2), row_bottom + 3.5, hsn_disp[:10])
+            c.drawCentredString(x_curr + (col_widths[4] / 2), row_baseline, hsn_disp[:10])
             x_curr += col_widths[4]
 
             # MRP
-            c.drawRightString(x_curr + col_widths[5] - 4, row_bottom + 3.5, f"{mrp_val:.2f}")
+            c.drawRightString(x_curr + col_widths[5] - 4, row_baseline, f"{mrp_val:.2f}")
             x_curr += col_widths[5]
 
             # Rate / Piece
-            c.drawRightString(x_curr + col_widths[6] - 4, row_bottom + 3.5, f"{rate_val:.2f}")
+            c.drawRightString(x_curr + col_widths[6] - 4, row_baseline, f"{rate_val:.2f}")
             x_curr += col_widths[6]
 
             # Dis
-            c.drawRightString(x_curr + col_widths[7] - 4, row_bottom + 3.5, f"{dis_val:.2f}")
+            c.drawRightString(x_curr + col_widths[7] - 4, row_baseline, f"{dis_val:.2f}")
             x_curr += col_widths[7]
 
             if has_igst:
                 # IGST
-                c.drawRightString(x_curr + col_widths[8] - 4, row_bottom + 3.5, igst_rate_str)
+                c.drawRightString(x_curr + col_widths[8] - 4, row_baseline, igst_rate_str)
                 x_curr += col_widths[8]
             else:
                 # SGST
-                c.drawRightString(x_curr + col_widths[8] - 4, row_bottom + 3.5, sgst_rate_str)
+                c.drawRightString(x_curr + col_widths[8] - 4, row_baseline, sgst_rate_str)
                 x_curr += col_widths[8]
 
                 # CGST
-                c.drawRightString(x_curr + col_widths[9] - 4, row_bottom + 3.5, cgst_rate_str)
+                c.drawRightString(x_curr + col_widths[9] - 4, row_baseline, cgst_rate_str)
                 x_curr += col_widths[9]
 
             # Amount
-            c.drawRightString(x_curr + col_widths[-1] - 4, row_bottom + 3.5, f"{line_total_val:.2f}")
-
-            # Horizontal row divider
-            x_grid = left_x
-            for w in col_widths[:-1]:
-                x_grid += w
-                c.setStrokeColor(HexColor("#E5E5E5"))
-                c.setLineWidth(0.5)
-                c.line(x_grid, curr_row_top, x_grid, row_bottom)
+            c.drawRightString(x_curr + col_widths[-1] - 4, row_baseline, f"{line_total_val:.2f}")
 
             curr_row_top = row_bottom
             running_sr += 1
@@ -616,13 +723,15 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         footer_height = 115 if is_last_page else 85
         footer_top = bottom_y + footer_height
 
-        # Fill table vertical grid down to footer
+        # Draw thin vertical column separators throughout the entire item table body down to footer
+        c.saveState()
+        c.setStrokeColor(HexColor("#555555"))
+        c.setLineWidth(0.35)
         x_grid = left_x
         for w in col_widths[:-1]:
             x_grid += w
-            c.setStrokeColor(HexColor("#E5E5E5"))
-            c.setLineWidth(0.5)
-            c.line(x_grid, curr_row_top, x_grid, footer_top)
+            c.line(x_grid, th_bottom, x_grid, footer_top)
+        c.restoreState()
 
         c.setStrokeColor(COLOR_BORDER)
         c.setLineWidth(0.75)
@@ -640,14 +749,14 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
         # Continuation Page Footer
         if not is_last_page:
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont("Helvetica-Bold", 8.5)
             c.drawString(totals_x + 12, footer_top - 25, f"Continued... Page {page_num + 1}")
-            c.setFont("Helvetica", 6.5)
+            c.setFont("Helvetica-Bold", 7.5)
             c.drawString(totals_x + 12, footer_top - 40, f"Page Total: Rs. {page_subtotal:.2f}")
 
             c.line(left_x, words_top, right_x, words_top)
             c.line(left_x, words_bot, right_x, words_bot)
-            c.setFont("Helvetica-Oblique", 6.5)
+            c.setFont("Helvetica-Oblique", 7)
             c.drawString(left_x + 6, words_bot + 4, f"(Continued on Page {page_num + 1})")
 
             # Bottom 3 boxes
@@ -658,21 +767,21 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             c.line(left_x + b_w1, words_bot, left_x + b_w1, bottom_y)
             c.line(left_x + b_w1 + b_w2, words_bot, left_x + b_w1 + b_w2, bottom_y)
 
-            c.setFont("Helvetica-Bold", 6)
+            c.setFont("Helvetica-Bold", 7)
             c.drawString(left_x + 4, words_bot - 8, "Terms & Conditions")
-            c.setFont("Helvetica", 5)
+            c.setFont("Helvetica", 6)
             t_lines = terms_text.splitlines()
             ty = words_bot - 16
             for tl in t_lines[:3]:
                 c.drawString(left_x + 4, ty, tl[:50])
                 ty -= 6
 
-            c.setFont("Helvetica-Bold", 6)
+            c.setFont("Helvetica-Bold", 7.5)
             c.drawCentredString(left_x + b_w1 + (b_w2 / 2), bottom_y + 6, "Receiver's Signature")
 
-            c.setFont("Helvetica", 6)
+            c.setFont("Helvetica-Bold", 7)
             c.drawString(left_x + b_w1 + b_w2 + 6, words_bot - 8, f"For {co_name[:28]}")
-            c.setFont("Helvetica-Bold", 6)
+            c.setFont("Helvetica-Bold", 7.5)
             c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
 
             c.restoreState()
@@ -717,7 +826,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.setFillColor(COLOR_HEADER_BG)
         c.rect(left_x, gh_bot, gst_w, gh_h, fill=1, stroke=1)
         c.setFillColor(COLOR_TEXT)
-        c.setFont("Helvetica-Bold", 5.5)
+        c.setFont("Helvetica-Bold", 6.5)
 
         gx = left_x
         for i, (gh, gw) in enumerate(zip(gst_hdrs, gst_cols)):
@@ -747,7 +856,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             sum_tot_gst += data["total_gst"]
 
             gy -= gr_h
-            c.setFont("Helvetica", 5.5)
+            c.setFont("Helvetica", 6.5)
             gx = left_x
 
             c.drawString(gx + 3, gy + 2.5, f"GST {r:.2f}%")
@@ -768,7 +877,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
         gy -= gr_h
         c.line(left_x, gy + gr_h, totals_x, gy + gr_h)
-        c.setFont("Helvetica-Bold", 5.5)
+        c.setFont("Helvetica-Bold", 6.5)
         gx = left_x
         c.drawString(gx + 3, gy + 2.5, "TOTAL")
         gx += gst_cols[0]
@@ -807,8 +916,9 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             labels.append(("ROUND OFF", f"{round_off:+.2f}"))
 
         for lbl, val in labels:
-            c.setFont("Helvetica", 6)
+            c.setFont("Helvetica-Bold", 7)
             c.drawString(totals_x + 6, ty + 2, lbl)
+            c.setFont("Helvetica-Bold", 7.5)
             c.drawRightString(right_x - 6, ty + 2, val)
             ty -= tr_h
 
@@ -816,7 +926,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.setFillColor(COLOR_HEADER_BG)
         c.rect(totals_x, words_top, totals_w, (ty + 8) - words_top, fill=1, stroke=1)
         c.setFillColor(COLOR_TEXT)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont("Helvetica-Bold", 9.5)
         c.drawString(totals_x + 6, words_top + 4, "GRAND TOTAL")
         c.drawRightString(right_x - 6, words_top + 4, f"Rs. {invoice.total_amount:.2f}")
 
@@ -824,7 +934,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.line(left_x, words_top, right_x, words_top)
         c.line(left_x, words_bot, right_x, words_bot)
 
-        c.setFont("Helvetica-Bold", 6.5)
+        c.setFont("Helvetica-Bold", 7.5)
         words_str = amount_to_words(invoice.total_amount)
         c.drawString(left_x + 6, words_bot + 4, f"Amount in Words: {words_str}")
 
@@ -836,21 +946,21 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.line(left_x + b_w1, words_bot, left_x + b_w1, bottom_y)
         c.line(left_x + b_w1 + b_w2, words_bot, left_x + b_w1 + b_w2, bottom_y)
 
-        c.setFont("Helvetica-Bold", 6)
+        c.setFont("Helvetica-Bold", 7)
         c.drawString(left_x + 4, words_bot - 8, "Terms & Conditions")
-        c.setFont("Helvetica", 5)
+        c.setFont("Helvetica", 6)
         t_lines = terms_text.splitlines()
         ty = words_bot - 16
         for tl in t_lines[:3]:
             c.drawString(left_x + 4, ty, tl[:50])
             ty -= 6
 
-        c.setFont("Helvetica-Bold", 6)
+        c.setFont("Helvetica-Bold", 7.5)
         c.drawCentredString(left_x + b_w1 + (b_w2 / 2), bottom_y + 6, "Receiver's Signature")
 
-        c.setFont("Helvetica", 6)
+        c.setFont("Helvetica-Bold", 7)
         c.drawString(left_x + b_w1 + b_w2 + 6, words_bot - 8, f"For {co_name[:28]}")
-        c.setFont("Helvetica-Bold", 6)
+        c.setFont("Helvetica-Bold", 7.5)
         c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
 
         c.restoreState()

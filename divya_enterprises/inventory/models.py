@@ -331,6 +331,36 @@ class Product(models.Model):
         instance._loaded_current_stock = instance.current_stock
         return instance
 
+    @property
+    def units_per_master_box(self):
+        """Return the product's units_per_master_box integer value, or None."""
+        if hasattr(self, "_units_per_master_box"):
+            return self._units_per_master_box
+        if hasattr(self, "_prefetched_objects_cache") and "attribute_values" in self._prefetched_objects_cache:
+            for pav in self.attribute_values.all():
+                attr_def = getattr(pav, "attribute_definition", None)
+                attr_code = getattr(attr_def, "code", None)
+                attr_active = getattr(attr_def, "is_active", True)
+                if attr_code == "units_per_master_box" and attr_active:
+                    val = pav.value_integer
+                    return val if val and val > 0 else None
+            return None
+        val = (
+            self.attribute_values.filter(
+                attribute_definition__code="units_per_master_box",
+                attribute_definition__is_active=True,
+            )
+            .values_list("value_integer", flat=True)
+            .first()
+        )
+        if val is not None and val > 0:
+            return val
+        return None
+
+    @units_per_master_box.setter
+    def units_per_master_box(self, val):
+        self._units_per_master_box = val
+
 
 class SupplierPurchasePricing(models.Model):
     """Supplier-specific purchase rate fixed per MRP slab."""

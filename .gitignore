@@ -5,6 +5,11 @@ __pycache__/
 *.pyd
 *.sqlite3
 *.log
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
 # Environment
 .env
@@ -15,6 +20,11 @@ __pycache__/
 .venv/
 venv/
 
+# Node & Frontend
+node_modules/
+dist/
+dist-ssr/
+
 # Django
 /media/
 /staticfiles/
@@ -23,12 +33,20 @@ venv/
 .DS_Store
 Thumbs.db
 
-# IDE
+# IDE & Tooling
 .vscode/
 .idea/
+.claude/
+.agents/
+graphify-out/
 
-# Runtime state store
-data/state_store.db/
+# Runtime data & state store
+data/
+
+# Temporary / rendered test PDF & sample image files
+*.pdf
+sample_*.png
+divya_enterprises/sample_*.png
 
 # Local backups and reference data
 divya_enterprises/pre_cleanup_backup.json
