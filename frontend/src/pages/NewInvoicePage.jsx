@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
 import { fetchCustomerMRPPricing } from '../api/customers'
 import { amendInvoice, fetchInvoice, postInvoice, updateDraftInvoice } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatQuantityWithUnit, formatStockWithBoxes, masterBoxSize } from '../utils/format'
+import { sortProductsByMrpForSameName } from '../utils/productSearch'
 
 const WALK_IN = { id: null, name: 'Walk-in (no account)', customer_type: 'B2C' }
 
@@ -59,11 +60,16 @@ export default function NewInvoicePage() {
   const isEditMode  = Boolean(editDraftId)
   const isAmendMode = Boolean(amendId)
 
+  const productSearchInputRef = useRef(null)
+  const rowRefs = useRef({})
+  const pendingFocusRef = useRef(null)
+
   const [customers, setCustomers] = useState([])
   const [customerSearch, setCustomerSearch] = useState('')
   const [productSearch, setProductSearch] = useState('')
   const [productResults, setProductResults] = useState([])
   const [productBusy, setProductBusy] = useState(false)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0)
   const [customer, setCustomer] = useState(WALK_IN)
   const [paymentType, setPaymentType] = useState('cash')
   const [taxMode, setTaxMode] = useState('exclusive')
@@ -186,17 +192,53 @@ export default function NewInvoicePage() {
 
   useEffect(() => {
     const query = productSearch.trim()
-    if (!query) { setProductResults([]); setProductBusy(false); return undefined }
+    if (!query) {
+      setProductResults([])
+      setProductBusy(false)
+      setActiveSuggestionIndex(0)
+      return undefined
+    }
     let cancelled = false
     setProductBusy(true)
     const timer = setTimeout(() => {
       api.get('/products/', { params: { search: query, is_active: 'true', page: 1 } })
-        .then(({ data }) => { if (!cancelled) setProductResults(rows(data).slice(0, 8)) })
+        .then(({ data }) => {
+          if (!cancelled) {
+            const sorted = sortProductsByMrpForSameName(rows(data))
+            setProductResults(sorted.slice(0, 8))
+            setActiveSuggestionIndex(0)
+          }
+        })
         .catch(() => { if (!cancelled) setProductResults([]) })
         .finally(() => { if (!cancelled) setProductBusy(false) })
     }, 300)
     return () => { cancelled = true; clearTimeout(timer); setProductBusy(false) }
   }, [productSearch])
+
+  useEffect(() => {
+    if (pendingFocusRef.current) {
+      const { key, field } = pendingFocusRef.current
+      const tryFocus = () => {
+        const el = rowRefs.current[key]?.[field]
+        if (el) {
+          pendingFocusRef.current = null
+          el.focus()
+          if (typeof el.select === 'function') {
+            el.select()
+          }
+          el.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+          return true
+        }
+        return false
+      }
+      if (!tryFocus()) {
+        const frame = requestAnimationFrame(() => {
+          tryFocus()
+        })
+        return () => cancelAnimationFrame(frame)
+      }
+    }
+  }, [lines])
 
   useEffect(() => {
     if (!customer.id) {
@@ -265,11 +307,41 @@ export default function NewInvoicePage() {
     if (value.id) setPlaceOfSupply(value.state_code || '')
   }
 
+  function handleNumericFocus(e) {
+    e.target.select?.()
+  }
+
+  function handleSearchKeyDown(e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (productResults.length > 0) {
+        setActiveSuggestionIndex((prev) => (prev + 1) % productResults.length)
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (productResults.length > 0) {
+        setActiveSuggestionIndex((prev) => (prev - 1 + productResults.length) % productResults.length)
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (productResults.length > 0 && productResults[activeSuggestionIndex]) {
+        addProduct(productResults[activeSuggestionIndex])
+      }
+    } else if (e.key === 'Escape') {
+      setProductSearch('')
+      setProductResults([])
+      setActiveSuggestionIndex(0)
+    }
+  }
+
   function addProduct(product) {
     const existing = lines.find((line) => line.product === product.id)
+    let targetKey
     if (existing) {
+      targetKey = existing.key
       updateLine(existing.key, 'quantity', Number(existing.quantity || 0) + 1)
     } else {
+      targetKey = product.id
       const mrpKey = product.mrp != null ? Number(product.mrp).toFixed(2) : null
       const customerRate =
         customer?.id && mrpKey && customerPricingMap[mrpKey] !== undefined
@@ -294,7 +366,10 @@ export default function NewInvoicePage() {
         },
       ])
     }
+    pendingFocusRef.current = { key: targetKey, field: 'unit' }
     setProductSearch('')
+    setProductResults([])
+    setActiveSuggestionIndex(0)
   }
 
   function updateLine(key, field, value) {
@@ -320,6 +395,7 @@ export default function NewInvoicePage() {
   }
 
   function removeLine(key) {
+    delete rowRefs.current[key]
     setLines(lines.filter((line) => line.key !== key))
   }
 
@@ -570,29 +646,8 @@ export default function NewInvoicePage() {
               </div>
               <span className="line-count">{lines.length} line{lines.length === 1 ? '' : 's'}</span>
             </div>
-            <div className="product-search">
-              <input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products by name to add..." aria-label="Search products" />
-              {productSearch && (
-                <div className="suggestion-list product-suggestions">
-                  {productBusy && !productResults.length && <div className="suggestion-empty">Searching...</div>}
-                  {productResults.map((product) => {
-                    const summary = variantSummary(product)
-                    const stock = formatStockWithBoxes(product.current_stock, product)
-                    return (
-                      <button type="button" key={product.id} onClick={() => addProduct(product)}>
-                        <strong>{product.name}</strong>
-                        {summary && <span className="variant-line">{summary}</span>}
-                        <span>{stock} available{product.mrp != null ? ` · MRP ₹${Number(product.mrp).toFixed(2)}` : ''}</span>
-                      </button>
-                    )
-                  })}
-                  {!productBusy && !productResults.length && <div className="suggestion-empty">No matching product</div>}
-                </div>
-              )}
-            </div>
-            {!lines.length ? (
-              <div className="lines-empty">Start typing above to add the first product.</div>
-            ) : (
+
+            {lines.length > 0 && (
               <div className="invoice-lines">
                 {lines.map((line, index) => {
                   const calculated = calculateLine(line, taxMode)
@@ -625,8 +680,23 @@ export default function NewInvoicePage() {
                       <label className="line-field line-field-unit">
                         <span className="line-field-title">Unit</span>
                         <select
+                          ref={(el) => {
+                            if (!rowRefs.current[line.key]) rowRefs.current[line.key] = {}
+                            rowRefs.current[line.key].unit = el
+                          }}
                           value={line.salesUnit}
                           onChange={(event) => updateLine(line.key, 'salesUnit', event.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              const qtyEl = rowRefs.current[line.key]?.qty
+                              if (qtyEl) {
+                                qtyEl.focus()
+                                qtyEl.select?.()
+                                qtyEl.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                              }
+                            }
+                          }}
                           aria-label={`Sales unit for ${line.productData.name}`}
                         >
                           <option value="piece">{line.productData.base_unit === 'piece' ? 'Piece' : line.productData.base_unit || 'Piece'}</option>
@@ -636,12 +706,30 @@ export default function NewInvoicePage() {
                       <label className="line-field line-field-qty">
                         <span className="line-field-title">Qty</span>
                         <input
+                          ref={(el) => {
+                            if (!rowRefs.current[line.key]) rowRefs.current[line.key] = {}
+                            rowRefs.current[line.key].qty = el
+                          }}
                           type="number"
                           min="0.001"
                           step={fixedUnit ? '1' : '0.001'}
                           value={line.quantity}
                           onChange={(event) => updateLine(line.key, 'quantity', event.target.value)}
-                          className={overStock ? 'input-warning' : ''}
+                          onFocus={handleNumericFocus}
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                              e.preventDefault()
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault()
+                              const rateEl = rowRefs.current[line.key]?.rate
+                              if (rateEl) {
+                                rateEl.focus()
+                                rateEl.select?.()
+                                rateEl.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                              }
+                            }
+                          }}
+                          className={`no-spinner ${overStock ? 'input-warning' : ''}`}
                           aria-label={`Quantity for ${line.productData.name}`}
                         />
                       </label>
@@ -659,6 +747,10 @@ export default function NewInvoicePage() {
                       <label className="line-field line-field-rate">
                         <span className="line-field-title">Rate / Piece</span>
                         <input
+                          ref={(el) => {
+                            if (!rowRefs.current[line.key]) rowRefs.current[line.key] = {}
+                            rowRefs.current[line.key].rate = el
+                          }}
                           type="number"
                           min="0"
                           step="0.01"
@@ -666,8 +758,22 @@ export default function NewInvoicePage() {
                           onChange={(event) =>
                             updateLine(line.key, 'rate_charged', event.target.value)
                           }
+                          onFocus={handleNumericFocus}
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                              e.preventDefault()
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault()
+                              const discEl = rowRefs.current[line.key]?.disc
+                              if (discEl) {
+                                discEl.focus()
+                                discEl.select?.()
+                                discEl.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                              }
+                            }
+                          }}
                           placeholder="₹ / pc"
-                          className="line-rate-input"
+                          className="no-spinner line-rate-input"
                           aria-label={`Selling rate per piece for ${line.productData.name}`}
                         />
                         {line.hasCustomerPrice && !line.isManualRate && (
@@ -696,12 +802,28 @@ export default function NewInvoicePage() {
                         <span className="line-field-title">Disc.</span>
                         <div className="disc-input-wrap">
                           <input
+                            ref={(el) => {
+                              if (!rowRefs.current[line.key]) rowRefs.current[line.key] = {}
+                              rowRefs.current[line.key].disc = el
+                            }}
                             type="number"
                             min="0"
                             step="0.01"
                             value={line.discount_amount}
                             onChange={(event) => updateLine(line.key, 'discount_amount', event.target.value)}
-                            className="line-disc-input"
+                            onFocus={handleNumericFocus}
+                            onKeyDown={(e) => {
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                e.preventDefault()
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault()
+                                if (productSearchInputRef.current) {
+                                  productSearchInputRef.current.focus()
+                                  productSearchInputRef.current.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                                }
+                              }
+                            }}
+                            className="no-spinner line-disc-input"
                             aria-label={`Discount for ${line.productData.name}`}
                           />
                           <span className="disc-symbol">%</span>
@@ -732,6 +854,41 @@ export default function NewInvoicePage() {
                 })}
               </div>
             )}
+
+            <div className="product-search">
+              <input
+                ref={productSearchInputRef}
+                value={productSearch}
+                onChange={(event) => setProductSearch(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search products by name to add..."
+                aria-label="Search products"
+              />
+              {productSearch && (
+                <div className="suggestion-list product-suggestions">
+                  {productBusy && !productResults.length && <div className="suggestion-empty">Searching...</div>}
+                  {productResults.map((product, idx) => {
+                    const summary = variantSummary(product)
+                    const stock = formatStockWithBoxes(product.current_stock, product)
+                    const isSelected = idx === activeSuggestionIndex
+                    return (
+                      <button
+                        type="button"
+                        key={product.id}
+                        className={isSelected ? 'active-suggestion' : ''}
+                        onClick={() => addProduct(product)}
+                        onMouseEnter={() => setActiveSuggestionIndex(idx)}
+                      >
+                        <strong>{product.name}</strong>
+                        {summary && <span className="variant-line">{summary}</span>}
+                        <span>{stock} available{product.mrp != null ? ` · MRP ₹${Number(product.mrp).toFixed(2)}` : ''}</span>
+                      </button>
+                    )
+                  })}
+                  {!productBusy && !productResults.length && <div className="suggestion-empty">No matching product</div>}
+                </div>
+              )}
+            </div>
           </section>
         </div>
         <aside className="invoice-summary">

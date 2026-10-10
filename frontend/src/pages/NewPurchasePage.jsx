@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import {
@@ -12,6 +12,7 @@ import {
 import { fetchActiveSuppliers, fetchSupplierPricing } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatStockWithBoxes, masterBoxSize } from '../utils/format'
+import { sortProductsByMrpForSameName } from '../utils/productSearch'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
@@ -55,6 +56,10 @@ export default function NewPurchasePage() {
   const editDraftId = searchParams.get('edit')
   const isEditMode = Boolean(editDraftId)
 
+  const productSearchInputRef = useRef(null)
+  const rowRefs = useRef({})
+  const pendingFocusRef = useRef(null)
+
   const [warehouses, setWarehouses] = useState([])
   const [supplier, setSupplier] = useState(null)
   const [supplierSearch, setSupplierSearch] = useState('')
@@ -71,6 +76,7 @@ export default function NewPurchasePage() {
   const [productSearch, setProductSearch] = useState('')
   const [productResults, setProductResults] = useState([])
   const [productBusy, setProductBusy] = useState(false)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0)
   const [lines, setLines] = useState([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -254,17 +260,54 @@ export default function NewPurchasePage() {
 
   useEffect(() => {
     const query = productSearch.trim()
-    if (!query) { setProductResults([]); setProductBusy(false); return undefined }
+    if (!query) {
+      setProductResults([])
+      setProductBusy(false)
+      setActiveSuggestionIndex(0)
+      return undefined
+    }
     let cancelled = false
     setProductBusy(true)
     const timer = setTimeout(() => {
       searchPurchaseProducts(query)
-        .then(({ data }) => { if (!cancelled) setProductResults((data.results || []).slice(0, 8)) })
+        .then(({ data }) => {
+          if (!cancelled) {
+            const raw = data.results || []
+            const sorted = sortProductsByMrpForSameName(raw)
+            setProductResults(sorted.slice(0, 8))
+            setActiveSuggestionIndex(0)
+          }
+        })
         .catch(() => { if (!cancelled) setProductResults([]) })
         .finally(() => { if (!cancelled) setProductBusy(false) })
     }, 300)
     return () => { cancelled = true; clearTimeout(timer); setProductBusy(false) }
   }, [productSearch])
+
+  useEffect(() => {
+    if (pendingFocusRef.current) {
+      const { key, field } = pendingFocusRef.current
+      const tryFocus = () => {
+        const el = rowRefs.current[key]?.[field]
+        if (el) {
+          pendingFocusRef.current = null
+          el.focus()
+          if (typeof el.select === 'function') {
+            el.select()
+          }
+          el.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+          return true
+        }
+        return false
+      }
+      if (!tryFocus()) {
+        const frame = requestAnimationFrame(() => {
+          tryFocus()
+        })
+        return () => cancelAnimationFrame(frame)
+      }
+    }
+  }, [lines])
 
   const totals = useMemo(() => lines.reduce((result, line) => {
     const calculated = calculateLine(line, taxMode)
@@ -276,11 +319,41 @@ export default function NewPurchasePage() {
     return result
   }, { subtotal: 0, discount: 0, taxable: 0, tax: 0, total: 0 }), [lines, taxMode])
 
+  function handleNumericFocus(e) {
+    e.target.select?.()
+  }
+
+  function handleSearchKeyDown(e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (productResults.length > 0) {
+        setActiveSuggestionIndex((prev) => (prev + 1) % productResults.length)
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (productResults.length > 0) {
+        setActiveSuggestionIndex((prev) => (prev - 1 + productResults.length) % productResults.length)
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (productResults.length > 0 && productResults[activeSuggestionIndex]) {
+        addProduct(productResults[activeSuggestionIndex])
+      }
+    } else if (e.key === 'Escape') {
+      setProductSearch('')
+      setProductResults([])
+      setActiveSuggestionIndex(0)
+    }
+  }
+
   function addProduct(product) {
     const existing = lines.find((line) => line.product === product.id)
+    let targetKey
     if (existing) {
+      targetKey = existing.key
       updateLine(existing.key, 'quantity', Number(existing.quantity || 0) + 1)
     } else {
+      targetKey = `${product.id}-${Date.now()}`
       const productMrp = product.mrp != null ? Number(product.mrp).toFixed(2) : null
       const supplierRate =
         supplier?.id && productMrp && supplierPricingMap[productMrp] !== undefined
@@ -289,7 +362,7 @@ export default function NewPurchasePage() {
       const hasSupplierPrice = supplierRate !== null
 
       setLines((current) => [...current, {
-        key: `${product.id}-${Date.now()}`,
+        key: targetKey,
         product: product.id,
         productData: product,
         quantity: 1,
@@ -302,7 +375,10 @@ export default function NewPurchasePage() {
         taxRate: Number(product.tax_rate) || 0,
       }])
     }
+    pendingFocusRef.current = { key: targetKey, field: 'unit' }
     setProductSearch('')
+    setProductResults([])
+    setActiveSuggestionIndex(0)
   }
 
   function updateLine(key, field, value) {
@@ -326,6 +402,7 @@ export default function NewPurchasePage() {
   }
 
   function removeLine(key) {
+    delete rowRefs.current[key]
     setLines((current) => current.filter((line) => line.key !== key))
   }
 
@@ -456,136 +533,231 @@ export default function NewPurchasePage() {
             <div><div className="section-kicker">03 / Items</div><h2>What is coming in?</h2></div>
             <span className="line-count">{lines.length} line{lines.length === 1 ? '' : 's'}</span>
           </div>
-          <div className="product-search">
-            <input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products by name to add..." aria-label="Search products" />
-            {productSearch && <div className="suggestion-list product-suggestions">
-              {productBusy && !productResults.length && <div className="suggestion-empty">Searching...</div>}
-              {productResults.map((product) => {
-                const box = masterBoxSize(product)
-                const summary = variantSummary(product)
-                return <button type="button" key={product.id} onClick={() => addProduct(product)}>
-                  <strong>{product.name}</strong>
-                  {summary && <span className="variant-line">{summary}</span>}
-                  <span>{box ? `M.Box ${box} · ` : ''}{formatStockWithBoxes(product.current_stock, product)}</span>
-                </button>
-              })}
-              {!productBusy && !productResults.length && <div className="suggestion-empty">No matching product</div>}
-            </div>}
-          </div>
 
-          {!lines.length ? <div className="lines-empty">Start typing above to add the first product.</div> : <div className="invoice-lines">
-            {lines.map((line) => {
-              const calculated = calculateLine(line, taxMode)
-              const box = masterBoxSize(line.productData)
-              const isMasterBox = line.purchaseUnit === 'master box'
-              return <div className="invoice-line new-purchase-line" key={line.key}>
-                <div className="line-product">
-                  <span className="line-field-title">Product</span>
-                  <strong className="line-product-name">{line.productData.name}</strong>
-                  <span className="variant-line">{variantSummary(line.productData) || line.productData.base_unit}</span>
-                  <span className="line-conversion-badge">
-                    {isMasterBox && box
-                      ? `Conversion: ${line.quantity || 0} × ${box} = ${calculated.baseQty} Pieces`
-                      : `${calculated.baseQty} ${line.productData.base_unit || 'Pieces'}`}
-                    {' · '}Effective cost: {money(calculated.unitCost)} / pc
-                  </span>
-                </div>
-                <label className="line-field line-field-unit">
-                  <span className="line-field-title">Unit</span>
-                  <select value={line.purchaseUnit} onChange={(e) => updateLine(line.key, 'purchaseUnit', e.target.value)} aria-label={`Unit for ${line.productData.name}`}>
-                    <option value="piece">Pieces</option>
-                    {box && <option value="master box">Master Box ({box} pcs)</option>}
-                  </select>
-                </label>
-                <label className="line-field line-field-qty">
-                  <span className="line-field-title">Qty</span>
-                  <input
-                    type="number"
-                    min="0.001"
-                    step={isMasterBox ? '1' : '0.001'}
-                    value={line.quantity}
-                    onChange={(e) => updateLine(line.key, 'quantity', e.target.value)}
-                    placeholder={isMasterBox ? 'Boxes' : 'Pieces'}
-                    aria-label={`Quantity in ${isMasterBox ? 'master boxes' : 'pieces'} for ${line.productData.name}`}
-                  />
-                </label>
-                <label className="line-field line-field-mrp">
-                  <span className="line-field-title">MRP</span>
-                  <input
-                    type="text"
-                    readOnly
-                    tabIndex={-1}
-                    value={line.productData?.mrp != null ? `₹${Number(line.productData.mrp).toFixed(2)}` : '—'}
-                    className="line-mrp-input"
-                    aria-label={`MRP for ${line.productData.name}`}
-                  />
-                </label>
-                <label className="line-field line-field-rate">
-                  <span className="line-field-title">Purchase Rate</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={line.rate}
-                    onChange={(e) => updateLine(line.key, 'rate', e.target.value)}
-                    placeholder="₹ / pc"
-                    className="line-rate-input"
-                    aria-label={`Purchase rate per piece for ${line.productData.name}`}
-                  />
-                  {line.hasSupplierPrice && !line.isManualRate && (
-                    <span
-                      className="line-rate-hint rate-supplier supplier-rate-badge"
-                      title={`Supplier rate${line.productData?.mrp != null ? ` (MRP ₹${Number(line.productData.mrp).toFixed(2)})` : ''}: ₹${Number(line.rate).toFixed(2)}/pc`}
+          {lines.length > 0 && (
+            <div className="invoice-lines">
+              {lines.map((line) => {
+                const calculated = calculateLine(line, taxMode)
+                const box = masterBoxSize(line.productData)
+                const isMasterBox = line.purchaseUnit === 'master box'
+                return (
+                  <div className="invoice-line new-purchase-line" key={line.key}>
+                    <div className="line-product">
+                      <span className="line-field-title">Product</span>
+                      <strong className="line-product-name">{line.productData.name}</strong>
+                      <span className="variant-line">{variantSummary(line.productData) || line.productData.base_unit}</span>
+                      <span className="line-conversion-badge">
+                        {isMasterBox && box
+                          ? `Conversion: ${line.quantity || 0} × ${box} = ${calculated.baseQty} Pieces`
+                          : `${calculated.baseQty} ${line.productData.base_unit || 'Pieces'}`}
+                        {' · '}Effective cost: {money(calculated.unitCost)} / pc
+                      </span>
+                    </div>
+                    <label className="line-field line-field-unit">
+                      <span className="line-field-title">Unit</span>
+                      <select
+                        ref={(el) => {
+                          if (!rowRefs.current[line.key]) rowRefs.current[line.key] = {}
+                          rowRefs.current[line.key].unit = el
+                        }}
+                        value={line.purchaseUnit}
+                        onChange={(e) => updateLine(line.key, 'purchaseUnit', e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            const qtyEl = rowRefs.current[line.key]?.qty
+                            if (qtyEl) {
+                              qtyEl.focus()
+                              qtyEl.select?.()
+                              qtyEl.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                            }
+                          }
+                        }}
+                        aria-label={`Unit for ${line.productData.name}`}
+                      >
+                        <option value="piece">Pieces</option>
+                        {box && <option value="master box">Master Box ({box} pcs)</option>}
+                      </select>
+                    </label>
+                    <label className="line-field line-field-qty">
+                      <span className="line-field-title">Qty</span>
+                      <input
+                        ref={(el) => {
+                          if (!rowRefs.current[line.key]) rowRefs.current[line.key] = {}
+                          rowRefs.current[line.key].qty = el
+                        }}
+                        type="number"
+                        min="0.001"
+                        step={isMasterBox ? '1' : '0.001'}
+                        value={line.quantity}
+                        onChange={(e) => updateLine(line.key, 'quantity', e.target.value)}
+                        onFocus={handleNumericFocus}
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                            e.preventDefault()
+                          } else if (e.key === 'Enter') {
+                            e.preventDefault()
+                            const rateEl = rowRefs.current[line.key]?.rate
+                            if (rateEl) {
+                              rateEl.focus()
+                              rateEl.select?.()
+                              rateEl.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                            }
+                          }
+                        }}
+                        placeholder={isMasterBox ? 'Boxes' : 'Pieces'}
+                        className="no-spinner"
+                        aria-label={`Quantity in ${isMasterBox ? 'master boxes' : 'pieces'} for ${line.productData.name}`}
+                      />
+                    </label>
+                    <label className="line-field line-field-mrp">
+                      <span className="line-field-title">MRP</span>
+                      <input
+                        type="text"
+                        readOnly
+                        tabIndex={-1}
+                        value={line.productData?.mrp != null ? `₹${Number(line.productData.mrp).toFixed(2)}` : '—'}
+                        className="line-mrp-input"
+                        aria-label={`MRP for ${line.productData.name}`}
+                      />
+                    </label>
+                    <label className="line-field line-field-rate">
+                      <span className="line-field-title">Purchase Rate</span>
+                      <input
+                        ref={(el) => {
+                          if (!rowRefs.current[line.key]) rowRefs.current[line.key] = {}
+                          rowRefs.current[line.key].rate = el
+                        }}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={line.rate}
+                        onChange={(e) => updateLine(line.key, 'rate', e.target.value)}
+                        onFocus={handleNumericFocus}
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                            e.preventDefault()
+                          } else if (e.key === 'Enter') {
+                            e.preventDefault()
+                            const discEl = rowRefs.current[line.key]?.disc
+                            if (discEl) {
+                              discEl.focus()
+                              discEl.select?.()
+                              discEl.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                            }
+                          }
+                        }}
+                        placeholder="₹ / pc"
+                        className="no-spinner line-rate-input"
+                        aria-label={`Purchase rate per piece for ${line.productData.name}`}
+                      />
+                      {line.hasSupplierPrice && !line.isManualRate && (
+                        <span
+                          className="line-rate-hint rate-supplier supplier-rate-badge"
+                          title={`Supplier rate${line.productData?.mrp != null ? ` (MRP ₹${Number(line.productData.mrp).toFixed(2)})` : ''}: ₹${Number(line.rate).toFixed(2)}/pc`}
+                        >
+                          Supplier rate{line.productData?.mrp != null ? ` (MRP ₹${Number(line.productData.mrp).toFixed(2)})` : ''}: ₹{Number(line.rate).toFixed(2)}/pc
+                        </span>
+                      )}
+                      {line.isManualRate && line.hasSupplierPrice && (
+                        <span className="line-rate-hint rate-manual manual-override-badge">
+                          Manually overridden
+                        </span>
+                      )}
+                    </label>
+                    <label className="line-field line-field-disc">
+                      <span className="line-field-title">Disc.</span>
+                      <div className="disc-input-wrap">
+                        <input
+                          ref={(el) => {
+                            if (!rowRefs.current[line.key]) rowRefs.current[line.key] = {}
+                            rowRefs.current[line.key].disc = el
+                          }}
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={line.discountAmount}
+                          onChange={(e) => updateLine(line.key, 'discountAmount', e.target.value)}
+                          onFocus={handleNumericFocus}
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                              e.preventDefault()
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault()
+                              if (productSearchInputRef.current) {
+                                productSearchInputRef.current.focus()
+                                productSearchInputRef.current.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+                              }
+                            }
+                          }}
+                          placeholder="0.00"
+                          className="no-spinner line-disc-input"
+                          aria-label={`Discount amount for ${line.productData.name}`}
+                        />
+                        <span className="disc-symbol">%</span>
+                      </div>
+                    </label>
+                    <div className="line-field line-field-tax">
+                      <span className="line-field-title">GST</span>
+                      <div className="line-val-display">{calculated.taxRate}%</div>
+                    </div>
+                    <div className="line-field line-field-taxable">
+                      <span className="line-field-title">Taxable</span>
+                      <div className="line-val-display line-val-taxable">
+                        <span className="sr-only">{`Taxable: ${money(calculated.taxable)}`}</span>
+                        <span aria-hidden="true">{money(calculated.taxable)}</span>
+                      </div>
+                    </div>
+                    <div className="line-field line-field-total">
+                      <span className="line-field-title">Total</span>
+                      <div className="line-val-display line-val-total">
+                        <strong>{money(calculated.total)}</strong>
+                      </div>
+                    </div>
+                    <div className="line-field line-field-remove">
+                      <span className="line-field-title">&nbsp;</span>
+                      <button type="button" className="remove-line" onClick={() => removeLine(line.key)} aria-label="Remove line" title="Remove line">×</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="product-search">
+            <input
+              ref={productSearchInputRef}
+              value={productSearch}
+              onChange={(event) => setProductSearch(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search products by name to add..."
+              aria-label="Search products"
+            />
+            {productSearch && (
+              <div className="suggestion-list product-suggestions">
+                {productBusy && !productResults.length && <div className="suggestion-empty">Searching...</div>}
+                {productResults.map((product, idx) => {
+                  const box = masterBoxSize(product)
+                  const summary = variantSummary(product)
+                  const isSelected = idx === activeSuggestionIndex
+                  return (
+                    <button
+                      type="button"
+                      key={product.id}
+                      className={isSelected ? 'active-suggestion' : ''}
+                      onClick={() => addProduct(product)}
+                      onMouseEnter={() => setActiveSuggestionIndex(idx)}
                     >
-                      Supplier rate{line.productData?.mrp != null ? ` (MRP ₹${Number(line.productData.mrp).toFixed(2)})` : ''}: ₹{Number(line.rate).toFixed(2)}/pc
-                    </span>
-                  )}
-                  {line.isManualRate && line.hasSupplierPrice && (
-                    <span className="line-rate-hint rate-manual manual-override-badge">
-                      Manually overridden
-                    </span>
-                  )}
-                </label>
-                <label className="line-field line-field-disc">
-                  <span className="line-field-title">Disc.</span>
-                  <div className="disc-input-wrap">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={line.discountAmount}
-                      onChange={(e) => updateLine(line.key, 'discountAmount', e.target.value)}
-                      placeholder="0.00"
-                      className="line-disc-input"
-                      aria-label={`Discount amount for ${line.productData.name}`}
-                    />
-                    <span className="disc-symbol">%</span>
-                  </div>
-                </label>
-                <div className="line-field line-field-tax">
-                  <span className="line-field-title">GST</span>
-                  <div className="line-val-display">{calculated.taxRate}%</div>
-                </div>
-                <div className="line-field line-field-taxable">
-                  <span className="line-field-title">Taxable</span>
-                  <div className="line-val-display line-val-taxable">
-                    <span className="sr-only">{`Taxable: ${money(calculated.taxable)}`}</span>
-                    <span aria-hidden="true">{money(calculated.taxable)}</span>
-                  </div>
-                </div>
-                <div className="line-field line-field-total">
-                  <span className="line-field-title">Total</span>
-                  <div className="line-val-display line-val-total">
-                    <strong>{money(calculated.total)}</strong>
-                  </div>
-                </div>
-                <div className="line-field line-field-remove">
-                  <span className="line-field-title">&nbsp;</span>
-                  <button type="button" className="remove-line" onClick={() => removeLine(line.key)} aria-label="Remove line" title="Remove line">×</button>
-                </div>
+                      <strong>{product.name}</strong>
+                      {summary && <span className="variant-line">{summary}</span>}
+                      <span>{box ? `M.Box ${box} · ` : ''}{formatStockWithBoxes(product.current_stock, product)}</span>
+                    </button>
+                  )
+                })}
+                {!productBusy && !productResults.length && <div className="suggestion-empty">No matching product</div>}
               </div>
-            })}
-          </div>}
+            )}
+          </div>
         </section>
       </div>
 

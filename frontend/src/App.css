@@ -620,5 +620,34 @@
   color: var(--green-dark);
 }
 
+/* Numeric input spinner suppression for quantity, rate, and discount fields */
+input.no-spinner::-webkit-outer-spin-button,
+input.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Product search and dropdown positioning below item list */
+.lines-card {
+  overflow: visible;
+}
+.product-suggestions {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  z-index: 100;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.suggestion-list button.active-suggestion {
+  background: #eef5ef;
+  border-left: 3px solid var(--green);
+}
+
 
 
