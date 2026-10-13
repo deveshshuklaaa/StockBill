@@ -4,6 +4,8 @@ import api, { apiErrorMessage } from '../api/client'
 import { fetchCustomerMRPPricing } from '../api/customers'
 import { amendInvoice, fetchInvoice, postInvoice, updateDraftInvoice } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
+import UnsavedChangesDialog from '../components/UnsavedChangesDialog'
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges'
 import { formatNetWeight, formatQuantityWithUnit, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 import { sortProductsByMrpForSameName } from '../utils/productSearch'
 
@@ -51,6 +53,25 @@ function calculateLine(line, taxMode) {
   return { subtotal: gross, discount, taxable, tax, total: taxable + tax, baseQty }
 }
 
+function makeInvoiceSnapshot({ customer, paymentType, taxMode, placeOfSupply, notes, lines, amendReason }) {
+  return JSON.stringify({
+    customerId: customer?.id ?? null,
+    paymentType,
+    taxMode,
+    placeOfSupply: placeOfSupply || '',
+    notes: notes || '',
+    amendReason: amendReason || '',
+    lines: (lines || []).map((l) => ({
+      product: l.product,
+      quantity: Number(l.quantity),
+      salesUnit: l.salesUnit,
+      conversionFactor: Number(l.conversionFactor),
+      rate_charged: Number(l.rate_charged),
+      discount_amount: Number(l.discount_amount || 0),
+    })),
+  })
+}
+
 export default function NewInvoicePage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -63,6 +84,9 @@ export default function NewInvoicePage() {
   const productSearchInputRef = useRef(null)
   const rowRefs = useRef({})
   const pendingFocusRef = useRef(null)
+  const isSubmittedRef = useRef(false)
+  const [initialSnapshot, setInitialSnapshot] = useState(null)
+  const [isSubmitted, setIsSubmitted] = useState(false)
 
   const [customers, setCustomers] = useState([])
   const [customerSearch, setCustomerSearch] = useState('')
@@ -172,7 +196,17 @@ export default function NewInvoicePage() {
             }
           })
         )
-        setLines(lineDetails.filter(Boolean))
+        const loadedLines = lineDetails.filter(Boolean)
+        setLines(loadedLines)
+        setInitialSnapshot(makeInvoiceSnapshot({
+          customer: inv.customer ? { id: inv.customer } : WALK_IN,
+          paymentType: inv.payment_type || 'cash',
+          taxMode: inv.tax_mode || 'exclusive',
+          placeOfSupply: inv.customer_state_code_snapshot || inv.place_of_supply || '',
+          notes: inv.notes || '',
+          lines: loadedLines,
+          amendReason: '',
+        }))
       })
       .catch((err) => setError(apiErrorMessage(err)))
       .finally(() => setLoading(false))
@@ -399,6 +433,131 @@ export default function NewInvoicePage() {
     setLines(lines.filter((line) => line.key !== key))
   }
 
+  const isDirty = useMemo(() => {
+    if (isSubmitted) return false
+    if (isEditMode || isAmendMode) {
+      if (!initialSnapshot) return false
+      const currentSnapshot = makeInvoiceSnapshot({
+        customer,
+        paymentType,
+        taxMode,
+        placeOfSupply,
+        notes,
+        lines,
+        amendReason,
+      })
+      return currentSnapshot !== initialSnapshot
+    }
+    const hasCustomer = customer?.id !== null
+    const hasCustomerSearch = customerSearch.trim() !== ''
+    const hasLines = lines.length > 0
+    const hasNotes = notes.trim() !== ''
+    const hasNonDefaultPayment = paymentType !== 'cash'
+    const hasNonDefaultTax = taxMode !== 'exclusive'
+    const hasPlaceOfSupply = placeOfSupply.trim() !== ''
+    return Boolean(
+      hasCustomer ||
+      hasCustomerSearch ||
+      hasLines ||
+      hasNotes ||
+      hasNonDefaultPayment ||
+      hasNonDefaultTax ||
+      hasPlaceOfSupply
+    )
+  }, [
+    isSubmitted,
+    isEditMode,
+    isAmendMode,
+    initialSnapshot,
+    customer,
+    customerSearch,
+    lines,
+    notes,
+    paymentType,
+    taxMode,
+    placeOfSupply,
+    amendReason,
+  ])
+
+  async function saveDraftInternal() {
+    if (!lines.length) {
+      throw new Error('Add at least one product before saving as draft.')
+    }
+    if (isAmendMode && !amendReason.trim()) {
+      throw new Error('A correction reason is required before submitting.')
+    }
+
+    const lineItems = lines.map((line) => ({
+      product: line.product,
+      quantity: Number(line.quantity),
+      sales_unit_name: line.salesUnit,
+      conversion_factor: Number(line.conversionFactor),
+      rate_charged: Number(line.rate_charged),
+      discount_amount: Number(line.discount_amount || 0),
+      tax_rate: line.tax_rate,
+    }))
+
+    try {
+      if (isEditMode) {
+        const payload = {
+          customer: customer.id,
+          payment_type: customer.id ? paymentType : 'cash',
+          tax_mode: taxMode,
+          place_of_supply: placeOfSupply,
+          notes,
+          line_items: lineItems,
+        }
+        await updateDraftInvoice(editDraftId, payload)
+        isSubmittedRef.current = true
+        setIsSubmitted(true)
+        return true
+      }
+
+      if (isAmendMode) {
+        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
+        const payload = {
+          reason: amendReason.trim(),
+          invoice_number: `INV-${stamp}`,
+          customer: customer.id,
+          payment_type: customer.id ? paymentType : 'cash',
+          tax_mode: taxMode,
+          place_of_supply: placeOfSupply,
+          notes,
+          line_items: lineItems,
+        }
+        await amendInvoice(amendId, payload)
+        isSubmittedRef.current = true
+        setIsSubmitted(true)
+        return true
+      }
+
+      const payload = {
+        invoice_number: makeInvoiceNumber(),
+        customer: customer.id,
+        payment_type: customer.id ? paymentType : 'cash',
+        tax_mode: taxMode,
+        place_of_supply: placeOfSupply,
+        notes,
+        line_items: lineItems,
+      }
+      const idempotencyKey = `invoice-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      await api.post('/invoices/drafts/', payload, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      })
+      isSubmittedRef.current = true
+      setIsSubmitted(true)
+      return true
+    } catch (err) {
+      throw new Error(apiErrorMessage(err, { action: 'saving draft' }))
+    }
+  }
+
+  const unsavedChanges = useUnsavedChanges({
+    isDirty,
+    isSubmittedRef,
+    onSaveDraft: saveDraftInternal,
+  })
+
   async function submit(event, asDraft = false, postDirectly = false) {
     if (event) event.preventDefault()
     if (submitting || posting) return
@@ -441,9 +600,13 @@ export default function NewInvoicePage() {
         const data = await updateDraftInvoice(editDraftId, payload)
         if (postDirectly) {
           const posted = await postInvoice(editDraftId)
+          isSubmittedRef.current = true
+          setIsSubmitted(true)
           navigate(`/invoices/${posted.id || editDraftId}`)
           return
         }
+        isSubmittedRef.current = true
+        setIsSubmitted(true)
         navigate(`/invoices/${data.id}`)
         return
       }
@@ -461,6 +624,8 @@ export default function NewInvoicePage() {
           line_items: lineItems,
         }
         const result = await amendInvoice(amendId, payload)
+        isSubmittedRef.current = true
+        setIsSubmitted(true)
         navigate(`/invoices/${result.replacement.id}`)
         return
       }
@@ -480,6 +645,8 @@ export default function NewInvoicePage() {
       const { data } = await api.post(url, payload, {
         headers: { 'Idempotency-Key': idempotencyKey },
       })
+      isSubmittedRef.current = true
+      setIsSubmitted(true)
       navigate(`/invoices/${data.id}`)
     } catch (err) {
       setError(
@@ -954,6 +1121,17 @@ export default function NewInvoicePage() {
           <p className="summary-note">{submitNote}</p>
         </aside>
       </form>
+
+      <UnsavedChangesDialog
+        isOpen={unsavedChanges.isOpen}
+        title="Unsaved Invoice"
+        message="You have unsaved changes on this invoice. What would you like to do before leaving?"
+        isSaving={unsavedChanges.isSaving}
+        error={unsavedChanges.saveError}
+        onSaveDraft={unsavedChanges.handleSaveDraft}
+        onLeaveWithoutSaving={unsavedChanges.handleLeaveWithoutSaving}
+        onCancel={unsavedChanges.handleCancel}
+      />
     </section>
   )
 }

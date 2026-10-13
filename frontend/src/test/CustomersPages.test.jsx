@@ -199,6 +199,132 @@ describe('CustomersPage', () => {
     await screen.findByText('Only admin users can access this endpoint.')
     expect(document.body.textContent).not.toMatch(/0:/)
   })
+
+  it('displays Add Customer form at the top, focuses Customer name, and prevents duplicate rendering', async () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+    vi.spyOn(customersApi, 'fetchCustomers').mockResolvedValue(LIST_PAGE_1)
+
+    const user = userEvent.setup()
+    mountPage('list')
+    await screen.findByText('J K Traders')
+
+    // Click Add Customer
+    const addBtn = screen.getByRole('button', { name: 'Add customer' })
+    await user.click(addBtn)
+
+    // Form should appear
+    const formHeading = await screen.findByRole('heading', { name: 'Add customer', level: 2 })
+    expect(formHeading).toBeInTheDocument()
+
+    // Positioned above table-frame
+    const formContainer = document.querySelector('.customer-form-container')
+    const tableFrame = document.querySelector('.table-frame')
+    expect(formContainer).toBeInTheDocument()
+    expect(tableFrame).toBeInTheDocument()
+    expect(formContainer.compareDocumentPosition(tableFrame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    // Form is rendered only once
+    const forms = document.querySelectorAll('form.record-form')
+    expect(forms.length).toBe(1)
+
+    // scrollIntoView called
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+
+    // First input (Customer name) focused
+    const nameInput = screen.getByLabelText(/Customer name/i)
+    await waitFor(() => {
+      expect(document.activeElement).toBe(nameInput)
+    })
+  })
+
+  it('preserves entered values and refocuses Customer name if Add customer is clicked again while already open', async () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+    vi.spyOn(customersApi, 'fetchCustomers').mockResolvedValue(LIST_PAGE_1)
+
+    const user = userEvent.setup()
+    mountPage('list')
+    await screen.findByText('J K Traders')
+
+    const addBtn = screen.getByRole('button', { name: 'Add customer' })
+    await user.click(addBtn)
+
+    const nameInput = screen.getByLabelText(/Customer name/i)
+    await user.type(nameInput, 'Unsaved Customer Name')
+    const phoneInput = screen.getByLabelText(/Phone/i)
+    await user.type(phoneInput, '9998887776')
+
+    expect(nameInput.value).toBe('Unsaved Customer Name')
+    expect(phoneInput.value).toBe('9998887776')
+
+    // Click Add customer again
+    await user.click(addBtn)
+
+    // Values remain intact
+    expect(screen.getByLabelText(/Customer name/i).value).toBe('Unsaved Customer Name')
+    expect(screen.getByLabelText(/Phone/i).value).toBe('9998887776')
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+    expect(document.activeElement).toBe(nameInput)
+  })
+
+  it('cancels form and resets entered data on Cancel', async () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+    vi.spyOn(customersApi, 'fetchCustomers').mockResolvedValue(LIST_PAGE_1)
+
+    const user = userEvent.setup()
+    mountPage('list')
+    await screen.findByText('J K Traders')
+
+    const addBtn = screen.getByRole('button', { name: 'Add customer' })
+    await user.click(addBtn)
+
+    const nameInput = screen.getByLabelText(/Customer name/i)
+    await user.type(nameInput, 'Temporary Customer')
+
+    // Click Cancel
+    const cancelBtn = screen.getByRole('button', { name: 'Cancel' })
+    await user.click(cancelBtn)
+
+    // Form disappears
+    expect(screen.queryByRole('heading', { name: 'Add customer', level: 2 })).not.toBeInTheDocument()
+
+    // Re-opening should now show an empty form
+    await user.click(addBtn)
+    expect(screen.getByLabelText(/Customer name/i).value).toBe('')
+  })
+
+  it('saves new customer via API, closes form, and refreshes the list', async () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+    vi.spyOn(customersApi, 'fetchCustomers').mockResolvedValue(LIST_PAGE_1)
+    const postSpy = vi.spyOn(client.default, 'post').mockResolvedValue({
+      data: { id: 25, name: 'Fresh Customer Pvt Ltd' },
+    })
+
+    const user = userEvent.setup()
+    mountPage('list')
+    await screen.findByText('J K Traders')
+
+    await user.click(screen.getByRole('button', { name: 'Add customer' }))
+
+    await user.type(screen.getByLabelText(/Customer name/i), 'Fresh Customer Pvt Ltd')
+    await user.type(screen.getByLabelText(/Phone/i), '9876543210')
+
+    await user.click(screen.getByRole('button', { name: 'Save customer' }))
+
+    await waitFor(() => {
+      expect(postSpy).toHaveBeenCalledWith(
+        '/customers/',
+        expect.objectContaining({
+          name: 'Fresh Customer Pvt Ltd',
+          contact_info: '9876543210',
+        })
+      )
+    })
+
+    // Form closed after save
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Add customer', level: 2 })).not.toBeInTheDocument()
+    })
+  })
 })
 
 describe('CustomerDetailPage', () => {

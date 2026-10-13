@@ -36,6 +36,16 @@ export default function CustomersPage() {
   const [editing, setEditing] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const formContainerRef = useRef(null)
+  const firstInputRef = useRef(null)
+
+  useEffect(() => {
+    if (showForm) {
+      formContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const firstInput = firstInputRef.current || formContainerRef.current?.querySelector('input[name="name"]')
+      firstInput?.focus()
+    }
+  }, [showForm])
 
   useEffect(() => {
     const timer = setTimeout(() => { setSearch(searchInput.trim()); setPage(1) }, 300)
@@ -73,7 +83,26 @@ export default function CustomersPage() {
     }
   }
 
-  function beginCreate() { setEditing(null); setForm(emptyCustomer); setSameAsBilling(true); setShowForm(true) }
+  function beginCreate() {
+    if (showForm && editing === null) {
+      formContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const firstInput = firstInputRef.current || formContainerRef.current?.querySelector('input[name="name"]')
+      firstInput?.focus()
+      return
+    }
+    setEditing(null)
+    setForm(emptyCustomer)
+    setSameAsBilling(true)
+    setShowForm(true)
+  }
+
+  function cancelForm() {
+    setShowForm(false)
+    setEditing(null)
+    setForm(emptyCustomer)
+    setSameAsBilling(true)
+  }
+
   function beginEdit(customer) {
     setEditing(customer.id)
     setForm({
@@ -115,7 +144,8 @@ export default function CustomersPage() {
     try {
       if (editing) await api.patch(`/customers/${editing}/`, payload)
       else await api.post('/customers/', payload)
-      setShowForm(false); await reload()
+      cancelForm()
+      await reload()
     } catch (err) { setError(apiErrorMessage(err)) }
     finally { setSaving(false) }
   }
@@ -141,12 +171,14 @@ export default function CustomersPage() {
     </header>
     <StatusMessage>{error}</StatusMessage>
 
-    {showForm && isAdmin && <form className="record-form" onSubmit={save}>
-      <div className="form-heading"><div><p className="eyebrow">{editing ? 'Edit record' : 'New record'}</p><h2>{editing ? 'Update customer' : 'Add customer'}</h2></div><button type="button" className="quiet-button" onClick={() => setShowForm(false)}>Close</button></div>
+    {showForm && isAdmin && (
+      <div ref={formContainerRef} className="customer-form-container">
+        <form className="record-form" onSubmit={save}>
+          <div className="form-heading"><div><p className="eyebrow">{editing ? 'Edit record' : 'New record'}</p><h2>{editing ? 'Update customer' : 'Add customer'}</h2></div><button type="button" className="quiet-button" onClick={cancelForm}>Close</button></div>
 
-      <p className="eyebrow">Basic</p>
-      <div className="form-grid">
-        <label>Customer name<input name="name" value={form.name} onChange={change} required aria-required="true" /></label>
+          <p className="eyebrow">Basic</p>
+          <div className="form-grid">
+            <label>Customer name<input ref={firstInputRef} name="name" value={form.name} onChange={change} required aria-required="true" /></label>
         <label>Phone<input name="contact_info" value={form.contact_info} onChange={change} /></label>
         <label>Customer type<select name="customer_type" value={form.customer_type} onChange={change}><option value="B2C">B2C</option><option value="B2B">B2B</option></select></label>
         <label className="checkbox-label"><input type="checkbox" name="is_regular" checked={form.is_regular} onChange={change} /> Regular customer account</label>
@@ -183,10 +215,11 @@ export default function CustomersPage() {
       </div>
 
       <div className="form-actions">
-        <button type="button" className="quiet-button" onClick={() => setShowForm(false)}>Cancel</button>
+        <button type="button" className="quiet-button" onClick={cancelForm}>Cancel</button>
         <button className="primary-button" disabled={saving}>{saving ? 'Saving...' : (editing ? 'Update customer' : 'Save customer')}</button>
       </div>
-    </form>}
+    </form>
+  </div>)}
 
     <div className="table-frame">
       <div className="table-meta">

@@ -126,6 +126,7 @@ export default function ProductForm({
   taxRates,
   schema,
   fieldErrors,
+  firstInputRef,
   onCancel,
   onSubmit,
   submitting,
@@ -179,7 +180,7 @@ export default function ProductForm({
 
     <p className="eyebrow">Basic details</p>
     <div className="form-grid">
-      <label>Product name<input name="name" value={form.name} onChange={change} required aria-required="true" /></label>
+      <label>Product name<input ref={firstInputRef} name="name" value={form.name} onChange={change} required aria-required="true" /></label>
       <label>SKU (internal)<input name="sku" value={form.sku} onChange={change} placeholder="Leave blank for none" /></label>
       <label>Category<select name="catalogue_category" value={form.catalogue_category} onChange={changeCategory} aria-label="Product category"><option value="">None</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}{c.is_active ? '' : ' (inactive)'}</option>)}</select></label>
       <label>Brand<input name="brand" value={form.brand} onChange={change} /></label>

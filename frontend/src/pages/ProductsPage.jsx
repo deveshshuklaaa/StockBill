@@ -48,8 +48,19 @@ export default function ProductsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const latestLoad = useRef(0)
+  const formContainerRef = useRef(null)
+  const firstInputRef = useRef(null)
 
   const pageSize = 25
+
+  // Scroll to form and focus first input when creation form is displayed
+  useEffect(() => {
+    if (showForm) {
+      formContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const firstInput = firstInputRef.current || formContainerRef.current?.querySelector('input[name="name"]')
+      firstInput?.focus()
+    }
+  }, [showForm])
 
   // Debounce the search box so typing does not fire a request per keystroke.
   // The reset to page 1 is batched with the search update so the load effect
@@ -108,7 +119,16 @@ export default function ProductsPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   function beginCreate() {
-    setForm(emptyProductForm); setAttributeValues({}); setFieldErrors({}); setShowForm(true)
+    if (!showForm) {
+      setForm(emptyProductForm)
+      setAttributeValues({})
+      setFieldErrors({})
+      setShowForm(true)
+    } else {
+      formContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const firstInput = firstInputRef.current || formContainerRef.current?.querySelector('input[name="name"]')
+      firstInput?.focus()
+    }
   }
 
   function beginEdit(product) {
@@ -127,7 +147,11 @@ export default function ProductsPage() {
     const payload = buildProductPayload({ form, attributeValues })
     try {
       await api.post('/products/', payload)
-      setShowForm(false); await loadProducts(page)
+      setShowForm(false)
+      setForm(emptyProductForm)
+      setAttributeValues({})
+      setFieldErrors({})
+      await loadProducts(page)
     } catch (err) {
       if (err?.response?.status === 400) setFieldErrors(mapFieldErrors(err.response.data, schema))
       else setError(apiErrorMessage(err))
@@ -151,6 +175,32 @@ export default function ProductsPage() {
       {isAdmin && <button className="primary-button" onClick={beginCreate}>Add product</button>}
     </header>
     <StatusMessage>{error}</StatusMessage>
+
+    {showForm && isAdmin && (
+      <div ref={formContainerRef} className="product-form-container">
+        <ProductForm
+          mode="create"
+          form={form}
+          setForm={setForm}
+          attributeValues={attributeValues}
+          setAttributeValues={setAttributeValues}
+          categories={categories}
+          taxRates={taxRates}
+          schema={schema}
+          fieldErrors={fieldErrors}
+          firstInputRef={firstInputRef}
+          onCancel={() => {
+            setShowForm(false)
+            setForm(emptyProductForm)
+            setAttributeValues({})
+            setFieldErrors({})
+          }}
+          onSubmit={save}
+          submitting={saving}
+          submitLabel="Save product"
+        />
+      </div>
+    )}
 
     <div className="table-frame">
       <div className="table-meta">
@@ -186,21 +236,5 @@ export default function ProductsPage() {
         <button className="pager-button" onClick={() => setPage((current) => current + 1)} disabled={!hasNext || busy}>Next →</button>
       </div>
     </div>
-
-    {showForm && isAdmin && <ProductForm
-      mode="create"
-      form={form}
-      setForm={setForm}
-      attributeValues={attributeValues}
-      setAttributeValues={setAttributeValues}
-      categories={categories}
-      taxRates={taxRates}
-      schema={schema}
-      fieldErrors={fieldErrors}
-      onCancel={() => setShowForm(false)}
-      onSubmit={save}
-      submitting={saving}
-      submitLabel="Save product"
-    />}
   </section>
 }

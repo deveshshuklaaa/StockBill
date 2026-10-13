@@ -11,6 +11,8 @@ import {
 } from '../api/purchases'
 import { fetchActiveSuppliers, fetchSupplierPricing } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
+import UnsavedChangesDialog from '../components/UnsavedChangesDialog'
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges'
 import { formatNetWeight, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 import { sortProductsByMrpForSameName } from '../utils/productSearch'
 
@@ -50,6 +52,25 @@ function calculateLine(line, taxMode) {
   return { gross, discount, taxable, tax, total: taxable + tax, baseQty, unitCost, taxRate }
 }
 
+function makePurchaseSnapshot({ supplier, warehouseId, supplierInvoiceNo, invoiceDate, taxMode, notes, lines }) {
+  return JSON.stringify({
+    supplierId: supplier?.id ?? null,
+    warehouseId: warehouseId ? Number(warehouseId) : null,
+    supplierInvoiceNo: (supplierInvoiceNo || '').trim(),
+    invoiceDate: invoiceDate || '',
+    taxMode: taxMode || 'exclusive',
+    notes: notes || '',
+    lines: (lines || []).map((l) => ({
+      product: l.product,
+      quantity: Number(l.quantity),
+      purchaseUnit: l.purchaseUnit,
+      conversionFactor: Number(l.conversionFactor),
+      rate: Number(l.rate),
+      discount_amount: Number(l.discount_amount || l.discountAmount || 0),
+    })),
+  })
+}
+
 export default function NewPurchasePage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -59,6 +80,9 @@ export default function NewPurchasePage() {
   const productSearchInputRef = useRef(null)
   const rowRefs = useRef({})
   const pendingFocusRef = useRef(null)
+  const isSubmittedRef = useRef(false)
+  const [initialSnapshot, setInitialSnapshot] = useState(null)
+  const [isSubmitted, setIsSubmitted] = useState(false)
 
   const [warehouses, setWarehouses] = useState([])
   const [supplier, setSupplier] = useState(null)
@@ -174,6 +198,15 @@ export default function NewPurchasePage() {
         )
         if (!cancelled) {
           setLines(loadedLines)
+          setInitialSnapshot(makePurchaseSnapshot({
+            supplier: draft.supplier ? { id: draft.supplier } : null,
+            warehouseId: draft.warehouse ? String(draft.warehouse) : '',
+            supplierInvoiceNo: draft.supplier_invoice_no || '',
+            invoiceDate: draft.invoice_date || today(),
+            taxMode: draft.tax_mode || 'exclusive',
+            notes: draft.notes || '',
+            lines: loadedLines,
+          }))
           setLoading(false)
         }
       })
@@ -422,6 +455,98 @@ export default function NewPurchasePage() {
     return ''
   }
 
+  const isDirty = useMemo(() => {
+    if (isSubmitted) return false
+    if (isEditMode) {
+      if (!initialSnapshot) return false
+      const current = makePurchaseSnapshot({
+        supplier,
+        warehouseId,
+        supplierInvoiceNo,
+        invoiceDate,
+        taxMode,
+        notes,
+        lines,
+      })
+      return current !== initialSnapshot
+    }
+    const hasSupplier = supplier?.id !== null && supplier?.id !== undefined
+    const hasSupplierSearch = supplierSearch.trim() !== ''
+    const hasInvoiceNo = supplierInvoiceNo.trim() !== ''
+    const hasNotes = notes.trim() !== ''
+    const hasLines = lines.length > 0
+    const hasNonDefaultTax = taxMode !== 'exclusive'
+    return Boolean(hasSupplier || hasSupplierSearch || hasInvoiceNo || hasNotes || hasLines || hasNonDefaultTax)
+  }, [
+    isSubmitted,
+    isEditMode,
+    initialSnapshot,
+    supplier,
+    supplierSearch,
+    warehouseId,
+    supplierInvoiceNo,
+    invoiceDate,
+    taxMode,
+    notes,
+    lines,
+  ])
+
+  async function saveDraftInternal() {
+    const problem = validate()
+    if (problem) {
+      throw new Error(problem)
+    }
+    const lineItems = lines.map((line) => ({
+      product: line.product,
+      quantity: Number(line.quantity),
+      purchase_unit_name: line.purchaseUnit,
+      conversion_factor: Number(line.conversionFactor),
+      rate: Number(line.rate),
+      discount_amount: Number(line.discount_amount || line.discountAmount || 0),
+    }))
+    const payload = {
+      supplier: supplier.id,
+      warehouse: Number(warehouseId),
+      supplier_invoice_no: supplierInvoiceNo.trim(),
+      invoice_date: invoiceDate,
+      tax_mode: taxMode,
+      notes,
+      line_items: lineItems,
+    }
+
+    try {
+      if (isEditMode) {
+        await updatePurchase(editDraftId, payload)
+        isSubmittedRef.current = true
+        setIsSubmitted(true)
+        return true
+      } else {
+        const createPayload = { ...payload, post: false }
+        const idempotencyKey = `purchase-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+        await api.post('/purchase-invoices/', createPayload, {
+          headers: { 'Idempotency-Key': idempotencyKey },
+        })
+        isSubmittedRef.current = true
+        setIsSubmitted(true)
+        return true
+      }
+    } catch (err) {
+      throw new Error(
+        apiForbiddenMessage(
+          err,
+          isEditMode ? 'update purchase drafts' : 'save purchase drafts',
+          isEditMode ? 'updating purchase draft' : 'saving purchase draft',
+        )
+      )
+    }
+  }
+
+  const unsavedChanges = useUnsavedChanges({
+    isDirty,
+    isSubmittedRef,
+    onSaveDraft: saveDraftInternal,
+  })
+
   async function submit(post) {
     const problem = validate()
     if (problem) { setError(problem); return }
@@ -448,6 +573,8 @@ export default function NewPurchasePage() {
 
       if (isEditMode) {
         await updatePurchase(editDraftId, payload)
+        isSubmittedRef.current = true
+        setIsSubmitted(true)
         if (post) {
           const posted = await postPurchase(editDraftId)
           navigate(`/purchases/${posted.id || editDraftId}`)
@@ -460,6 +587,8 @@ export default function NewPurchasePage() {
         const { data } = await api.post('/purchase-invoices/', createPayload, {
           headers: { 'Idempotency-Key': idempotencyKey },
         })
+        isSubmittedRef.current = true
+        setIsSubmitted(true)
         navigate(`/purchases/${data.id}`)
       }
     } catch (err) {
@@ -776,5 +905,16 @@ export default function NewPurchasePage() {
         <p className="summary-note">Posting receives stock, updates the weighted-average cost, and writes the stock ledger. Drafts affect nothing until posted.</p>
       </aside>
     </div>
+
+    <UnsavedChangesDialog
+      isOpen={unsavedChanges.isOpen}
+      title="Unsaved Purchase"
+      message="You have unsaved changes on this purchase. What would you like to do before leaving?"
+      isSaving={unsavedChanges.isSaving}
+      error={unsavedChanges.saveError}
+      onSaveDraft={unsavedChanges.handleSaveDraft}
+      onLeaveWithoutSaving={unsavedChanges.handleLeaveWithoutSaving}
+      onCancel={unsavedChanges.handleCancel}
+    />
   </section>
 }
