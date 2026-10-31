@@ -107,7 +107,7 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
     queryset = (
         Invoice.objects
         .select_related("customer", "created_by", "replacement_invoice", "amended_from_invoice")
-        .prefetch_related("line_items")
+        .prefetch_related("line_items__product")
         .all()
         .order_by("-created_at", "-id")
     )

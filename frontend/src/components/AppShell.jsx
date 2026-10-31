@@ -1,5 +1,7 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Suspense } from 'react'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import PageLoadingFallback from './PageLoadingFallback'
 
 export default function AppShell() {
   const { user, logout } = useAuth()
@@ -14,13 +16,18 @@ export default function AppShell() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand-lockup">
+        <Link
+          to="/dashboard"
+          className="brand-lockup brand-home-link"
+          title="Go to Dashboard"
+          aria-label="Go to Dashboard"
+        >
           <div className="brand-mark">DE</div>
           <div>
             <strong>Divya Enterprises</strong>
             <span>StockBill operations</span>
           </div>
-        </div>
+        </Link>
         <nav className="primary-nav" aria-label="Primary navigation">
           <div className="workspace-label">Overview</div>
           <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
@@ -100,7 +107,7 @@ export default function AppShell() {
               <span className="nav-symbol">W</span> Warehouses
             </NavLink>
             <NavLink to="/settings/business" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <span className="nav-symbol">G</span> Business Profile
+              <span className="nav-symbol">B</span> Business
             </NavLink>
             <NavLink to="/settings/taxes" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <span className="nav-symbol">T</span> Taxes
@@ -123,7 +130,9 @@ export default function AppShell() {
         </div>
       </aside>
       <main className="main-content">
-        <Outlet />
+        <Suspense fallback={<PageLoadingFallback />}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   )

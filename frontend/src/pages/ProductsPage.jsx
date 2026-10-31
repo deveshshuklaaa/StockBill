@@ -8,6 +8,7 @@ import ProductForm, {
   emptyProductForm,
   loadCategorySchema,
   mapFieldErrors,
+  validateUnitsPerMasterBox,
 } from '../components/ProductForm'
 import { useAuth } from '../context/AuthContext'
 import { formatNetWeight, formatStockWithBoxes } from '../utils/format'
@@ -15,12 +16,13 @@ import { formatNetWeight, formatStockWithBoxes } from '../utils/format'
 function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
-function formatAttributes(attributes) {
-  if (!attributes || Object.keys(attributes).length === 0) return null
+function formatAttributes(product) {
+  const attributes = product?.attributes || {}
   const parts = []
   const weight = formatNetWeight(attributes.net_weight)
   if (weight) parts.push(weight)
-  if (attributes.units_per_master_box) parts.push(`${attributes.units_per_master_box} per M.Box`)
+  const box = product?.units_per_master_box ?? attributes.units_per_master_box
+  if (box) parts.push(`${box} per M.Box`)
   return parts.join(' · ')
 }
 
@@ -138,7 +140,10 @@ export default function ProductsPage() {
   async function save(event) {
     event.preventDefault(); setSaving(true); setError(''); setFieldErrors({})
     const localErrors = {}
+    const boxError = validateUnitsPerMasterBox(form.units_per_master_box)
+    if (boxError) localErrors.units_per_master_box = boxError
     schema.forEach((s) => {
+      if (s.code === 'units_per_master_box') return
       const problem = attributeErrorText(s, attributeValues[s.code])
       if (problem) localErrors[s.code] = problem
     })
@@ -214,7 +219,7 @@ export default function ProductsPage() {
       {busy ? <div className="empty-state">Loading products...</div> : products.length === 0 ? <div className="empty-state">{search || categoryFilter || statusFilter !== '' ? 'No products match your filters.' : 'No products yet.'}</div> : <div className="table-scroll"><table>
         <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Brand</th><th>MRP</th><th>Stock</th><th>Tax</th><th>Status</th>{isAdmin && <th aria-label="Actions" />}</tr></thead>
         <tbody>{products.map((product) => { const _low = Number(product.current_stock) <= Number(product.low_stock_threshold); return <tr key={product.id} className={product.is_active ? '' : 'archived-row'}>
-          <td><strong>{product.name}</strong><small className="attribute-summary">{formatAttributes(product.attributes)}</small></td>
+          <td><strong>{product.name}</strong><small className="attribute-summary">{formatAttributes(product)}</small></td>
           <td><code>{product.sku || '-'}</code></td>
           <td>{product.category_name || '-'}</td>
           <td>{product.brand || '-'}</td>

@@ -58,7 +58,7 @@ export function formatNetWeight(kgValue) {
 // Master-box metadata from a product's attributes payload.
 // Returns a positive integer or null when not configured/invalid.
 export function masterBoxSize(product) {
-  const box = Number(product?.attributes?.units_per_master_box)
+  const box = Number(product?.units_per_master_box ?? product?.attributes?.units_per_master_box)
   return Number.isInteger(box) && box > 0 ? box : null
 }
 

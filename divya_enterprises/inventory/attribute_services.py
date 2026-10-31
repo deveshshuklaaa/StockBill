@@ -76,6 +76,23 @@ def validate_and_normalize_attributes(category, submitted, *, current_product=No
     errors = {}
     if category is None:
         if submitted:
+            if set(submitted.keys()) == {"units_per_master_box"}:
+                master_box_def, _ = AttributeDefinition.objects.get_or_create(
+                    code="units_per_master_box",
+                    defaults={
+                        "name": "Units per Master Box",
+                        "data_type": AttributeDefinition.TYPE_INTEGER,
+                    },
+                )
+                raw = submitted["units_per_master_box"]
+                if raw is None or raw == "":
+                    return []
+                typed = _coerce_typed_value(master_box_def, raw)
+                if typed <= 0:
+                    raise AttributeServiceError(
+                        {"attributes": ["Attribute 'units_per_master_box' must be a positive whole number."]}
+                    )
+                return [(master_box_def, typed)]
             raise AttributeServiceError(
                 {"attributes": ["Attributes require a catalogue category."]}
             )
@@ -87,6 +104,11 @@ def validate_and_normalize_attributes(category, submitted, *, current_product=No
     definitions = {a.attribute_definition.code: a for a in assignments}
 
     unknown = set(submitted or {}) - set(definitions)
+    allow_master_box_extra = False
+    if "units_per_master_box" in unknown:
+        unknown.remove("units_per_master_box")
+        allow_master_box_extra = True
+
     if unknown:
         errors["attributes"] = [
             f"Attribute '{code}' is not assigned to category '{category.name}'."
@@ -119,6 +141,11 @@ def validate_and_normalize_attributes(category, submitted, *, current_product=No
             continue
         try:
             typed = _coerce_typed_value(definition, raw)
+            if definition.code == "units_per_master_box" and (not isinstance(typed, int) or typed <= 0):
+                errors.setdefault("attributes", []).append(
+                    "Attribute 'units_per_master_box' must be a positive whole number."
+                )
+                continue
         except AttributeServiceError as exc:
             detail = (
                 exc.detail["attributes"] if isinstance(exc.detail, dict) else exc.detail
@@ -128,6 +155,32 @@ def validate_and_normalize_attributes(category, submitted, *, current_product=No
             )
             continue
         validated.append((definition, typed))
+
+    if allow_master_box_extra:
+        raw = submitted["units_per_master_box"]
+        if raw is not None and raw != "":
+            master_box_def, _ = AttributeDefinition.objects.get_or_create(
+                code="units_per_master_box",
+                defaults={
+                    "name": "Units per Master Box",
+                    "data_type": AttributeDefinition.TYPE_INTEGER,
+                },
+            )
+            try:
+                typed = _coerce_typed_value(master_box_def, raw)
+                if typed <= 0:
+                    errors.setdefault("attributes", []).append(
+                        "Attribute 'units_per_master_box' must be a positive whole number."
+                    )
+                else:
+                    validated.append((master_box_def, typed))
+            except AttributeServiceError as exc:
+                detail = (
+                    exc.detail["attributes"] if isinstance(exc.detail, dict) else exc.detail
+                )
+                errors.setdefault("attributes", []).extend(
+                    detail if isinstance(detail, list) else [str(detail)]
+                )
 
     if errors:
         raise AttributeServiceError({"attributes": errors.get("attributes", [])})
@@ -286,7 +339,14 @@ def apply_product_attributes(*, product, validated):
 
 def assemble_product_attributes(product):
     """Return {code: typed_value} for a product's dynamic attributes."""
-    values = product.attribute_values.select_related(
-        "attribute_definition", "value_choice"
-    ).all()
-    return {v.attribute_definition.code: v.typed_value() for v in values}
+    if hasattr(product, "_prefetched_objects_cache") and "attribute_values" in product._prefetched_objects_cache:
+        values = product.attribute_values.all()
+    else:
+        values = product.attribute_values.select_related(
+            "attribute_definition", "value_choice"
+        ).all()
+    return {
+        v.attribute_definition.code: v.typed_value()
+        for v in values
+        if getattr(v, "attribute_definition", None)
+    }

@@ -866,6 +866,7 @@ class PurchaseInvoiceListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         queryset = (
             PurchaseInvoice.objects.select_related("supplier", "warehouse", "created_by")
+            .prefetch_related("line_items__product")
             .all()
             .order_by("-created_at")
         )

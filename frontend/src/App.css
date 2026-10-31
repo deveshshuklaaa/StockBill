@@ -651,3 +651,46 @@ input.no-spinner {
 
 
 
+
+/* Brand Logo Home Navigation */
+.brand-home-link {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: opacity 0.15s ease;
+}
+.brand-home-link:hover {
+  opacity: 0.92;
+}
+
+/* Page Loading Skeleton Fallback */
+.page-loading-skeleton {
+  padding: 48px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1260px;
+  margin: 0 auto;
+}
+.skeleton-bar {
+  background: #e2e8df;
+  border-radius: 4px;
+  animation: pulse-skeleton 1.5s ease-in-out infinite;
+}
+.skeleton-title {
+  width: 240px;
+  height: 38px;
+}
+.skeleton-subtitle {
+  width: 380px;
+  height: 16px;
+}
+.skeleton-table {
+  width: 100%;
+  height: 320px;
+}
+@keyframes pulse-skeleton {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
+}

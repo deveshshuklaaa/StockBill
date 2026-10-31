@@ -9,19 +9,35 @@ import api from '../api/client'
 export const emptyProductForm = {
   name: '', sku: '', brand: '', catalogue_category: '',
   mrp: '',
+  units_per_master_box: '',
   base_unit: 'piece', tax: '', hsn_sac: '', is_tax_applicable: true,
   low_stock_threshold: '0',
 }
 
 export function productFormFromProduct(product) {
+  const masterBox = product.units_per_master_box ?? product.attributes?.units_per_master_box ?? ''
   return {
     name: product.name || '', sku: product.sku || '', brand: product.brand || '',
     catalogue_category: product.catalogue_category || '',
     mrp: product.mrp ?? '',
+    units_per_master_box: masterBox !== '' && masterBox != null ? String(masterBox) : '',
     base_unit: product.base_unit || 'piece', tax: product.tax ?? '',
     hsn_sac: product.hsn_sac || '', is_tax_applicable: product.is_tax_applicable !== false,
     low_stock_threshold: product.low_stock_threshold ?? '0',
   }
+}
+
+export function validateUnitsPerMasterBox(value) {
+  if (value === '' || value === null || value === undefined) return ''
+  const trimmed = String(value).trim()
+  if (!/^\d+$/.test(trimmed)) {
+    return 'Units per Master Box must be a positive whole number.'
+  }
+  const num = Number(trimmed)
+  if (num <= 0) {
+    return 'Units per Master Box must be greater than 0.'
+  }
+  return ''
 }
 
 export function attributePlaceholder(schema) {
@@ -59,9 +75,13 @@ export function mapFieldErrors(errors, schema) {
     if (key === 'attributes' && Array.isArray(messages)) {
       // Attribute errors map back onto their inputs where recognisable.
       messages.forEach((message) => {
-        const match = schema.find((s) => message.includes(s.name) || message.includes(s.code))
-        if (match) mapped[match.code] = message
-        else mapped.attributes = (mapped.attributes || []).concat(message)
+        if (message.includes('units_per_master_box')) {
+          mapped.units_per_master_box = message
+        } else {
+          const match = schema.find((s) => message.includes(s.name) || message.includes(s.code))
+          if (match) mapped[match.code] = message
+          else mapped.attributes = (mapped.attributes || []).concat(message)
+        }
       })
     } else {
       mapped[key] = Array.isArray(messages) ? messages.join(', ') : String(messages)
@@ -101,7 +121,7 @@ async function loadTaxRates() {
 }
 
 export function buildProductPayload({ form, attributeValues }) {
-  return {
+  const payload = {
     name: form.name,
     sku: form.sku || null,
     brand: form.brand,
@@ -112,8 +132,17 @@ export function buildProductPayload({ form, attributeValues }) {
     is_tax_applicable: form.is_tax_applicable,
     low_stock_threshold: Number(form.low_stock_threshold || 0),
     tax: form.tax === '' ? null : Number(form.tax),
-    attributes: attributeValues,
+    attributes: { ...attributeValues },
   }
+  if (form.units_per_master_box !== '' && form.units_per_master_box != null) {
+    const boxNum = Number(form.units_per_master_box)
+    payload.units_per_master_box = boxNum
+    payload.attributes.units_per_master_box = boxNum
+  } else {
+    payload.units_per_master_box = null
+    delete payload.attributes.units_per_master_box
+  }
+  return payload
 }
 
 export default function ProductForm({
@@ -186,10 +215,10 @@ export default function ProductForm({
       <label>Brand<input name="brand" value={form.brand} onChange={change} /></label>
     </div>
 
-    {categoryChoice && schema.length > 0 && <>
+    {categoryChoice && schema.filter((s) => s.code !== 'units_per_master_box').length > 0 && <>
       <p className="eyebrow">{categoryChoice.name} attributes</p>
       <div className="form-grid">
-        {schema.map((s) => {
+        {schema.filter((s) => s.code !== 'units_per_master_box').map((s) => {
           const value = attributeValues[s.code] ?? ''
           const problem = fieldErrors[s.code] || attributeErrorText(s, value)
           return <label key={s.code} className={problem ? 'input-warning' : ''}>
@@ -227,9 +256,26 @@ export default function ProductForm({
       <label>MRP (printed)<input name="mrp" type="number" min="0" step="0.01" value={form.mrp} onChange={change} aria-describedby="mrp-help" /><small id="mrp-help" className="field-help">Manufacturer's printed maximum retail price. Purchase cost comes from posted purchases; selling rates come from the actual invoice.</small></label>
     </div>
 
-    <p className="eyebrow">Unit and tax</p>
+    <p className="eyebrow">Unit and packaging</p>
     <div className="form-grid">
       <label>Base unit<select name="base_unit" value={form.base_unit} onChange={change}><option value="piece">Piece</option><option value="box">Box</option><option value="carton">Carton</option></select></label>
+      <label className={fieldErrors.units_per_master_box ? 'input-warning' : ''}>
+        Units per Master Box
+        <input
+          name="units_per_master_box"
+          type="number"
+          min="1"
+          step="1"
+          value={form.units_per_master_box ?? ''}
+          onChange={change}
+          placeholder="24"
+          aria-label="Units per Master Box"
+        />
+        <small className="field-help">Pieces per master box, e.g. 24. Leave blank if not applicable.</small>
+        {fieldErrors.units_per_master_box && (
+          <small className="field-error" role="alert">{fieldErrors.units_per_master_box}</small>
+        )}
+      </label>
       <label>Tax<select name="tax" value={form.tax} onChange={change} aria-label="GST tax rate"><option value="">None configured</option>{taxRates.map((rate) => <option key={rate.id} value={rate.id}>{rate.name} ({Number(rate.rate).toFixed(0)}%)</option>)}</select></label>
       <label>HSN/SAC<input name="hsn_sac" value={form.hsn_sac} onChange={change} /></label>
       <label className="checkbox-label"><input type="checkbox" name="is_tax_applicable" checked={form.is_tax_applicable} onChange={change} /> Tax applicable</label>

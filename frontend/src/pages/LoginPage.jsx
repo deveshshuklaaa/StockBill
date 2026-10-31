@@ -1,22 +1,26 @@
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 
 export default function LoginPage() {
   const { token, login, authError } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const destination = location.state?.from?.pathname || location.state?.next || '/dashboard'
   const [form, setForm] = useState({ username: '', password: '' })
   const [busy, setBusy] = useState(false)
 
-  if (token) return <Navigate to="/products" replace />
+  if (token) return <Navigate to={destination} replace />
 
   async function submit(event) {
     event.preventDefault()
     setBusy(true)
     try {
       await login(form.username, form.password)
-      navigate('/products')
+      navigate(destination, { replace: true })
+    } catch {
+      // Error is stored in authError and displayed via StatusMessage
     } finally {
       setBusy(false)
     }

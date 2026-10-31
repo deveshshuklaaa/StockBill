@@ -309,6 +309,9 @@ class ProductSerializer(serializers.ModelSerializer):
     attributes = serializers.DictField(
         child=serializers.JSONField(), required=False, write_only=True
     )
+    units_per_master_box = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1
+    )
 
     class Meta:
         model = Product
@@ -334,6 +337,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "catalogue_category",
             "category_name",
             "attributes",
+            "units_per_master_box",
             "created_at",
             "updated_at",
         ]
@@ -349,6 +353,7 @@ class ProductSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data["attributes"] = assemble_product_attributes(instance)
+        data["units_per_master_box"] = instance.units_per_master_box
         return data
 
     def validate(self, attrs):
@@ -363,7 +368,18 @@ class ProductSerializer(serializers.ModelSerializer):
                     ]
                 }
             )
+        units_box = attrs.pop("units_per_master_box", ...)
         submitted = attrs.pop("attributes", None)
+        if units_box is not ...:
+            if submitted is None:
+                submitted = {}
+            if units_box is not None:
+                submitted["units_per_master_box"] = units_box
+            elif self.instance is not None:
+                master_box_def = AttributeDefinition.objects.filter(code="units_per_master_box").first()
+                if master_box_def:
+                    self._clear_master_box_def = master_box_def
+
         partial = getattr(self, "partial", False)
         if submitted is not None:
             current = self.instance
@@ -380,7 +396,7 @@ class ProductSerializer(serializers.ModelSerializer):
                 merged = {
                     code: value
                     for code, value in {**stored, **submitted}.items()
-                    if code in assigned_codes
+                    if code in assigned_codes or (code == "units_per_master_box" and "units_per_master_box" in submitted)
                 }
             self._validated_attributes = validate_and_normalize_attributes(
                 category, merged, current_product=current
@@ -440,6 +456,10 @@ class ProductSerializer(serializers.ModelSerializer):
         instance.save()
         if validated_attributes is not None:
             apply_product_attributes(product=instance, validated=validated_attributes)
+        elif getattr(self, "_clear_master_box_def", None):
+            ProductAttributeValue.objects.filter(
+                product=instance, attribute_definition=self._clear_master_box_def
+            ).delete()
         return instance
 
 
@@ -463,6 +483,9 @@ class ProductPublicSerializer(serializers.ModelSerializer):
         source="catalogue_category.name", read_only=True
     )
     attributes = serializers.SerializerMethodField()
+    units_per_master_box = serializers.IntegerField(
+        read_only=True
+    )
 
     class Meta:
         model = Product
@@ -487,6 +510,7 @@ class ProductPublicSerializer(serializers.ModelSerializer):
             "catalogue_category",
             "category_name",
             "attributes",
+            "units_per_master_box",
         ]
         read_only_fields = fields
 

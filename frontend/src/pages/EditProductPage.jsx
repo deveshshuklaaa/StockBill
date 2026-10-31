@@ -9,6 +9,7 @@ import ProductForm, {
   loadCategoryOptions,
   mapFieldErrors,
   productFormFromProduct,
+  validateUnitsPerMasterBox,
 } from '../components/ProductForm'
 import { useAuth } from '../context/AuthContext'
 
@@ -58,7 +59,10 @@ export default function EditProductPage() {
     event.preventDefault()
     setSaving(true); setError(''); setFieldErrors({})
     const localErrors = {}
+    const boxError = validateUnitsPerMasterBox(form.units_per_master_box)
+    if (boxError) localErrors.units_per_master_box = boxError
     schema.forEach((s) => {
+      if (s.code === 'units_per_master_box') return
       const problem = attributeErrorText(s, attributeValues[s.code])
       if (problem) localErrors[s.code] = problem
     })
