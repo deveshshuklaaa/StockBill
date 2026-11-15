@@ -21,6 +21,8 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "idempotency-key",
 ]
+# Let the browser read the server's filename on CSV/XLSX downloads.
+CORS_EXPOSE_HEADERS = ["Content-Disposition"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",

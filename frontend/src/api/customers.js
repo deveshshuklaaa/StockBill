@@ -1,4 +1,5 @@
 import api from './client'
+import { defaultCsvName, saveBlobResponse } from './download'
 
 export function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
 
@@ -87,4 +88,21 @@ export async function lookupCustomerMRPPricing(customerId, mrp) {
     params: { mrp },
   })
   return data
+}
+
+function customerExportParams({ search = '', isActive = '' } = {}) {
+  const params = {}
+  if (search) params.search = search
+  if (isActive) params.is_active = isActive
+  return params
+}
+
+export async function exportCustomersCsv(filters) {
+  const response = await api.get('/customers/export/', { params: customerExportParams(filters), responseType: 'blob' })
+  return saveBlobResponse(response, defaultCsvName('customers'), 'text/csv')
+}
+
+export async function exportCustomerOutstandingCsv(filters) {
+  const response = await api.get('/customers/export/outstanding/', { params: customerExportParams(filters), responseType: 'blob' })
+  return saveBlobResponse(response, defaultCsvName('customer-outstanding'), 'text/csv')
 }

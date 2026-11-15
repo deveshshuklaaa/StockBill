@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
-import { fetchCustomers } from '../api/customers'
+import { exportCustomerOutstandingCsv, exportCustomersCsv, fetchCustomers } from '../api/customers'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 
@@ -29,6 +29,7 @@ export default function CustomersPage() {
   const [hasPrevious, setHasPrevious] = useState(false)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
+  const [exporting, setExporting] = useState('')
   const latestLoad = useRef(0)
 
   const [form, setForm] = useState(emptyCustomer)
@@ -164,10 +165,31 @@ export default function CustomersPage() {
   const totalPages = Math.max(1, Math.ceil(total / 25))
   const filtersActive = search || activeFilter
 
+  async function handleExport(kind) {
+    setExporting(kind); setError('')
+    try {
+      // Exports follow the filters currently applied to the list.
+      const filters = { search, isActive: activeFilter }
+      await (kind === 'outstanding' ? exportCustomerOutstandingCsv(filters) : exportCustomersCsv(filters))
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    } finally {
+      setExporting('')
+    }
+  }
+
   return <section className="page-section">
     <header className="page-header">
       <div><p className="eyebrow">Relationships / ledger</p><h1>Customers</h1><p className="page-subtitle">Accounts, tax identity, credit terms, and authoritative outstanding balances.</p></div>
-      {isAdmin && <button className="primary-button" onClick={beginCreate}>Add customer</button>}
+      {isAdmin && <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" className="action-button outline" onClick={() => handleExport('details')} disabled={Boolean(exporting)} aria-label="Export customer details CSV">
+          {exporting === 'details' ? 'Exporting...' : 'Export CSV'}
+        </button>
+        <button type="button" className="action-button outline" onClick={() => handleExport('outstanding')} disabled={Boolean(exporting)} aria-label="Export outstanding amounts CSV">
+          {exporting === 'outstanding' ? 'Exporting...' : 'Export outstanding'}
+        </button>
+        <button className="primary-button" onClick={beginCreate}>Add customer</button>
+      </div>}
     </header>
     <StatusMessage>{error}</StatusMessage>
 

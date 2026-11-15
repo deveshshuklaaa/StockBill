@@ -2,15 +2,19 @@ from django.urls import path
 
 from .views import (
     CustomerDetailView,
+    CustomerExportView,
     CustomerListCreateView,
     CustomerMRPPricingDetailView,
     CustomerMRPPricingListCreateView,
     CustomerMRPPricingLookupView,
+    CustomerOutstandingExportView,
     CustomerReportView,
 )
 
 urlpatterns = [
     path("customers/", CustomerListCreateView.as_view(), name="customer-list-create"),
+    path("customers/export/", CustomerExportView.as_view(), name="customer-export"),
+    path("customers/export/outstanding/", CustomerOutstandingExportView.as_view(), name="customer-outstanding-export"),
     path("customers/<int:pk>/", CustomerDetailView.as_view(), name="customer-detail"),
     path("customers/<int:pk>/report/", CustomerReportView.as_view(), name="customer-report"),
     path(

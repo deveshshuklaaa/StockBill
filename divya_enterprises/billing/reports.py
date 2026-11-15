@@ -105,6 +105,7 @@ from inventory.models import (
     Supplier,
 )
 
+from .csv_export import csv_response, export_filename, quantity
 from .models import BusinessProfile, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 from .profit import profit_percent_on_cost
 from .tax_engine import round_inr
@@ -441,41 +442,79 @@ def _inventory_valuation_rows(warehouse=None, category=None, is_active=None, sea
     return balances
 
 
+def _parse_inventory_filters(params):
+    """Parse the inventory report filters shared by the screen and CSV export.
+
+    Returns ``(filters, None)`` with keys warehouse/category/is_active/search,
+    or ``(None, error_response)``.
+    """
+    params = params or {}
+    try:
+        from inventory.models import Category, Warehouse
+
+        warehouse_id = (params.get("warehouse") or "").strip()
+        warehouse = None
+        if warehouse_id:
+            if not warehouse_id.isdigit():
+                return None, _bad_request("warehouse must be a numeric id.")
+            warehouse = Warehouse.objects.filter(pk=int(warehouse_id)).first()
+            if warehouse is None:
+                return None, _bad_request("warehouse does not exist.")
+        category_id = (params.get("category") or "").strip()
+        category = None
+        if category_id:
+            if not category_id.isdigit():
+                return None, _bad_request("category must be a numeric id.")
+            category = Category.objects.filter(pk=int(category_id)).first()
+            if category is None:
+                return None, _bad_request("category does not exist.")
+    except ValueError:
+        return None, _bad_request("Invalid filter.")
+    active_param = (params.get("is_active") or "").strip().lower()
+    is_active = None
+    if active_param:
+        if active_param not in {"true", "false"}:
+            return None, _bad_request("is_active must be 'true' or 'false'.")
+        is_active = active_param == "true"
+    search = (params.get("search") or "").strip()
+    return {"warehouse": warehouse, "category": category, "is_active": is_active, "search": search}, None
+
+
+def _legacy_inventory_products(warehouse=None, category=None, is_active=None, search=""):
+    """Products with stock but no InventoryBalance rows at all (legacy fallback).
+
+    Only meaningful without warehouse/category scoping: legacy current_stock
+    is a global cache, not per-warehouse.
+    """
+    if warehouse or category:
+        return []
+    legacy_products = Product.objects.filter(is_active=True).exclude(
+        inventory_balances__isnull=False
+    )
+    rows = []
+    for product in legacy_products:
+        if is_active is not None and product.is_active != is_active:
+            continue
+        if search and search.lower() not in product.name.lower() and search.lower() not in (product.sku or "").lower():
+            continue
+        if product.current_stock and product.current_stock > 0:
+            rows.append(product)
+    return rows
+
+
 class InventoryValuationReportView(APIView):
     """Inventory value = Σ quantity_on_hand × average_cost (WAC)."""
 
     permission_classes = [IsStaffUser]
 
     def get(self, request):
-        params = request.query_params or {}
-        try:
-            from inventory.models import Category, Warehouse
-
-            warehouse_id = (params.get("warehouse") or "").strip()
-            warehouse = None
-            if warehouse_id:
-                if not warehouse_id.isdigit():
-                    return _bad_request("warehouse must be a numeric id.")
-                warehouse = Warehouse.objects.filter(pk=int(warehouse_id)).first()
-                if warehouse is None:
-                    return _bad_request("warehouse does not exist.")
-            category_id = (params.get("category") or "").strip()
-            category = None
-            if category_id:
-                if not category_id.isdigit():
-                    return _bad_request("category must be a numeric id.")
-                category = Category.objects.filter(pk=int(category_id)).first()
-                if category is None:
-                    return _bad_request("category does not exist.")
-        except ValueError:
-            return _bad_request("Invalid filter.")
-        active_param = (params.get("is_active") or "").strip().lower()
-        is_active = None
-        if active_param:
-            if active_param not in {"true", "false"}:
-                return _bad_request("is_active must be 'true' or 'false'.")
-            is_active = active_param == "true"
-        search = (params.get("search") or "").strip()
+        filters, error = _parse_inventory_filters(request.query_params)
+        if error is not None:
+            return error
+        warehouse = filters["warehouse"]
+        category = filters["category"]
+        is_active = filters["is_active"]
+        search = filters["search"]
 
         balances = _inventory_valuation_rows(warehouse, category, is_active, search)
         value_expr = ExpressionWrapper(
@@ -489,24 +528,9 @@ class InventoryValuationReportView(APIView):
         )
 
         # Legacy fallback: products with stock but no balance rows at all.
-        legacy_products = Product.objects.filter(is_active=True).exclude(
-            inventory_balances__isnull=False
-        )
-        legacy_rows = []
-        legacy_value = ZERO_MONEY
-        legacy_quantity = ZERO_QTY
-        if not warehouse and not category:
-            # Only meaningful without warehouse/category scoping (legacy
-            # current_stock is a global cache, not per-warehouse).
-            for product in legacy_products:
-                if is_active is not None and product.is_active != is_active:
-                    continue
-                if search and search.lower() not in product.name.lower() and search.lower() not in (product.sku or "").lower():
-                    continue
-                if product.current_stock and product.current_stock > 0:
-                    legacy_rows.append(product)
-                    legacy_quantity += product.current_stock
-                    legacy_value += product.current_stock * product.cost_price
+        legacy_rows = _legacy_inventory_products(warehouse, category, is_active, search)
+        legacy_quantity = sum((product.current_stock for product in legacy_rows), ZERO_QTY)
+        legacy_value = sum((product.current_stock * product.cost_price for product in legacy_rows), ZERO_MONEY)
 
         by_warehouse = list(
             balances.values("warehouse_id", "warehouse__name", "warehouse__code")
@@ -536,6 +560,55 @@ class InventoryValuationReportView(APIView):
                     for row in by_warehouse
                 ],
             }
+        )
+
+
+class InventoryStockExportView(APIView):
+    """CSV of stock left: one row per product × warehouse, quantities only.
+
+    Same permission, filters and row builder as the inventory report screen,
+    so the file's quantity total always equals the screen's "Quantity on
+    hand". No cost or value columns.
+    """
+
+    permission_classes = [IsStaffUser]
+
+    HEADERS = ["SKU", "Product name", "Brand", "Category", "Warehouse", "Quantity on hand", "Base unit"]
+    TEXT_COLUMNS = {"SKU", "Product name", "Brand", "Category", "Warehouse", "Base unit"}
+
+    def get(self, request):
+        filters, error = _parse_inventory_filters(request.query_params)
+        if error is not None:
+            return error
+        balances = _inventory_valuation_rows(**filters).order_by("product__name", "warehouse__code", "id")
+        rows = [
+            [
+                balance.product.sku,
+                balance.product.name,
+                balance.product.brand,
+                balance.product.catalogue_category.name if balance.product.catalogue_category else "",
+                balance.warehouse.name,
+                quantity(balance.quantity_on_hand),
+                balance.product.base_unit,
+            ]
+            for balance in balances
+        ]
+        # Legacy products have no per-warehouse balance, so Warehouse is blank.
+        for product in sorted(_legacy_inventory_products(**filters), key=lambda p: (p.name, p.pk)):
+            rows.append([
+                product.sku,
+                product.name,
+                product.brand,
+                product.catalogue_category.name if product.catalogue_category else "",
+                "",
+                quantity(product.current_stock),
+                product.base_unit,
+            ])
+        return csv_response(
+            headers=self.HEADERS,
+            rows=rows,
+            filename=export_filename("inventory"),
+            text_columns=self.TEXT_COLUMNS,
         )
 
 

@@ -24,6 +24,7 @@ from .reporting import DailySalesReportView, ProfitLossReportView, StockValuatio
 from .reports import (
     CustomerSalesReportView,
     DashboardReportView,
+    InventoryStockExportView,
     InventoryValuationReportView,
     ProductSalesReportView,
     ProfitReportView,
@@ -63,6 +64,7 @@ urlpatterns = [
     path("reports/sales-gst/export/", SalesGstReportExportView.as_view(), name="sales-gst-report-export"),
     path("reports/purchases/", PurchaseSummaryReportView.as_view(), name="purchases-report"),
     path("reports/inventory/", InventoryValuationReportView.as_view(), name="inventory-report"),
+    path("reports/inventory/export/", InventoryStockExportView.as_view(), name="inventory-report-export"),
     path("reports/stock-movement/", StockMovementReportView.as_view(), name="stock-movement-report"),
     path("reports/products/", ProductSalesReportView.as_view(), name="products-report"),
     path("reports/customers/", CustomerSalesReportView.as_view(), name="customers-report"),
