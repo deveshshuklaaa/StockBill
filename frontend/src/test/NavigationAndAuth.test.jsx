@@ -94,7 +94,7 @@ describe('Authentication and Navigation Improvements', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true })
     })
 
-    it('preserves deep link redirect if user was trying to access a specific page', async () => {
+    it('lands on /dashboard even if the user was trying to access a specific page', async () => {
       const user = userEvent.setup()
       mockLogin.mockResolvedValueOnce({
         token: 'token-admin',
@@ -113,7 +113,8 @@ describe('Authentication and Navigation Improvements', () => {
       await user.type(screen.getByLabelText(/password/i), 'secret123')
       await user.click(screen.getByRole('button', { name: /sign in/i }))
 
-      expect(mockNavigate).toHaveBeenCalledWith('/customers', { replace: true })
+      expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true })
+      expect(mockNavigate).not.toHaveBeenCalledWith('/customers', expect.anything())
     })
 
     it('does not redirect when login credentials are invalid', async () => {

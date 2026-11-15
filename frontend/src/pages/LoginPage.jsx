@@ -1,13 +1,14 @@
 import { useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 
 export default function LoginPage() {
   const { token, login, authError } = useAuth()
   const navigate = useNavigate()
-  const location = useLocation()
-  const destination = location.state?.from?.pathname || location.state?.next || '/dashboard'
+  // Signing in always lands on the dashboard, even when the session expired
+  // on another page (the shop wants a consistent starting point).
+  const destination = '/dashboard'
   const [form, setForm] = useState({ username: '', password: '' })
   const [busy, setBusy] = useState(false)
 
