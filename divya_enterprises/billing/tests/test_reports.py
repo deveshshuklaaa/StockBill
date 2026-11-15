@@ -123,7 +123,6 @@ def make_report_context(cls):
     # gross 100, tax 18, total 118; COGS = 10 × 6 = 60.
     cls.sale_a = create_invoice(
         customer=cls.customer_a,
-        invoice_number="REP-A-0001",
         created_by=cls.admin,
         payment_type="credit",
         line_items=[
@@ -133,7 +132,6 @@ def make_report_context(cls):
     # Posted sale TODAY: customer B buys 2 × B @ ₹20. total 47.20; COGS = 2 × 8 = 16.
     cls.sale_b = create_invoice(
         customer=cls.customer_b,
-        invoice_number="REP-B-0002",
         created_by=cls.admin,
         payment_type="cash",
         line_items=[
@@ -143,7 +141,6 @@ def make_report_context(cls):
     # Draft invoice: must be excluded from every report.
     cls.draft_sale = create_invoice(
         customer=cls.customer_a,
-        invoice_number="REP-DRAFT-0003",
         created_by=cls.admin,
         payment_type="credit",
         state=Invoice.STATE_DRAFT,
@@ -154,7 +151,6 @@ def make_report_context(cls):
     # Cancelled sale: excluded from active sales; counted separately.
     cls.cancelled_sale = create_invoice(
         customer=cls.customer_a,
-        invoice_number="REP-CANCEL-0004",
         created_by=cls.admin,
         payment_type="credit",
         line_items=[
@@ -545,7 +541,6 @@ class CustomerSalesReportTests(ReportTestBase):
 
         create_invoice(
             customer=None,
-            invoice_number="REP-WALKIN-0005",
             created_by=self.admin,
             payment_type="cash",
             line_items=[

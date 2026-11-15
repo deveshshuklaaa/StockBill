@@ -11,6 +11,7 @@ from customers.models import Customer
 from inventory.models import InventoryBalance, Product, ProductAttributeValue, StockLedger
 from inventory.services import adjust_inventory, ensure_inventory_balance, get_default_warehouse
 from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment, PaymentReversal, refresh_invoice_payment_status
+from .numbering import next_credit_note_number, next_invoice_number
 from .tax_engine import calculate_gst, round_paise
 
 
@@ -29,6 +30,19 @@ def _money(value):
 
 def _quantity(value):
     return Decimal(value).quantize(QUANTITY_QUANTUM)
+
+
+def _issue_invoice_number(invoice):
+    """Stamp the tax-invoice number and issue date at the move into POSTED.
+
+    Called only after every posting validation has passed and inside the
+    posting transaction, so a failed or rolled-back post consumes no serial
+    and the series stays consecutive (CGST Rule 46(b)). The date is the IST
+    business date of issue, not the draft-creation date.
+    """
+    invoice.invoice_date = timezone.localdate()
+    invoice.invoice_number = next_invoice_number(invoice.invoice_date)
+    return invoice
 
 
 def _master_box_size(product):
@@ -153,7 +167,7 @@ def _validate_invoice_lines(line_items, customer=None):
 
 
 @transaction.atomic
-def create_invoice(*, customer, invoice_number, notes="", created_by, payment_type, line_items, state=Invoice.STATE_POSTED, place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE):
+def create_invoice(*, customer, notes="", created_by, payment_type, line_items, state=Invoice.STATE_POSTED, place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE):
     if payment_type == "credit" and customer is None:
         raise serializers.ValidationError({"customer": "A registered customer is required for credit invoices."})
     if customer is not None:
@@ -252,9 +266,16 @@ def create_invoice(*, customer, invoice_number, notes="", created_by, payment_ty
                 {"customer": f"Credit limit exceeded. Available credit: {_money(customer.credit_limit - customer.outstanding_balance)}."}
             )
 
+    # Direct-post path: the number is reserved only now, after stock and
+    # credit-limit validation. Drafts carry no number until they are posted.
+    numbered = Invoice(state=state)
+    if state == Invoice.STATE_POSTED:
+        _issue_invoice_number(numbered)
+
     invoice = Invoice.objects.create(
         customer=customer,
-        invoice_number=invoice_number,
+        invoice_number=numbered.invoice_number,
+        invoice_date=numbered.invoice_date,
         payment_type=payment_type,
         notes=notes,
         created_by=created_by,
@@ -376,9 +397,10 @@ def post_invoice(*, invoice_id, posted_by):
         line.mrp_snapshot = product.mrp or Decimal("0.00")
         line.save(update_fields=["cost_price_snapshot", "cogs_amount", "product_name_snapshot", "base_unit_snapshot", "mrp_snapshot"])
         adjust_inventory(product=product, quantity_delta=-line.base_quantity, movement_type=StockLedger.SALE, created_by=posted_by, reference_type="invoice", reference_id=invoice.pk, unit_cost=line.cost_price_snapshot)
+    _issue_invoice_number(invoice)
     invoice.state = Invoice.STATE_POSTED
     invoice._allow_lifecycle_transition = True
-    invoice.save(update_fields=["state", "updated_at"])
+    invoice.save(update_fields=["state", "invoice_number", "invoice_date", "updated_at"])
     if invoice.payment_type == Invoice.PAYMENT_TYPE_CASH:
         create_payment(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount, actor=posted_by)
     AuditLog.objects.create(user=posted_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)
@@ -440,7 +462,10 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
         calculated_lines.append((original_line, product, quantity, discount_amount, tax_amount, cgst_amount, sgst_amount, igst_amount, line_total, per_base_rate))
         total_amount += line_total
 
+    # Numbered inside this transaction (CGST Rule 53); the model forbids any
+    # later update, so the number must be set on create.
     credit_note = CreditNote.objects.create(
+        credit_note_number=next_credit_note_number(timezone.localdate()),
         original_invoice=invoice,
         reason=reason,
         total_amount=_money(total_amount),
@@ -756,13 +781,13 @@ def check_invoice_correction_eligibility(invoice_id):
 
 
 @transaction.atomic
-def amend_invoice(*, invoice_id, corrected_line_items, customer, payment_type, notes="", place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE, new_invoice_number, amended_by, reason):
+def amend_invoice(*, invoice_id, corrected_line_items, customer, payment_type, notes="", place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE, amended_by, reason):
     """Correct a posted invoice with no payments or credit notes.
 
     Atomically:
     1. Re-validates eligibility (inside the DB lock).
     2. Cancels the original (stock reversal).
-    3. Creates a replacement invoice (new number, new stock deduction).
+    3. Creates a replacement invoice (next number in the series, new stock deduction).
     4. Links original ↔ replacement.
     5. Writes a single audit event linking both.
     """
@@ -784,7 +809,6 @@ def amend_invoice(*, invoice_id, corrected_line_items, customer, payment_type, n
     # Step 2: Create replacement invoice (full posted workflow with stock deduction)
     replacement = create_invoice(
         customer=customer,
-        invoice_number=new_invoice_number,
         notes=notes,
         created_by=amended_by,
         payment_type=payment_type,
@@ -887,7 +911,7 @@ def build_selected_invoices_item_summary(invoice_ids):
     posted_invoices = Invoice.objects.filter(
         id__in=deduped_ids,
         state=Invoice.STATE_POSTED,
-    ).order_by("invoice_number")
+    ).order_by("invoice_date", "id")
 
     posted_ids = list(posted_invoices.values_list("id", flat=True))
     invoice_numbers = list(posted_invoices.values_list("invoice_number", flat=True))

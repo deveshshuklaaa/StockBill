@@ -205,7 +205,6 @@ class InvoiceHistoryAPITests(APITestCase):
 
         sale = create_invoice(
             customer=self.customer,
-            invoice_number="INV-HIST-CANCEL",
             created_by=self.admin,
             payment_type="credit",
             line_items=[
@@ -256,7 +255,6 @@ class InvoiceHistoryAPITests(APITestCase):
 
         sale = create_invoice(
             customer=self.customer,
-            invoice_number="INV-HIST-NOREASON",
             created_by=self.admin,
             payment_type="credit",
             line_items=[

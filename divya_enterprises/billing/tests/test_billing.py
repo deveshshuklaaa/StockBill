@@ -51,7 +51,7 @@ class TransactionalBillingTests(APITestCase):
 
     def invoice_payload(self, invoice_number, product, quantity=1, customer=None, payment_type="credit"):
         return {
-            "invoice_number": invoice_number,
+            "notes": invoice_number,
             "customer": customer,
             "payment_type": payment_type,
             "line_items": [
@@ -77,7 +77,7 @@ class TransactionalBillingTests(APITestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         product.refresh_from_db()
-        invoice = Invoice.objects.get(invoice_number="CASH-1001")
+        invoice = Invoice.objects.get(notes="CASH-1001")
         self.assertEqual(product.current_stock, Decimal("3.000"))
         self.assertEqual(invoice.payment_status, Invoice.PAYMENT_STATUS_PAID)
         self.assertEqual(Payment.objects.get(invoice=invoice).amount, Decimal("236.00"))
@@ -93,7 +93,7 @@ class TransactionalBillingTests(APITestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         product.refresh_from_db()
-        invoice = Invoice.objects.get(invoice_number="CREDIT-1001")
+        invoice = Invoice.objects.get(notes="CREDIT-1001")
         self.assertEqual(product.current_stock, Decimal("3.000"))
         self.assertEqual(invoice.payment_status, Invoice.PAYMENT_STATUS_CREDIT)
         self.assertFalse(Payment.objects.filter(invoice=invoice).exists())
@@ -109,7 +109,7 @@ class TransactionalBillingTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("customer", response.data)
-        self.assertFalse(Invoice.objects.filter(invoice_number="INVALID-1001").exists())
+        self.assertFalse(Invoice.objects.filter(notes="INVALID-1001").exists())
 
     def test_multi_line_stock_failure_does_not_partially_deduct_stock(self):
         first_product = self.create_product("First Product", stock=5)
@@ -131,7 +131,7 @@ class TransactionalBillingTests(APITestCase):
         second_product.refresh_from_db()
         self.assertEqual(first_product.current_stock, Decimal("5.000"))
         self.assertEqual(second_product.current_stock, Decimal("1.000"))
-        self.assertFalse(Invoice.objects.filter(invoice_number="ROLLBACK-1001").exists())
+        self.assertFalse(Invoice.objects.filter(notes="ROLLBACK-1001").exists())
 
     def test_partial_credit_note_restores_stock_and_reduces_customer_balance_only_for_target_invoice(self):
         product = self.create_product("Reversible Product", stock=10)
@@ -149,8 +149,8 @@ class TransactionalBillingTests(APITestCase):
         self.assertEqual(invoice_response.status_code, 201, invoice_response.data)
         self.assertEqual(unrelated_response.status_code, 201, unrelated_response.data)
 
-        invoice = Invoice.objects.get(invoice_number="REVERSAL-1001")
-        unrelated_invoice = Invoice.objects.get(invoice_number="UNRELATED-1001")
+        invoice = Invoice.objects.get(notes="REVERSAL-1001")
+        unrelated_invoice = Invoice.objects.get(notes="UNRELATED-1001")
         original_line = invoice.line_items.get()
         response = self.client.post(
             "/api/credit-notes/",
@@ -186,7 +186,7 @@ class TransactionalBillingTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
-        line = Invoice.objects.get(invoice_number="HISTORICAL-COST-1001").line_items.get()
+        line = Invoice.objects.get(notes="HISTORICAL-COST-1001").line_items.get()
         product.cost_price = Decimal("95.00")
         product.save(update_fields=["cost_price", "updated_at"])
         line.refresh_from_db()
@@ -214,7 +214,7 @@ class TransactionalBillingTests(APITestCase):
         self.assertEqual(first.status_code, 201, first.data)
         self.assertEqual(second.status_code, 200, second.data)
         self.assertEqual(first.data["id"], second.data["id"])
-        self.assertEqual(Invoice.objects.filter(invoice_number="IDEMPOTENT-1001").count(), 1)
+        self.assertEqual(Invoice.objects.filter(notes="IDEMPOTENT-1001").count(), 1)
 
     def test_credit_limit_is_enforced_before_invoice_creation(self):
         product = self.create_product("Credit Limit Product", stock=5)
@@ -227,7 +227,7 @@ class TransactionalBillingTests(APITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("customer", response.data)
-        self.assertFalse(Invoice.objects.filter(invoice_number="CREDIT-LIMIT-1001").exists())
+        self.assertFalse(Invoice.objects.filter(notes="CREDIT-LIMIT-1001").exists())
 
     def test_cancellation_preserves_invoice_reverses_stock_and_audits(self):
         product = self.create_product("Cancellation Product", stock=5)
@@ -237,7 +237,7 @@ class TransactionalBillingTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
-        invoice = Invoice.objects.get(invoice_number="CANCEL-1001")
+        invoice = Invoice.objects.get(notes="CANCEL-1001")
         response = self.client.post(f"/api/invoices/{invoice.pk}/cancel/", {"reason": "Duplicate entry"}, format="json")
         self.assertEqual(response.status_code, 200, response.data)
         invoice.refresh_from_db()
@@ -253,7 +253,7 @@ class TransactionalBillingTests(APITestCase):
         invoice = self.invoice_payload("REVERSAL-PAY-1001", product, quantity=1, payment_type="cash")
         response = self.client.post("/api/invoices/", invoice, format="json")
         self.assertEqual(response.status_code, 201, response.data)
-        payment = Payment.objects.get(invoice__invoice_number="REVERSAL-PAY-1001")
+        payment = Payment.objects.get(invoice__notes="REVERSAL-PAY-1001")
         response = self.client.post(f"/api/payments/{payment.pk}/reverse/", {"amount": "118.00", "reason": "Bank correction"}, format="json")
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(PaymentReversal.objects.filter(payment=payment).count(), 1)
@@ -268,7 +268,7 @@ class TransactionalBillingTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
-        invoice = Invoice.objects.get(invoice_number="IMMUTABLE-1001")
+        invoice = Invoice.objects.get(notes="IMMUTABLE-1001")
         line = invoice.line_items.get()
         line.rate_charged = Decimal("1.00")
         with self.assertRaises(ValueError):
@@ -286,7 +286,7 @@ class TransactionalBillingTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
-        invoice = Invoice.objects.get(invoice_number="SNAPSHOT-1001")
+        invoice = Invoice.objects.get(notes="SNAPSHOT-1001")
         product.name = "Changed Product"
         product.default_price = Decimal("999.00")
         product.tax = self.tax_40
@@ -323,7 +323,7 @@ class TransactionalBillingTests(APITestCase):
         payload = self.invoice_payload("DRAFT-1001", product, quantity=2, customer=self.customer.pk)
         draft = self.client.post("/api/invoices/drafts/", payload, format="json")
         self.assertEqual(draft.status_code, 201, draft.data)
-        invoice = Invoice.objects.get(invoice_number="DRAFT-1001")
+        invoice = Invoice.objects.get(notes="DRAFT-1001")
         self.assertEqual(invoice.state, Invoice.STATE_DRAFT)
         product.refresh_from_db()
         self.assertEqual(product.current_stock, Decimal("5.000"))

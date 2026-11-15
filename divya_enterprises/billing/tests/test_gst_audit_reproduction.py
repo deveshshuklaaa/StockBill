@@ -131,7 +131,6 @@ class GstAuditReproductionTests(TestCase):
 
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-AUDIT-05",
             created_by=self.user,
             payment_type="credit",
             line_items=line_items,
@@ -333,7 +332,6 @@ class GstAuditReproductionTests(TestCase):
         prod = self._create_product("Piece Prod", "SKU-PC", "10.00")
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-AUDIT-PC",
             created_by=self.user,
             payment_type="credit",
             line_items=[{
@@ -358,7 +356,6 @@ class GstAuditReproductionTests(TestCase):
         prod = self._create_product("Box Prod", "SKU-BOX", "10.00", pack_size=192)
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-AUDIT-BOX",
             created_by=self.user,
             payment_type="credit",
             line_items=[{
@@ -386,7 +383,6 @@ class GstAuditReproductionTests(TestCase):
         prod = self._create_product("Draft Prod", "SKU-DFT", "10.00")
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-AUDIT-DFT",
             created_by=self.user,
             payment_type="credit",
             line_items=[{
@@ -410,7 +406,6 @@ class GstAuditReproductionTests(TestCase):
         prod = self._create_product("Posted Prod", "SKU-PST", "10.00")
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-AUDIT-PST",
             created_by=self.user,
             payment_type="credit",
             line_items=[{
@@ -432,7 +427,6 @@ class GstAuditReproductionTests(TestCase):
         prod = self._create_product("PDF Prod", "SKU-PDF", "10.00")
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-AUDIT-PDF",
             created_by=self.user,
             payment_type="credit",
             line_items=[{
@@ -453,7 +447,6 @@ class GstAuditReproductionTests(TestCase):
         prod = self._create_product("Serial Prod", "SKU-SER", "10.00")
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-AUDIT-SER",
             created_by=self.user,
             payment_type="credit",
             line_items=[{

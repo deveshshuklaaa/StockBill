@@ -12,6 +12,7 @@ import {
 } from '../api/customers'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
+import { invoiceLabel } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
@@ -237,7 +238,7 @@ export default function CustomerDetailPage() {
         <label>Reference number<input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} placeholder="UPI ref / cheque no (optional)" /></label>
         <label>Against invoice<select value={paymentInvoice} onChange={(e) => setPaymentInvoice(e.target.value)}>
           <option value="">Customer account (no specific invoice)</option>
-          {openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoice_number} · {money(invoice.total_amount)}</option>)}
+          {openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoiceLabel(invoice)} · {money(invoice.total_amount)}</option>)}
         </select></label>
       </div>
       <div className="form-grid" style={{ marginTop: 12 }}>
@@ -505,7 +506,7 @@ export default function CustomerDetailPage() {
       {invoices.length === 0 ? <div className="empty-state">No invoices for this customer yet.</div> : <div className="table-scroll"><table>
         <thead><tr><th>Invoice</th><th>Date</th><th>Payment</th><th>Payment status</th><th>Total</th><th>State</th><th aria-label="Actions" /></tr></thead>
         <tbody>{invoices.map((invoice) => <tr key={invoice.id} className={invoice.state === 'CANCELLED' ? 'archived-row' : ''}>
-          <td><strong>{invoice.invoice_number}</strong></td>
+          <td><strong>{invoiceLabel(invoice)}</strong></td>
           <td>{invoice.invoice_date}</td>
           <td><span className="type-chip">{invoice.payment_type}</span></td>
           <td><span className={PAYMENT_STATUS_BADGE[invoice.payment_status] || 'type-chip'}>{invoice.payment_status}</span></td>

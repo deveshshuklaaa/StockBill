@@ -1153,7 +1153,7 @@ def get_sales_gst_report_data(from_date, to_date):
                 output_field=MONEY_FIELD,
             ),
         )
-        .order_by("invoice_date", "invoice_number")
+        .order_by("invoice_date", "id")
     )
 
     ZERO = Decimal("0.00")

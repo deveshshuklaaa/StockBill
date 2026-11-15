@@ -39,7 +39,7 @@ class InvoiceProfitTests(APITestCase):
 
     def invoice(self, lines, **kwargs):
         return create_invoice(
-            customer=self.customer, invoice_number=f"INV-PROFIT-{Invoice.objects.count() + 1}",
+            customer=self.customer, 
             created_by=self.admin, payment_type="credit", line_items=lines, **kwargs,
         )
 

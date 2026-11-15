@@ -521,7 +521,8 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.setFont("Helvetica-Bold", 8)
         c.drawString(meta_x + 6, meta_y, "Invoice No:")
         c.setFont("Helvetica-Bold", 8.5)
-        c.drawString(meta_x + 56, meta_y, str(invoice.invoice_number))
+        # Drafts have no tax-invoice number until they are posted.
+        c.drawString(meta_x + 56, meta_y, invoice.invoice_number or "DRAFT")
 
         c.setFont("Helvetica-Bold", 7.5)
         c.drawRightString(right_x - 58, meta_y, "Date:")

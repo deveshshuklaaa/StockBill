@@ -790,7 +790,6 @@ class HistoricalInvoiceIsolationTests(CatalogueTestBase):
         )
         invoice = create_invoice(
             customer=customer,
-            invoice_number="INV-HIST-1",
             created_by=self.admin,
             payment_type="cash",
             line_items=[

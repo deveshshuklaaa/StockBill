@@ -92,6 +92,12 @@ TIME_ZONE = "Asia/Kolkata"
 USE_I18N = True
 USE_TZ = True
 
+# GST document-number prefixes (CGST Rules 46(b) / 53). The full number is
+# "<prefix>/<fy>/<serial>" and must stay within 16 characters; billing.numbering
+# refuses to issue a number that would not.
+INVOICE_NUMBER_PREFIX = os.getenv("INVOICE_NUMBER_PREFIX", "DE")
+CREDIT_NOTE_NUMBER_PREFIX = os.getenv("CREDIT_NOTE_NUMBER_PREFIX", "CN")
+
 STATIC_URL = "/static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -42,7 +42,7 @@ def _make_customer(name, n):
 
 def _credit_inv(num, product, customer, user, qty=2):
     return create_invoice(
-        customer=customer, invoice_number=num, notes="", created_by=user, payment_type="credit",
+        customer=customer, notes="", created_by=user, payment_type="credit",
         line_items=[{"product": product, "quantity": Decimal(str(qty)), "rate_charged": Decimal("100"),
                      "tax_rate": Decimal("18"), "discount_amount": Decimal("0"),
                      "sales_unit_name": "piece", "conversion_factor": Decimal("1")}],
@@ -50,14 +50,14 @@ def _credit_inv(num, product, customer, user, qty=2):
     )
 
 
-def _amend_inv(inv_pk, product, customer, user, qty=2, new_num="REPLACE-X"):
+def _amend_inv(inv_pk, product, customer, user, qty=2):
     return amend_invoice(
         invoice_id=inv_pk,
         corrected_line_items=[{"product": product, "quantity": Decimal(str(qty)), "rate_charged": Decimal("100"),
                                "tax_rate": Decimal("18"), "discount_amount": Decimal("0"),
                                "sales_unit_name": "piece", "conversion_factor": Decimal("1")}],
         customer=customer, payment_type="credit", notes="", place_of_supply="29",
-        new_invoice_number=new_num, amended_by=user, reason="test reason",
+        amended_by=user, reason="test reason",
     )
 
 
@@ -204,7 +204,7 @@ class EligibilityTests(APITestCase):
 
     def test_already_amended_not_eligible(self):
         p = self._p("ElP7", stock=200); inv = self._inv("EL-007", p, qty=2)
-        _amend_inv(inv.pk, p, self.cust, self.user, qty=1, new_num="EL-REPLACE-007")
+        _amend_inv(inv.pk, p, self.cust, self.user, qty=1)
         ok, reason = check_invoice_correction_eligibility(inv.pk)
         self.assertFalse(ok); self.assertIn("replacement", reason.lower())
 
@@ -224,26 +224,28 @@ class AmendmentWorkflowTests(APITestCase):
     def _inv(self, num, product, qty=3):
         return _credit_inv(num, product, self.cust, self.user, qty)
 
-    def _amend(self, inv, product, qty=2, new_num="REPLACE-X"):
-        return _amend_inv(inv.pk, product, self.cust, self.user, qty, new_num)
+    def _amend(self, inv, product, qty=2):
+        return _amend_inv(inv.pk, product, self.cust, self.user, qty)
 
     def test_replacement_gets_new_number(self):
         p = self._p("NNP"); inv = self._inv("AW-001", p)
-        orig, repl = self._amend(inv, p, new_num="AW-REPLACE-001")
-        self.assertEqual(orig.invoice_number, "AW-001")
-        self.assertEqual(repl.invoice_number, "AW-REPLACE-001")
+        orig, repl = self._amend(inv, p)
+        # The original keeps its number; the replacement takes the next serial.
+        self.assertEqual(orig.invoice_number, inv.invoice_number)
+        prefix, serial = inv.invoice_number.rsplit("/", 1)
+        self.assertEqual(repl.invoice_number, f"{prefix}/{int(serial) + 1:05d}")
         self.assertNotEqual(orig.pk, repl.pk)
 
     def test_original_cancelled_and_preserved(self):
         p = self._p("OrigP"); inv = self._inv("AW-002", p, qty=4); ot = inv.total_amount
-        orig, repl = self._amend(inv, p, qty=2, new_num="AW-REPLACE-002")
+        orig, repl = self._amend(inv, p, qty=2)
         self.assertEqual(orig.state, Invoice.STATE_CANCELLED)
         self.assertIsNotNone(orig.cancelled_at)
         self.assertEqual(orig.total_amount, ot)
 
     def test_links_set_on_both_invoices(self):
         p = self._p("LinkP"); inv = self._inv("AW-003", p)
-        orig, repl = self._amend(inv, p, new_num="AW-REPLACE-003")
+        orig, repl = self._amend(inv, p)
         orig.refresh_from_db(); repl.refresh_from_db()
         self.assertEqual(orig.replacement_invoice_id, repl.pk)
         self.assertEqual(repl.amended_from_invoice_id, orig.pk)
@@ -251,12 +253,12 @@ class AmendmentWorkflowTests(APITestCase):
     def test_stock_reversal_and_deduction(self):
         p = self._p("StockP", stock=50); inv = self._inv("AW-004", p, qty=5)
         self.assertEqual(Product.objects.get(pk=p.pk).current_stock, Decimal("45.000"))
-        self._amend(inv, p, qty=3, new_num="AW-REPLACE-004")
+        self._amend(inv, p, qty=3)
         self.assertEqual(Product.objects.get(pk=p.pk).current_stock, Decimal("47.000"))
 
     def test_audit_log_links_both(self):
         p = self._p("AuditP"); inv = self._inv("AW-005", p)
-        orig, repl = self._amend(inv, p, new_num="AW-REPLACE-005")
+        orig, repl = self._amend(inv, p)
         log = AuditLog.objects.filter(action="invoice_amended", entity_id=orig.pk).last()
         self.assertIsNotNone(log)
         self.assertEqual(log.metadata["original_invoice_id"], orig.pk)
@@ -287,7 +289,7 @@ class AmendmentWorkflowTests(APITestCase):
 
     def test_amend_blocked_when_cash_payment_exists(self):
         p = self._p("CashP", stock=50)
-        ci = create_invoice(customer=None, invoice_number="AW-CASH-001", notes="", created_by=self.user,
+        ci = create_invoice(customer=None, notes="", created_by=self.user,
             payment_type="cash",
             line_items=[{"product": p, "quantity": Decimal("2"), "rate_charged": Decimal("100"),
                          "tax_rate": Decimal("18"), "discount_amount": Decimal("0"),
@@ -303,15 +305,15 @@ class AmendmentWorkflowTests(APITestCase):
 
     def test_serializer_exposes_amendment_fields(self):
         p = self._p("SerP", stock=100); inv = self._inv("AW-008", p, qty=2)
-        orig, repl = self._amend(inv, p, qty=1, new_num="AW-REPLACE-008")
+        orig, repl = self._amend(inv, p, qty=1)
         r1 = self.client.get(f"/api/invoices/{orig.pk}/")
         self.assertEqual(r1.status_code, 200)
         self.assertEqual(r1.data["replacement_invoice"], repl.pk)
-        self.assertEqual(r1.data["replacement_invoice_number"], "AW-REPLACE-008")
+        self.assertEqual(r1.data["replacement_invoice_number"], repl.invoice_number)
         r2 = self.client.get(f"/api/invoices/{repl.pk}/")
         self.assertEqual(r2.status_code, 200)
         self.assertEqual(r2.data["amended_from_invoice"], orig.pk)
-        self.assertEqual(r2.data["amended_from_invoice_number"], "AW-008")
+        self.assertEqual(r2.data["amended_from_invoice_number"], orig.invoice_number)
 
     def test_amend_api_requires_reason(self):
         p = self._p("ValP", stock=50); inv = self._inv("AW-009", p)
