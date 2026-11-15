@@ -69,9 +69,9 @@ class CustomerExportTests(APITestCase):
                 "sales_unit_name": "piece", "conversion_factor": Decimal("1"),
             }]
 
-        first = create_invoice(customer=cls.trader, invoice_number="EXP-1", created_by=cls.admin,
+        first = create_invoice(customer=cls.trader, created_by=cls.admin,
                                payment_type="credit", line_items=line(4), place_of_supply="27")
-        create_invoice(customer=cls.trader, invoice_number="EXP-2", created_by=cls.admin,
+        create_invoice(customer=cls.trader, created_by=cls.admin,
                        payment_type="credit", line_items=line(2), place_of_supply="27")
         payment = create_payment(customer=cls.trader, invoice=first, amount=Decimal("200.00"), actor=cls.admin)
         reverse_payment(payment_id=payment.pk, amount=Decimal("50.00"), reversed_by=cls.admin, reason="bounced")
