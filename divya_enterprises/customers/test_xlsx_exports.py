@@ -1,16 +1,16 @@
-"""Customer CSV exports: details (/api/customers/export/) and outstanding
+"""Customer Excel exports: details (/api/customers/export/) and outstanding
 amounts (/api/customers/export/outstanding/)."""
 
-import codecs
-import csv
 import io
 from decimal import Decimal
 
+import openpyxl
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
 from billing.models import AuditLog, BusinessProfile
 from billing.services import create_credit_note, create_invoice, create_payment, reverse_payment
+from billing.xlsx_export import HEADER_ROW, XLSX_CONTENT_TYPE
 from customers.models import Customer
 from inventory.models import Product, TaxRate
 from inventory.services import ensure_inventory_balance
@@ -23,10 +23,11 @@ DETAIL_HEADERS = [
 OUTSTANDING_HEADERS = ["Customer name", "Address", "Outstanding amount"]
 
 
-def parse_csv(response):
-    body = response.content
-    assert body.startswith(codecs.BOM_UTF8), "CSV must start with a UTF-8 BOM"
-    return list(csv.reader(io.StringIO(body.decode("utf-8-sig"), newline="")))
+def read_sheet(response):
+    assert response["Content-Type"] == XLSX_CONTENT_TYPE
+    sheet = openpyxl.load_workbook(io.BytesIO(response.content)).active
+    rows = [list(row) for row in sheet.iter_rows(min_row=HEADER_ROW, values_only=True)]
+    return sheet, rows[0], rows[1:]
 
 
 class CustomerExportTests(APITestCase):
@@ -50,10 +51,10 @@ class CustomerExportTests(APITestCase):
         ensure_inventory_balance(product=cls.product)
 
         cls.trader = Customer.objects.create(
-            name="Agarwal Traders", contact_info="9820098200", customer_type="B2B",
+            name="Agarwal Traders", contact_info="919820098200", customer_type="B2B",
             gst_registration_type="registered", gstin="27AABCU9603R1ZM",
             billing_address="Shop 4,\nMarket Road\nPune", shipping_address="Godown 1\r\nHadapsar",
-            state="Maharashtra", state_code="27", pincode="411001",
+            state="Delhi", state_code="07", pincode="011001",
             credit_limit=Decimal("50000"), credit_days=30, is_regular=True,
         )
         cls.hindi = Customer.objects.create(name="शर्मा किराना स्टोर", state_code="27", billing_address="कोथरूड, पुणे")
@@ -88,12 +89,12 @@ class CustomerExportTests(APITestCase):
     def details(self, **params):
         response = self.client_as(self.admin).get(self.DETAILS, params)
         self.assertEqual(response.status_code, 200, response.content[:200])
-        return parse_csv(response)
+        return read_sheet(response)
 
     def outstanding(self, **params):
         response = self.client_as(self.admin).get(self.OUTSTANDING, params)
         self.assertEqual(response.status_code, 200, response.content[:200])
-        return parse_csv(response)
+        return read_sheet(response)
 
     # --- permissions -------------------------------------------------------
     def test_admin_only(self):
@@ -107,36 +108,46 @@ class CustomerExportTests(APITestCase):
     # --- details export ----------------------------------------------------
     def test_details_headers_and_values(self):
         response = self.client_as(self.admin).get(self.DETAILS)
-        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
-        self.assertRegex(response["Content-Disposition"], r'attachment; filename="stockbill-customers-\d{8}-\d{4}\.csv"')
-        rows = parse_csv(response)
-        self.assertEqual(rows[0], DETAIL_HEADERS)
-        trader = next(r for r in rows[1:] if r[0] == "Agarwal Traders")
-        # Phone / state code / pincode are written as ="..." so Excel keeps them as text.
+        self.assertRegex(response["Content-Disposition"], r'attachment; filename="stockbill-customers-\d{8}-\d{4}\.xlsx"')
+        sheet, headers, rows = read_sheet(response)
+        self.assertEqual(headers, DETAIL_HEADERS)
+        self.assertEqual(sheet["A1"].value, "Customers")
+        trader = next(r for r in rows if r[0] == "Agarwal Traders")
         self.assertEqual(trader, [
-            "Agarwal Traders", '="9820098200"', "B2B", "Registered", "27AABCU9603R1ZM",
-            "Shop 4,, Market Road, Pune", "Godown 1, Hadapsar", "Maharashtra", '="27"', '="411001"',
-            "50000.00", "30", "Yes",
+            "Agarwal Traders", "919820098200", "B2B", "Registered", "27AABCU9603R1ZM",
+            "Shop 4,, Market Road, Pune", "Godown 1, Hadapsar", "Delhi", "07", "011001",
+            50000, 30, "Yes",
         ])
-        self.assertFalse({"Outstanding balance", "Available credit", "Opening balance"} & set(rows[0]))
+        self.assertFalse({"Outstanding balance", "Available credit", "Opening balance"} & set(headers))
 
-    def test_details_injection_and_unicode(self):
-        rows = self.details()
-        evil = next(r for r in rows[1:] if "HYPERLINK" in r[0])
-        self.assertEqual(evil[0], "'=HYPERLINK(\"http://x\")")
-        # A "+91" phone is a string literal inside ="...", so it is never evaluated.
-        self.assertEqual(evil[1], '="+919820098200"')
-        # Empty codes stay empty rather than becoming ="".
-        self.assertEqual(evil[9], "")
-        hindi = next(r for r in rows[1:] if r[0] == "शर्मा किराना स्टोर")
+    def test_codes_are_text_cells(self):
+        sheet, headers, rows = self.details()
+        row_number = HEADER_ROW + 1 + [r[0] for r in rows].index("Agarwal Traders")
+        for header in ("Phone", "State code", "Pincode"):
+            cell = sheet.cell(row=row_number, column=headers.index(header) + 1)
+            self.assertEqual(cell.data_type, "s", header)
+            self.assertEqual(cell.number_format, "@", header)
+        credit_limit = sheet.cell(row=row_number, column=headers.index("Credit limit") + 1)
+        self.assertEqual(credit_limit.data_type, "n")
+
+    def test_details_formula_text_and_unicode(self):
+        sheet, headers, rows = self.details()
+        index = next(i for i, r in enumerate(rows) if "HYPERLINK" in (r[0] or ""))
+        self.assertEqual(rows[index][0], '=HYPERLINK("http://x")')
+        self.assertEqual(rows[index][1], "+919820098200")
+        self.assertEqual(sheet.cell(row=HEADER_ROW + 1 + index, column=1).data_type, "s")  # never a formula
+        self.assertIsNone(rows[index][9])  # empty pincode stays empty
+        hindi = next(r for r in rows if r[0] == "शर्मा किराना स्टोर")
         self.assertEqual(hindi[5], "कोथरूड, पुणे")
 
     def test_details_filters(self):
-        self.assertEqual([r[0] for r in self.details(is_active="false")[1:]], ["Closed Shop"])
-        active = [r[0] for r in self.details(is_active="true")[1:]]
+        self.assertEqual([r[0] for r in self.details(is_active="false")[2]], ["Closed Shop"])
+        sheet, _, active_rows = self.details(is_active="true")
+        active = [r[0] for r in active_rows]
         self.assertNotIn("Closed Shop", active)
         self.assertEqual(len(active), Customer.objects.filter(is_active=True).count())
-        self.assertEqual([r[0] for r in self.details(search="agarwal")[1:]], ["Agarwal Traders"])
+        self.assertIn("Active customers", sheet["A2"].value)
+        self.assertEqual([r[0] for r in self.details(search="agarwal")[2]], ["Agarwal Traders"])
         self.assertEqual(self.client_as(self.admin).get(self.DETAILS, {"is_active": "maybe"}).status_code, 400)
 
     def test_details_audit_log(self):
@@ -151,23 +162,27 @@ class CustomerExportTests(APITestCase):
         expected = self.trader.outstanding_balance
         # Two invoices, a payment, a partial reversal and a credit note all count.
         self.assertGreater(expected, 0)
-        rows = self.outstanding()
-        self.assertEqual(rows[0], OUTSTANDING_HEADERS)
-        trader = next(r for r in rows[1:] if r[0] == "Agarwal Traders")
-        self.assertEqual(trader, ["Agarwal Traders", "Shop 4,, Market Road, Pune", f"{expected:.2f}"])
+        response = self.client_as(self.admin).get(self.OUTSTANDING)
+        self.assertRegex(response["Content-Disposition"], r'attachment; filename="stockbill-customer-outstanding-\d{8}-\d{4}\.xlsx"')
+        _, headers, rows = read_sheet(response)
+        self.assertEqual(headers, OUTSTANDING_HEADERS)
+        trader = next(r for r in rows if r[0] == "Agarwal Traders")
+        self.assertEqual(trader[:2], ["Agarwal Traders", "Shop 4,, Market Road, Pune"])
+        self.assertEqual(Decimal(str(trader[2])), expected)
 
     def test_outstanding_skips_zero_keeps_negative_numeric_and_sorts(self):
-        rows = self.outstanding()[1:]
+        sheet, headers, rows = self.outstanding()
         names = [r[0] for r in rows]
         self.assertNotIn("Zero Balance Mart", names)
         self.assertNotIn("शर्मा किराना स्टोर", names)  # nothing owed
         self.assertEqual(names, sorted(names))
-        advance = next(r for r in rows if r[0] == "Advance Paid Co")
-        self.assertEqual(advance[2], "-1500.00")  # numeric column: no "'" prefix
+        advance_index = names.index("Advance Paid Co")
+        self.assertEqual(rows[advance_index][2], -1500)
+        self.assertEqual(sheet.cell(row=HEADER_ROW + 1 + advance_index, column=3).data_type, "n")
         self.assertIn("Closed Shop", names)
 
     def test_outstanding_filters_and_audit(self):
-        rows = self.outstanding(is_active="true")[1:]
+        _, _, rows = self.outstanding(is_active="true")
         self.assertNotIn("Closed Shop", [r[0] for r in rows])
         log = AuditLog.objects.get(action="customer_outstanding_exported")
         self.assertEqual(log.user, self.admin)

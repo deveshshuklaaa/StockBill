@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsAdminOrReadOnly, IsAdminUser
-from billing.csv_export import csv_response, export_filename, money, yes_no
+from billing.xlsx_export import INTEGER, MONEY, Column, export_filename, xlsx_response
 from billing.models import AuditLog, CreditNote, Payment
 from inventory.models import Product
 from .models import Customer, CustomerMRPPricing
@@ -44,6 +44,18 @@ def _export_filters(params):
     return applied
 
 
+def _filters_label(filters):
+    """Human-readable line describing the list filters an export used."""
+    parts = []
+    if filters.get("is_active") == "true":
+        parts.append("Active customers")
+    elif filters.get("is_active") == "false":
+        parts.append("Archived customers")
+    if filters.get("search"):
+        parts.append(f"Search: {filters['search']}")
+    return " · ".join(parts) or "All customers"
+
+
 class CustomerListCreateView(generics.ListCreateAPIView):
     serializer_class = CustomerSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
@@ -65,7 +77,7 @@ class CustomerListCreateView(generics.ListCreateAPIView):
 
 
 class CustomerExportView(APIView):
-    """Admin-only CSV of customer registration details (no balances).
+    """Admin-only Excel of customer registration details (no balances).
 
     Columns are exactly the fields captured on the customer form. Honours the
     list page's search / status filters. Bulk personal data, so every export
@@ -74,17 +86,23 @@ class CustomerExportView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
 
-    HEADERS = [
-        "Name", "Phone", "Customer type", "GST registration", "GSTIN", "Address",
-        "Shipping address", "State", "State code", "Pincode", "Credit limit",
-        "Credit days", "Regular customer",
+    # Phone / State code / Pincode are text cells: no 9.82E+09 phones and no
+    # lost leading zeros.
+    COLUMNS = [
+        Column("Name", width=34),
+        Column("Phone", width=16),
+        Column("Customer type", width=14),
+        Column("GST registration", width=16),
+        Column("GSTIN", width=18),
+        Column("Address", width=44),
+        Column("Shipping address", width=44),
+        Column("State", width=16),
+        Column("State code", width=11),
+        Column("Pincode", width=10),
+        Column("Credit limit", MONEY, width=14),
+        Column("Credit days", INTEGER, width=12),
+        Column("Regular customer", width=16),
     ]
-    TEXT_COLUMNS = {
-        "Name", "Phone", "Customer type", "GST registration", "GSTIN", "Address",
-        "Shipping address", "State", "State code", "Pincode",
-    }
-    # Kept as text in Excel (no 9.82E+09 phones, no lost leading zeros).
-    EXCEL_TEXT_COLUMNS = {"Phone", "State code", "Pincode"}
 
     def get(self, request):
         filters = _export_filters(request.query_params)
@@ -101,9 +119,9 @@ class CustomerExportView(APIView):
                 customer.state,
                 customer.state_code,
                 customer.pincode,
-                money(customer.credit_limit),
-                str(customer.credit_days),
-                yes_no(customer.is_regular),
+                customer.credit_limit,
+                customer.credit_days,
+                "Yes" if customer.is_regular else "No",
             ]
             for customer in customers
         ]
@@ -114,17 +132,17 @@ class CustomerExportView(APIView):
             entity_id=0,
             metadata={"row_count": len(rows), "filters": filters},
         )
-        return csv_response(
-            headers=self.HEADERS,
+        return xlsx_response(
+            title="Customers",
+            subtitle=_filters_label(filters),
+            columns=self.COLUMNS,
             rows=rows,
             filename=export_filename("customers"),
-            text_columns=self.TEXT_COLUMNS,
-            excel_text_columns=self.EXCEL_TEXT_COLUMNS,
         )
 
 
 class CustomerOutstandingExportView(APIView):
-    """Admin-only CSV: customer name, address, outstanding amount.
+    """Admin-only Excel: customer name, address, outstanding amount.
 
     The amount is Customer.outstanding_balance, the same property the rest of
     the app uses (no second formula). Only customers whose outstanding is not
@@ -133,8 +151,11 @@ class CustomerOutstandingExportView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
 
-    HEADERS = ["Customer name", "Address", "Outstanding amount"]
-    TEXT_COLUMNS = {"Customer name", "Address"}
+    COLUMNS = [
+        Column("Customer name", width=36),
+        Column("Address", width=50),
+        Column("Outstanding amount", MONEY, width=20),
+    ]
 
     def get(self, request):
         filters = _export_filters(request.query_params)
@@ -143,7 +164,7 @@ class CustomerOutstandingExportView(APIView):
         for customer in customers:
             outstanding = customer.outstanding_balance
             if outstanding != 0:
-                rows.append([customer.name, customer.billing_address, money(outstanding)])
+                rows.append([customer.name, customer.billing_address, outstanding])
         AuditLog.objects.create(
             user=request.user,
             action="customer_outstanding_exported",
@@ -151,11 +172,12 @@ class CustomerOutstandingExportView(APIView):
             entity_id=0,
             metadata={"row_count": len(rows), "filters": filters},
         )
-        return csv_response(
-            headers=self.HEADERS,
+        return xlsx_response(
+            title="Customer outstanding",
+            subtitle=_filters_label(filters),
+            columns=self.COLUMNS,
             rows=rows,
             filename=export_filename("customer-outstanding"),
-            text_columns=self.TEXT_COLUMNS,
         )
 
 

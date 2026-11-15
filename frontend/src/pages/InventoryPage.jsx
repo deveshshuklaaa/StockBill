@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiErrorMessage } from '../api/client'
-import { fetchInventoryBalances } from '../api/inventory'
+import { exportInventoryXlsx, fetchInventoryBalances } from '../api/inventory'
 import { fetchWarehouses } from '../api/warehouses'
 import StatusMessage from '../components/StatusMessage'
 import { formatNetWeight, formatStockWithBoxes } from '../utils/format'
@@ -29,6 +29,7 @@ export default function InventoryPage() {
   const [hasPrevious, setHasPrevious] = useState(false)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
+  const [exporting, setExporting] = useState(false)
   const latestLoad = useRef(0)
 
   useEffect(() => {
@@ -61,6 +62,18 @@ export default function InventoryPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / 25))
 
+  async function handleExport() {
+    setExporting(true); setError('')
+    try {
+      // Same search / warehouse filters the list is showing.
+      await exportInventoryXlsx({ warehouse: warehouseFilter, search })
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return <section className="page-section">
     <header className="page-header">
       <div>
@@ -68,6 +81,9 @@ export default function InventoryPage() {
         <h1>Inventory</h1>
         <p className="page-subtitle">Current stock levels, weighted-average cost, and inventory valuation by warehouse.</p>
       </div>
+      <button type="button" className="action-button outline" onClick={handleExport} disabled={exporting} aria-label="Export stock to Excel">
+        {exporting ? 'Exporting...' : 'Export Excel'}
+      </button>
     </header>
     <StatusMessage>{error}</StatusMessage>
 

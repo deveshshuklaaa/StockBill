@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiErrorMessage } from '../../api/client'
-import { exportInventoryCsv, fetchInventoryReport } from '../../api/reports'
+import { fetchInventoryReport } from '../../api/reports'
 import { fetchWarehouses } from '../../api/warehouses'
 import StatusMessage from '../../components/StatusMessage'
 import { formatQuantity } from '../../utils/format'
@@ -17,7 +17,6 @@ export default function InventoryReportPage() {
   const [isActive, setIsActive] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     fetchWarehouses().then(setWarehouses).catch(() => {})
@@ -38,24 +37,9 @@ export default function InventoryReportPage() {
     return () => { cancelled = true }
   }, [warehouse, isActive, search])
 
-  async function handleExportCsv() {
-    setExporting(true); setError('')
-    try {
-      // Same filters the screen is showing right now.
-      await exportInventoryCsv({ warehouse, isActive, search })
-    } catch (err) {
-      setError(apiErrorMessage(err))
-    } finally {
-      setExporting(false)
-    }
-  }
-
   return <section className="page-section">
     <header className="page-header">
       <div><p className="eyebrow">Reports / inventory</p><h1>Stock Valuation</h1><p className="page-subtitle">Inventory value = quantity on hand Ã— weighted-average cost, exactly as the inventory service maintains it.</p></div>
-      <button type="button" className="action-button outline" onClick={handleExportCsv} disabled={exporting} aria-label="Export stock CSV">
-        {exporting ? 'Exporting...' : 'Export CSV'}
-      </button>
     </header>
     <StatusMessage>{error}</StatusMessage>
 
