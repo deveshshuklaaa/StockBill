@@ -105,7 +105,7 @@ from inventory.models import (
     Supplier,
 )
 
-from .csv_export import csv_response, export_filename, quantity
+from .xlsx_export import MONEY, QUANTITY, Column, export_filename, xlsx_response
 from .models import BusinessProfile, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 from .profit import profit_percent_on_cost
 from .tax_engine import round_inr
@@ -564,51 +564,63 @@ class InventoryValuationReportView(APIView):
 
 
 class InventoryStockExportView(APIView):
-    """CSV of stock left: one row per product × warehouse, quantities only.
+    """Excel of stock left: one row per product with its MRP and quantity.
 
-    Same permission, filters and row builder as the inventory report screen,
-    so the file's quantity total always equals the screen's "Quantity on
-    hand". No cost or value columns.
+    Downloaded from the Inventory page with its search / warehouse filters.
+    Quantities are summed across warehouses (or taken from the filtered
+    warehouse). Uses the inventory valuation row builder (stock above zero
+    plus the legacy no-balance fallback), so the file's quantity total
+    equals the Stock Valuation report's "Quantity on hand" for the same
+    filters. No cost or value columns. MRP tells apart products that share a
+    name (e.g. the ₹5 and ₹10 packs of the same snack).
     """
 
     permission_classes = [IsStaffUser]
 
-    HEADERS = ["SKU", "Product name", "Brand", "Category", "Warehouse", "Quantity on hand", "Base unit"]
-    TEXT_COLUMNS = {"SKU", "Product name", "Brand", "Category", "Warehouse", "Base unit"}
+    COLUMNS = [
+        Column("Product name", width=44),
+        Column("MRP", MONEY, width=10),
+        Column("Quantity on hand", QUANTITY, width=18),
+        Column("Base unit", width=12),
+    ]
 
     def get(self, request):
         filters, error = _parse_inventory_filters(request.query_params)
         if error is not None:
             return error
-        balances = _inventory_valuation_rows(**filters).order_by("product__name", "warehouse__code", "id")
+        per_product = (
+            _inventory_valuation_rows(**filters)
+            .order_by()  # no default ordering in GROUP BY: exactly one row per product
+            .values("product_id", "product__name", "product__mrp", "product__base_unit")
+            .annotate(quantity=Sum("quantity_on_hand"))
+        )
         rows = [
-            [
-                balance.product.sku,
-                balance.product.name,
-                balance.product.brand,
-                balance.product.catalogue_category.name if balance.product.catalogue_category else "",
-                balance.warehouse.name,
-                quantity(balance.quantity_on_hand),
-                balance.product.base_unit,
-            ]
-            for balance in balances
+            (row["product__name"], row["product__mrp"], row["product_id"], row["quantity"], row["product__base_unit"])
+            for row in per_product
         ]
-        # Legacy products have no per-warehouse balance, so Warehouse is blank.
-        for product in sorted(_legacy_inventory_products(**filters), key=lambda p: (p.name, p.pk)):
-            rows.append([
-                product.sku,
-                product.name,
-                product.brand,
-                product.catalogue_category.name if product.catalogue_category else "",
-                "",
-                quantity(product.current_stock),
-                product.base_unit,
-            ])
-        return csv_response(
-            headers=self.HEADERS,
+        # Legacy products (no balance rows at all) never overlap the above.
+        rows += [
+            (product.name, product.mrp, product.pk, product.current_stock, product.base_unit)
+            for product in _legacy_inventory_products(**filters)
+        ]
+        # Same-name products sit together, lower MRP first; no MRP sorts last.
+        rows.sort(key=lambda r: (r[0].lower(), r[1] is None, r[1] or 0, r[2]))
+        rows = [[name, mrp, quantity, unit] for name, mrp, _, quantity, unit in rows]
+        applied = []
+        if filters["warehouse"] is not None:
+            applied.append(f"Warehouse: {filters['warehouse'].name}")
+        if filters["category"] is not None:
+            applied.append(f"Category: {filters['category'].name}")
+        if filters["is_active"] is not None:
+            applied.append("Active products" if filters["is_active"] else "Archived products")
+        if filters["search"]:
+            applied.append(f"Search: {filters['search']}")
+        return xlsx_response(
+            title="Inventory stock",
+            subtitle=" · ".join(applied) or "All warehouses",
+            columns=self.COLUMNS,
             rows=rows,
             filename=export_filename("inventory"),
-            text_columns=self.TEXT_COLUMNS,
         )
 
 

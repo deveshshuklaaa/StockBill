@@ -1,5 +1,5 @@
 import api from './client'
-import { defaultCsvName, saveBlobResponse } from './download'
+import { XLSX_TYPE, defaultExportName, saveBlobResponse } from './download'
 
 export function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
 
@@ -97,12 +97,12 @@ function customerExportParams({ search = '', isActive = '' } = {}) {
   return params
 }
 
-export async function exportCustomersCsv(filters) {
+export async function exportCustomersXlsx(filters) {
   const response = await api.get('/customers/export/', { params: customerExportParams(filters), responseType: 'blob' })
-  return saveBlobResponse(response, defaultCsvName('customers'), 'text/csv')
+  return saveBlobResponse(response, defaultExportName('customers'), XLSX_TYPE)
 }
 
-export async function exportCustomerOutstandingCsv(filters) {
+export async function exportCustomerOutstandingXlsx(filters) {
   const response = await api.get('/customers/export/outstanding/', { params: customerExportParams(filters), responseType: 'blob' })
-  return saveBlobResponse(response, defaultCsvName('customer-outstanding'), 'text/csv')
+  return saveBlobResponse(response, defaultExportName('customer-outstanding'), XLSX_TYPE)
 }

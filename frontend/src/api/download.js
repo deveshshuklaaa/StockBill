@@ -11,8 +11,10 @@ function istStamp(date = new Date()) {
   return `${ist.getFullYear()}${pad(ist.getMonth() + 1)}${pad(ist.getDate())}-${pad(ist.getHours())}${pad(ist.getMinutes())}`
 }
 
-export function defaultCsvName(name) {
-  return `stockbill-${name}-${istStamp()}.csv`
+export const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+export function defaultExportName(name) {
+  return `stockbill-${name}-${istStamp()}.xlsx`
 }
 
 export function saveBlobResponse(response, fallbackName, type) {

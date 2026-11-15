@@ -1,4 +1,5 @@
 import api from './client'
+import { XLSX_TYPE, defaultExportName, saveBlobResponse } from './download'
 
 export function rows(data) { return Array.isArray(data) ? data : data?.results || [] }
 
@@ -34,4 +35,13 @@ export async function fetchProducts({ page = 1, page_size = 200, is_active, sear
   if (search) params.search = search
   const { data } = await api.get('/products/', { params })
   return data
+}
+
+// Stock left (quantity > 0) as an Excel file, using the Inventory page's filters.
+export async function exportInventoryXlsx({ warehouse = '', search = '' } = {}) {
+  const params = {}
+  if (warehouse) params.warehouse = warehouse
+  if (search) params.search = search
+  const response = await api.get('/reports/inventory/export/', { params, responseType: 'blob' })
+  return saveBlobResponse(response, defaultExportName('inventory'), XLSX_TYPE)
 }
