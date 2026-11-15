@@ -4,7 +4,7 @@ import { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { cancelInvoice, deleteDraftInvoice, fetchCorrectionEligibility, fetchInvoice, postInvoice, printInvoicePdf } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
-import { formatQuantity, formatQuantityWithUnit } from '../utils/format'
+import { formatQuantity, formatQuantityWithUnit, invoiceLabel } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 function percent(value) { return value == null ? '—' : `${Number(value).toFixed(1)}%` }
@@ -54,7 +54,7 @@ export default function InvoiceDetailPage() {
     setDownloading(copy)
     setError('')
     try {
-      await printInvoicePdf(id, { copy, invoiceNumber: invoice?.invoice_number })
+      await printInvoicePdf(id, { copy, invoiceNumber: invoice?.invoice_number || '' })
     } catch (err) {
       setError(apiErrorMessage(err))
     } finally {
@@ -101,7 +101,7 @@ export default function InvoiceDetailPage() {
     try {
       await deleteDraftInvoice(id)
       navigate('/invoices', {
-        state: { successMessage: `Draft invoice ${invoice.invoice_number} deleted successfully.` },
+        state: { successMessage: `Draft invoice ${invoiceLabel(invoice)} deleted successfully.` },
       })
     } catch (err) {
       setError(apiErrorMessage(err))
@@ -167,7 +167,7 @@ export default function InvoiceDetailPage() {
     <StatusMessage>{error}</StatusMessage>
 
     {showCancel && <div className="record-form">
-      <div className="form-heading"><div><p className="eyebrow">Cancellation</p><h2>Cancel invoice {invoice.invoice_number}</h2></div></div>
+      <div className="form-heading"><div><p className="eyebrow">Cancellation</p><h2>Cancel invoice {invoiceLabel(invoice)}</h2></div></div>
       <p className="field-help" style={{ marginBottom: 10 }}>Cancellation reverses the stock movement with a compensating SALE_REVERSAL ledger entry. The original sale remains in history and the invoice becomes immutable.</p>
       <label className="filter-field" style={{ display: 'block' }}>Reason<textarea style={{ display: 'block', width: '100%', marginTop: 6, border: '1px solid #cbd5cd', padding: '10px 11px', fontFamily: 'inherit', resize: 'vertical' }} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why is this invoice being cancelled?" /></label>
       <div className="form-actions">
@@ -217,7 +217,7 @@ export default function InvoiceDetailPage() {
       <div className="invoice-detail-head">
         <div>
           <p className="eyebrow">Divya Enterprises / Invoice</p>
-          <h1>{invoice.invoice_number}</h1>
+          <h1>{invoiceLabel(invoice)}</h1>
           <p>{invoice.invoice_date}{invoice.created_at ? ` · ${String(invoice.created_at).slice(11, 16)}` : ''}</p>
         </div>
         <div className="detail-status">

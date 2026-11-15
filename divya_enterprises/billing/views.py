@@ -253,7 +253,8 @@ class InvoicePdfView(generics.GenericAPIView):
         if copy_type not in ["original", "duplicate", "triplicate", "reprint"]:
             copy_type = "original"
         pdf_bytes = build_invoice_a5_pdf(invoice, copy_type=copy_type)
-        filename = f"invoice-{slugify(invoice.invoice_number)}-{slugify(copy_type)}.pdf"
+        number_slug = slugify(invoice.invoice_number) if invoice.invoice_number else f"draft-{invoice.pk}"
+        filename = f"invoice-{number_slug}-{slugify(copy_type)}.pdf"
         disposition = request.query_params.get("disposition", "inline").strip().lower()
         if disposition not in ["inline", "attachment"]:
             disposition = "inline"
@@ -407,7 +408,8 @@ class InvoiceAmendView(APIView):
     """Atomically cancel a POSTED invoice and create a replacement.
 
     Admin-only. Blocked if any payment or credit note exists against the invoice.
-    The replacement receives a new invoice number; the original is preserved.
+    The replacement draws the next number from the server-side GST series;
+    any client-supplied invoice_number is ignored. The original is preserved.
     """
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
 
@@ -415,10 +417,6 @@ class InvoiceAmendView(APIView):
         reason = (request.data.get("reason") or "").strip()
         if not reason:
             return Response({"reason": "A correction reason is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        new_invoice_number = (request.data.get("invoice_number") or "").strip()
-        if not new_invoice_number:
-            return Response({"invoice_number": "A new invoice number is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         line_items_raw = request.data.get("line_items", [])
         if not line_items_raw:
@@ -465,7 +463,6 @@ class InvoiceAmendView(APIView):
                     notes=notes,
                     place_of_supply=place_of_supply,
                     tax_mode=tax_mode,
-                    new_invoice_number=new_invoice_number,
                     amended_by=request.user,
                     reason=reason,
                 )

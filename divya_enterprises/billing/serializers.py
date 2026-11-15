@@ -101,8 +101,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "replacement_invoice", "replacement_invoice_number",
             "amended_from_invoice", "amended_from_invoice_number",
         ]
+        # invoice_number / invoice_date are assigned server-side at posting
+        # (billing.numbering); a client-supplied value is ignored.
         read_only_fields = [
-            "id", "customer_name", "invoice_date", "created_at", "updated_at",
+            "id", "invoice_number", "customer_name", "invoice_date", "created_at", "updated_at",
             "payment_status", "state", "cancellation_reason", "cancelled_at",
             "created_by", "total_amount", "customer_name_snapshot",
             "customer_gstin_snapshot", "customer_registration_type_snapshot",
@@ -191,6 +193,7 @@ class CreditNoteSerializer(serializers.ModelSerializer):
         model = CreditNote
         fields = [
             "id",
+            "credit_note_number",
             "original_invoice",
             "original_invoice_number",
             "reason",
@@ -200,7 +203,7 @@ class CreditNoteSerializer(serializers.ModelSerializer):
             "line_items",
             "created_at",
         ]
-        read_only_fields = ["id", "original_invoice_number", "note_date", "created_at", "total_amount", "created_by"]
+        read_only_fields = ["id", "credit_note_number", "original_invoice_number", "note_date", "created_at", "total_amount", "created_by"]
 
     def validate(self, attrs):
         if not attrs.get("line_items"):

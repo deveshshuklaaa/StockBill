@@ -189,7 +189,7 @@ describe('Unsaved Changes Protection - New Invoice', () => {
   it('saves draft via API and then continues requested navigation on Save as Draft', async () => {
     const user = userEvent.setup()
     const postSpy = vi.spyOn(api, 'post').mockResolvedValue({
-      data: { id: 77, invoice_number: 'INV-DRAFT-01', state: 'DRAFT' },
+      data: { id: 77, invoice_number: null, state: 'DRAFT' },
     })
 
     render(
@@ -231,6 +231,9 @@ describe('Unsaved Changes Protection - New Invoice', () => {
         expect.anything()
       )
     })
+    // Invoice numbers are assigned by the server at posting, never by the browser.
+    const draftPayload = postSpy.mock.calls.find(([url]) => url === '/invoices/drafts/')[1]
+    expect(draftPayload).not.toHaveProperty('invoice_number')
 
     // Continues navigation to requested target (/products)
     expect(await screen.findByText('Products Catalogue')).toBeInTheDocument()
@@ -293,7 +296,7 @@ describe('Unsaved Changes Protection - New Invoice', () => {
   it('navigates cleanly without prompt when successfully saving draft via the page button', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'post').mockResolvedValue({
-      data: { id: 99, invoice_number: 'INV-99', state: 'DRAFT' },
+      data: { id: 99, invoice_number: null, state: 'DRAFT' },
     })
 
     render(
@@ -324,7 +327,7 @@ describe('Unsaved Changes Protection - New Invoice', () => {
   it('navigates cleanly without prompt when successfully creating/posting invoice via the page button', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'post').mockResolvedValue({
-      data: { id: 100, invoice_number: 'INV-100', state: 'POSTED' },
+      data: { id: 100, invoice_number: 'DE/26-27/00100', state: 'POSTED' },
     })
 
     render(
@@ -433,7 +436,7 @@ describe('Unsaved Changes Protection - New Invoice', () => {
   it('saves draft via API on Save as Draft then completes browser Back navigation in New Invoice', async () => {
     const user = userEvent.setup()
     const postSpy = vi.spyOn(api, 'post').mockResolvedValue({
-      data: { id: 88, invoice_number: 'INV-DRAFT-88', state: 'DRAFT' },
+      data: { id: 88, invoice_number: null, state: 'DRAFT' },
     })
 
     window.history.pushState({ idx: 0 }, '', '/dashboard')

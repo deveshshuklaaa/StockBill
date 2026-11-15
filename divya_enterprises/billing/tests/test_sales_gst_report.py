@@ -105,8 +105,10 @@ class SalesGstReportTests(APITestCase):
     def _create_direct_invoice(self, *, number, date_str, customer, state, total_amt, lines, customer_snapshot=None, customer_gstin_snapshot=None):
         """Helper to create an invoice directly with exact line snapshots for deterministic testing."""
         inv_date = datetime.date.fromisoformat(date_str)
+        # invoice_date is set on create: posted rows are immutable afterwards.
         inv = Invoice.objects.create(
             invoice_number=number,
+            invoice_date=inv_date,
             customer=customer,
             customer_name_snapshot=customer_snapshot if customer_snapshot is not None else (customer.name if customer else "Walk-in customer"),
             customer_gstin_snapshot=customer_gstin_snapshot if customer_gstin_snapshot is not None else ((customer.gstin or "") if customer else ""),
@@ -115,7 +117,6 @@ class SalesGstReportTests(APITestCase):
             seller_business_name_snapshot=self.seller.business_name,
             seller_gstin_snapshot=self.seller.gstin,
         )
-        Invoice.objects.filter(pk=inv.pk).update(invoice_date=inv_date)
         inv.refresh_from_db()
         for line in lines:
             tax_val = Decimal(str(line.get("tax", "0.00")))

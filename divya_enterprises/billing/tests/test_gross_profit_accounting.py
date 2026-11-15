@@ -164,7 +164,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         # Sale: 100 pcs @ 7.35 per piece (tax-exclusive rate)
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-BUG-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -228,7 +227,6 @@ class GrossProfitAccountingTestCase(APITestCase):
 
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-DIFF-RATE-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -261,7 +259,6 @@ class GrossProfitAccountingTestCase(APITestCase):
 
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-EXEMPT-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -296,7 +293,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         # Sale from Maharashtra to Karnataka -> IGST 18%
         inv = create_invoice(
             customer=self.customer_inter,
-            invoice_number="INV-IGST-001",
             created_by=self.admin,
             payment_type="credit",
             line_items=[
@@ -331,7 +327,6 @@ class GrossProfitAccountingTestCase(APITestCase):
 
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-INTRA-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -385,7 +380,6 @@ class GrossProfitAccountingTestCase(APITestCase):
 
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-WAC-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -415,7 +409,6 @@ class GrossProfitAccountingTestCase(APITestCase):
 
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-PARTIAL-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -447,7 +440,6 @@ class GrossProfitAccountingTestCase(APITestCase):
 
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-MULTI-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -479,7 +471,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         # 1. Posted invoice: 10 @ 100 -> rev 1000, cogs 500, profit 500
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-STATE-POSTED",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -490,7 +481,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         # 2. Draft invoice: 10 @ 100 -> MUST NOT affect profit
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-STATE-DRAFT",
             created_by=self.admin,
             payment_type="credit",
             state=Invoice.STATE_DRAFT,
@@ -502,7 +492,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         # 3. Cancelled invoice: 10 @ 100 -> MUST NOT affect profit
         cancelled_inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-STATE-CANCELLED",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -535,7 +524,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         # Sell 10 @ 20.00 -> COGS = 10 * 10 = 100, Revenue = 200, Profit = 100
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-HIST-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -584,7 +572,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         # 3 * 3.33 = 9.99 revenue. COGS: 3 * 2.11 = 6.33. Profit = 3.66.
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-PAISE-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -625,7 +612,6 @@ class GrossProfitAccountingTestCase(APITestCase):
 
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-DISC-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -657,7 +643,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         # Charged rate is ₹90 (negotiated, below default 100 and MRP 120)
         inv = create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-CUST-PRICE-001",
             created_by=self.admin,
             payment_type="credit",
             line_items=[
@@ -692,7 +677,6 @@ class GrossProfitAccountingTestCase(APITestCase):
 
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-CONSIST-001",
             created_by=self.admin,
             payment_type="cash",
             line_items=[
@@ -750,7 +734,6 @@ class GrossProfitAccountingTestCase(APITestCase):
         )
         create_invoice(
             customer=self.customer_intra,
-            invoice_number="INV-PROFIT-ON-COST",
             created_by=self.admin,
             payment_type="credit",
             tax_mode=tax_mode,

@@ -714,7 +714,7 @@ class InvoicePricingFieldsTests(APITestCase):
             created_by=self.admin, post=True,
         )
         invoice = create_invoice(
-            customer=self.customer, invoice_number="INV-PRICE-001",
+            customer=self.customer, 
             created_by=self.admin, payment_type="credit",
             line_items=[{"product": self.product, "quantity": "5", "rate_charged": "10.00", "tax_rate": "18"}],
         )
@@ -734,7 +734,7 @@ class InvoicePricingFieldsTests(APITestCase):
         )
         # Sell some
         invoice = create_invoice(
-            customer=self.customer, invoice_number="INV-COGS-SNAP",
+            customer=self.customer, 
             created_by=self.admin, payment_type="credit",
             line_items=[{"product": self.product, "quantity": "10", "rate_charged": "10.00", "tax_rate": "18"}],
         )
@@ -761,7 +761,7 @@ class InvoicePricingFieldsTests(APITestCase):
             created_by=self.admin, post=True,
         )
         create_invoice(
-            customer=self.customer, invoice_number="INV-REPORT-001",
+            customer=self.customer, 
             created_by=self.admin, payment_type="credit",
             line_items=[{"product": self.product, "quantity": "5", "rate_charged": "10.00", "tax_rate": "18"}],
         )
@@ -803,7 +803,7 @@ class InvoicePricingFieldsTests(APITestCase):
         self.assertEqual(purchase.line_items.get().rate, Decimal("6.50"))
         # Invoice works with explicit rate
         invoice = create_invoice(
-            customer=self.customer, invoice_number="INV-NOPRICE-001",
+            customer=self.customer, 
             created_by=self.admin, payment_type="credit",
             line_items=[{"product": product, "quantity": "5", "rate_charged": "10.00", "tax_rate": "18"}],
         )

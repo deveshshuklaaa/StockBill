@@ -5,6 +5,7 @@ import { deleteDraftInvoice, fetchInvoices, printInvoicePdf } from '../api/invoi
 import InvoiceItemSummaryModal from '../components/InvoiceItemSummaryModal'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
+import { invoiceLabel } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 
@@ -120,7 +121,7 @@ export default function InvoicesPage() {
       setInvoices((prev) => prev.filter((inv) => inv.id !== draftToDelete.id))
       setTotal((prev) => Math.max(0, prev - 1))
       setSelectedIds((prev) => prev.filter((id) => id !== draftToDelete.id))
-      setSuccess(`Draft invoice ${draftToDelete.invoice_number} deleted successfully.`)
+      setSuccess(`Draft invoice ${invoiceLabel(draftToDelete)} deleted successfully.`)
       setDraftToDelete(null)
     } catch (err) {
       setError(apiErrorMessage(err))
@@ -199,7 +200,7 @@ export default function InvoicesPage() {
           <td style={{ textAlign: 'center' }}>
             <input
               type="checkbox"
-              aria-label={`Select invoice ${invoice.invoice_number}`}
+              aria-label={`Select invoice ${invoiceLabel(invoice)}`}
               checked={selectedIds.includes(invoice.id)}
               onChange={() => toggleSelectInvoice(invoice.id)}
               disabled={invoice.state !== 'POSTED'}
@@ -211,7 +212,7 @@ export default function InvoicesPage() {
               className="text-button"
               to={invoice.state === 'DRAFT' ? `/invoices/new?edit=${invoice.id}` : `/invoices/${invoice.id}`}
             >
-              <strong>{invoice.invoice_number || `Draft #${invoice.id}`}</strong>
+              <strong>{invoiceLabel(invoice)}</strong>
             </Link>
           </td>
           <td>{invoice.invoice_date}</td>
@@ -227,7 +228,7 @@ export default function InvoicesPage() {
                   <Link
                     className="text-button"
                     to={`/invoices/new?edit=${invoice.id}`}
-                    aria-label={`View / Edit draft invoice ${invoice.invoice_number}`}
+                    aria-label={`View / Edit draft invoice ${invoiceLabel(invoice)}`}
                   >
                     View / Edit
                   </Link>
@@ -237,7 +238,7 @@ export default function InvoicesPage() {
                       className="text-button"
                       style={{ color: 'var(--red)' }}
                       onClick={() => { setError(''); setSuccess(''); setDraftToDelete(invoice) }}
-                      aria-label={`Delete draft invoice ${invoice.invoice_number}`}
+                      aria-label={`Delete draft invoice ${invoiceLabel(invoice)}`}
                     >
                       Delete Draft
                     </button>
@@ -247,15 +248,15 @@ export default function InvoicesPage() {
                 <Link className="text-button" to={`/invoices/${invoice.id}`}>View</Link>
               )}
               {invoice.state === 'POSTED' && <>
-                <button className="text-button" onClick={() => handlePrint(invoice.id, 'original', invoice.invoice_number)} aria-label={`Print original invoice ${invoice.invoice_number}`}>Original</button>
-                <button className="text-button" onClick={() => handlePrint(invoice.id, 'duplicate', invoice.invoice_number)} aria-label={`Print duplicate invoice ${invoice.invoice_number}`}>Duplicate</button>
-                <button className="text-button" onClick={() => handlePrint(invoice.id, 'reprint', invoice.invoice_number)} aria-label={`Print reprint invoice ${invoice.invoice_number}`}>Reprint</button>
+                <button className="text-button" onClick={() => handlePrint(invoice.id, 'original', invoice.invoice_number)} aria-label={`Print original invoice ${invoiceLabel(invoice)}`}>Original</button>
+                <button className="text-button" onClick={() => handlePrint(invoice.id, 'duplicate', invoice.invoice_number)} aria-label={`Print duplicate invoice ${invoiceLabel(invoice)}`}>Duplicate</button>
+                <button className="text-button" onClick={() => handlePrint(invoice.id, 'reprint', invoice.invoice_number)} aria-label={`Print reprint invoice ${invoiceLabel(invoice)}`}>Reprint</button>
               </>}
               {invoice.state === 'CANCELLED' && invoice.replacement_invoice && (
-                <Link className="text-button" to={`/invoices/${invoice.replacement_invoice}`} aria-label={`View replacement for invoice ${invoice.invoice_number}`}>Replacement →</Link>
+                <Link className="text-button" to={`/invoices/${invoice.replacement_invoice}`} aria-label={`View replacement for invoice ${invoiceLabel(invoice)}`}>Replacement →</Link>
               )}
               {invoice.amended_from_invoice && (
-                <Link className="text-button" to={`/invoices/${invoice.amended_from_invoice}`} aria-label={`View original invoice for ${invoice.invoice_number}`}>← Original</Link>
+                <Link className="text-button" to={`/invoices/${invoice.amended_from_invoice}`} aria-label={`View original invoice for ${invoiceLabel(invoice)}`}>← Original</Link>
               )}
             </div>
           </td>

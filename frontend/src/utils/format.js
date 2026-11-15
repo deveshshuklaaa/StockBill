@@ -104,3 +104,9 @@ export function variantSummary(product) {
   if (product.base_unit && product.base_unit !== 'piece') parts.push(product.base_unit)
   return parts.join(' · ')
 }
+
+// Drafts have no tax-invoice number: the server assigns one when posting.
+export function invoiceLabel(invoice) {
+  if (!invoice) return ''
+  return invoice.invoice_number || `Draft #${invoice.id}`
+}

@@ -57,8 +57,12 @@ class Invoice(models.Model):
     ]
 
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name="invoices")
-    invoice_number = models.CharField(max_length=50, unique=True)
-    invoice_date = models.DateField(auto_now_add=True)
+    # Null while DRAFT; assigned server-side at posting from the gapless
+    # per-FY series (billing.numbering). max_length stays 50 so legacy
+    # 18-character INV-YYYYMMDDHHMMSS numbers remain valid and unchanged.
+    invoice_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    # Draft-creation date until posting; posting sets it to the IST issue date.
+    invoice_date = models.DateField(default=timezone.localdate)
     payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPE_CHOICES, default=PAYMENT_TYPE_CREDIT)
     state = models.CharField(max_length=12, choices=STATE_CHOICES, default=STATE_POSTED)
     cancellation_reason = models.TextField(blank=True)
@@ -106,8 +110,20 @@ class Invoice(models.Model):
         related_name="amendments",
     )
 
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(state="DRAFT") | models.Q(invoice_number__isnull=False),
+                name="billing_invoice_number_required_unless_draft",
+            ),
+        ]
+
     def __str__(self):
-        return self.invoice_number
+        return self.display_number
+
+    @property
+    def display_number(self):
+        return self.invoice_number or f"Draft #{self.pk}"
 
     def delete(self, *args, **kwargs):
         if self.state != self.STATE_DRAFT:
@@ -120,13 +136,13 @@ class Invoice(models.Model):
     def save(self, *args, **kwargs):
         if self.pk is not None:
             stored = type(self).objects.only(
-                "payment_type", "customer_id", "total_amount", "state", "invoice_number"
+                "payment_type", "customer_id", "total_amount", "state", "invoice_number", "invoice_date"
             ).get(pk=self.pk)
             if self.state != stored.state and not getattr(self, "_allow_lifecycle_transition", False):
                 raise ValueError("Invoice lifecycle transitions must use domain services.")
             if stored.state in {self.STATE_POSTED, self.STATE_CANCELLED}:
                 immutable_fields = [
-                    "payment_type", "customer_id", "total_amount", "invoice_number",
+                    "payment_type", "customer_id", "total_amount", "invoice_number", "invoice_date",
                     "customer_name_snapshot", "customer_gstin_snapshot", "billing_address_snapshot",
                     "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
                     "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
@@ -185,7 +201,7 @@ class InvoiceLineItem(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.invoice.invoice_number} - {self.product.name}"
+        return f"{self.invoice.display_number} - {self.product.name}"
 
     def save(self, *args, **kwargs):
         if self.pk is not None:
@@ -209,8 +225,32 @@ class InvoiceLineItem(models.Model):
         return super().delete(*args, **kwargs)
 
 
+class InvoiceNumberCounter(models.Model):
+    """One row per financial year; serializes tax-invoice number assignment."""
+
+    fy_code = models.CharField(max_length=10, unique=True)
+    last_serial = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Invoice number counters cannot be deleted.")
+
+
+class CreditNoteNumberCounter(models.Model):
+    """One row per financial year; serializes credit-note number assignment."""
+
+    fy_code = models.CharField(max_length=10, unique=True)
+    last_serial = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Credit note number counters cannot be deleted.")
+
+
 class CreditNote(models.Model):
     original_invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="credit_notes")
+    # Assigned server-side at creation from the gapless per-FY series.
+    credit_note_number = models.CharField(max_length=16, unique=True)
     reason = models.CharField(max_length=255, blank=True)
     note_date = models.DateField(auto_now_add=True)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
@@ -218,7 +258,7 @@ class CreditNote(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"CreditNote for {self.original_invoice.invoice_number}"
+        return f"{self.credit_note_number} for {self.original_invoice.display_number}"
 
     def save(self, *args, **kwargs):
         if self.pk is not None:

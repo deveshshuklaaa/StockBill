@@ -69,7 +69,7 @@ export default function AppShell() {
             <span className="nav-symbol">M</span> Product Sales
           </NavLink>
           {isAdmin && <NavLink to="/reports/purchases" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-            <span className="nav-symbol">N</span> Purchases
+            <span className="nav-symbol">N</span> Purchase Summary
           </NavLink>}
           <NavLink to="/reports/inventory" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
             <span className="nav-symbol">E</span> Stock Valuation

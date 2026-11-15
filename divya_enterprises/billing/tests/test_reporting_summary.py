@@ -1,7 +1,9 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
 from billing.models import Invoice, Payment, BusinessProfile
@@ -55,7 +57,7 @@ class ReportingEndpointTests(APITestCase):
         response = client.post(
             "/api/invoices/",
             {
-                "invoice_number": number,
+                "notes": number,
                 "customer": self.customer.pk,
                 "payment_type": payment_type,
                 "line_items": [
@@ -72,7 +74,7 @@ class ReportingEndpointTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
-        return Invoice.objects.get(invoice_number=number)
+        return Invoice.objects.get(notes=number)
 
     def test_daily_sales_report_splits_cash_credit_and_tax(self):
         client = self.client_as(self.admin)
@@ -92,9 +94,10 @@ class ReportingEndpointTests(APITestCase):
 
     def test_prior_day_credit_invoice_payment_counts_as_today_cash_collection_only(self):
         client = self.client_as(self.admin)
-        invoice = self.invoice(client, "REPORT-PRIOR-CREDIT", self.product, 1)
-        yesterday = date.today() - timedelta(days=1)
-        Invoice.objects.filter(pk=invoice.pk).update(invoice_date=yesterday)
+        # Post it yesterday: invoice_date is the posting date and immutable once posted.
+        with mock.patch("django.utils.timezone.now", return_value=timezone.now() - timedelta(days=1)):
+            invoice = self.invoice(client, "REPORT-PRIOR-CREDIT", self.product, 1)
+        self.assertEqual(invoice.invoice_date, date.today() - timedelta(days=1))
         payment = Payment.objects.create(customer=self.customer, invoice=invoice, amount=invoice.total_amount, payment_date=date.today())
 
         response = client.get(f"/api/reports/daily-sales/?date={self.today}")

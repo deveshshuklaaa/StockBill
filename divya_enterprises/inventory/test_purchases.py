@@ -20,7 +20,7 @@ import uuid
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.test import TransactionTestCase
 from rest_framework.test import APIClient, APITestCase
 
@@ -32,6 +32,7 @@ from inventory.models import (
     CategoryAttribute,
     InventoryBalance,
     Product,
+    PurchaseIdempotencyKey,
     PurchaseInvoice,
     PurchaseLineItem,
     StockLedger,
@@ -855,6 +856,43 @@ class PurchaseIdempotencyTests(PurchaseAPITestBase):
         )
         self.assertEqual(second.status_code, 409, second.data)
 
+    def test_draft_created_with_idempotency_key_can_be_deleted(self):
+        # The UI always sends Idempotency-Key, so its drafts carry a key row.
+        created = self.client_as(self.admin).post(
+            "/api/purchase-invoices/",
+            self.purchase_payload(),
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        purchase_id = created.data["id"]
+        self.assertTrue(PurchaseIdempotencyKey.objects.filter(purchase_id=purchase_id).exists())
+
+        deleted = self.client_as(self.admin).delete(f"/api/purchase-invoices/{purchase_id}/")
+
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(PurchaseInvoice.objects.filter(pk=purchase_id).exists())
+        self.assertFalse(PurchaseIdempotencyKey.objects.filter(purchase_id=purchase_id).exists())
+
+    def test_posted_purchase_idempotency_key_stays_protected(self):
+        payload = self.purchase_payload()
+        payload["post"] = True
+        created = self.client_as(self.admin).post(
+            "/api/purchase-invoices/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        key = PurchaseIdempotencyKey.objects.get(purchase_id=created.data["id"])
+        with self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                PurchaseIdempotencyKey.objects.filter(pk=key.pk).delete()
+        with self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                PurchaseIdempotencyKey.objects.filter(pk=key.pk).update(request_hash="tampered")
+        self.assertTrue(PurchaseIdempotencyKey.objects.filter(pk=key.pk).exists())
+
 
 class PurchasePermissionTests(PurchaseAPITestBase):
     def test_staff_cannot_list_create_or_mutate_purchases(self):
@@ -1137,7 +1175,7 @@ class SalesRegressionTests(PurchaseAPITestBase):
         )
         customer = Customer.objects.create(name="Retail Customer", state_code="27")
         invoice_payload = {
-            "invoice_number": "SALES-REG-1001",
+            "notes": "SALES-REG-1001",
             "customer": customer.pk,
             "payment_type": "credit",
             "line_items": [
@@ -1160,7 +1198,7 @@ class SalesRegressionTests(PurchaseAPITestBase):
         )
         from billing.models import Invoice, InvoiceLineItem
 
-        sale_line = InvoiceLineItem.objects.get(invoice__invoice_number="SALES-REG-1001")
+        sale_line = InvoiceLineItem.objects.get(invoice__notes="SALES-REG-1001")
         # COGS must use the purchase-derived weighted average (6.50).
         self.assertEqual(sale_line.cost_price_snapshot, Decimal("6.50"))
         self.assertEqual(sale_line.cogs_amount, Decimal("65.00"))

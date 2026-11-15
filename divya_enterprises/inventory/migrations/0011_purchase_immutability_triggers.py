@@ -143,6 +143,11 @@ def backwards(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("inventory", "0010_purchase_lifecycle"),
+        # Re-creates triggers on billing tables, so billing's trigger
+        # migration must have run first. This was previously implicit
+        # (planner order only); declared explicitly once billing/0019
+        # began depending on the latest inventory migration.
+        ("billing", "0008_immutability_triggers"),
     ]
 
     operations = [migrations.RunPython(forwards, backwards)]

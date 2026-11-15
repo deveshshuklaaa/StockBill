@@ -19,11 +19,6 @@ function money(value) {
   return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 }
 
-function makeInvoiceNumber() {
-  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
-  return `INV-${stamp}`
-}
-
 function variantSummary(product) {
   const parts = []
   const weight = formatNetWeight(product?.attributes?.net_weight)
@@ -514,10 +509,8 @@ export default function NewInvoicePage() {
       }
 
       if (isAmendMode) {
-        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
         const payload = {
           reason: amendReason.trim(),
-          invoice_number: `INV-${stamp}`,
           customer: customer.id,
           payment_type: customer.id ? paymentType : 'cash',
           tax_mode: taxMode,
@@ -532,7 +525,6 @@ export default function NewInvoicePage() {
       }
 
       const payload = {
-        invoice_number: makeInvoiceNumber(),
         customer: customer.id,
         payment_type: customer.id ? paymentType : 'cash',
         tax_mode: taxMode,
@@ -612,10 +604,8 @@ export default function NewInvoicePage() {
       }
 
       if (isAmendMode) {
-        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
         const payload = {
           reason: amendReason.trim(),
-          invoice_number: `INV-${stamp}`,
           customer: customer.id,
           payment_type: customer.id ? paymentType : 'cash',
           tax_mode: taxMode,
@@ -632,7 +622,6 @@ export default function NewInvoicePage() {
 
       // Normal creation (draft or posted)
       const payload = {
-        invoice_number: makeInvoiceNumber(),
         customer: customer.id,
         payment_type: customer.id ? paymentType : 'cash',
         tax_mode: taxMode,

@@ -414,7 +414,7 @@ class CustomerAccountTests(APITestCase):
         response = self.client.post(
             "/api/invoices/",
             {
-                "invoice_number": "INV-CREDIT-LIMIT-1",
+                "notes": "INV-CREDIT-LIMIT-1",
                 "customer": self.customer.pk,
                 "payment_type": "credit",
                 "line_items": [
@@ -432,7 +432,7 @@ class CustomerAccountTests(APITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("customer", response.data)
-        self.assertFalse(Invoice.objects.filter(invoice_number="INV-CREDIT-LIMIT-1").exists())
+        self.assertFalse(Invoice.objects.filter(notes="INV-CREDIT-LIMIT-1").exists())
 
     def test_credit_limit_blocked_at_draft_posting(self):
         # Draft creation succeeds under a high limit; the limit is then
@@ -442,7 +442,7 @@ class CustomerAccountTests(APITestCase):
         draft = self.client.post(
             "/api/invoices/drafts/",
             {
-                "invoice_number": "INV-CREDIT-LIMIT-2",
+                "notes": "INV-CREDIT-LIMIT-2",
                 "customer": self.customer.pk,
                 "payment_type": "credit",
                 "line_items": [
@@ -465,7 +465,7 @@ class CustomerAccountTests(APITestCase):
         posted = self.client.post(f"/api/invoices/{draft.data['id']}/post/", {}, format="json")
         self.assertEqual(posted.status_code, 400)
         self.assertIn("customer", posted.data)
-        invoice = Invoice.objects.get(invoice_number="INV-CREDIT-LIMIT-2")
+        invoice = Invoice.objects.get(notes="INV-CREDIT-LIMIT-2")
         self.assertEqual(invoice.state, Invoice.STATE_DRAFT)
         self.product.refresh_from_db()
         self.assertEqual(self.product.current_stock, Decimal("100.000"))
@@ -494,7 +494,7 @@ class CustomerAccountTests(APITestCase):
         response = self.client.post(
             "/api/invoices/",
             {
-                "invoice_number": "INV-CASH-LIMIT",
+                "notes": "INV-CASH-LIMIT",
                 "customer": self.customer.pk,
                 "payment_type": "cash",
                 "line_items": [
@@ -511,7 +511,7 @@ class CustomerAccountTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
-        invoice = Invoice.objects.get(invoice_number="INV-CASH-LIMIT")
+        invoice = Invoice.objects.get(notes="INV-CASH-LIMIT")
         self.assertTrue(Payment.objects.filter(invoice=invoice).exists())
         # Cash sale is paid immediately; outstanding stays zero.
         report = self.client.get(f"/api/customers/{self.customer.pk}/report/")

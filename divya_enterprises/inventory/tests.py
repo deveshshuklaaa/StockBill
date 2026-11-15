@@ -49,7 +49,6 @@ class InventoryBalanceTests(TestCase):
         )
         invoice = create_invoice(
             customer=self.customer,
-            invoice_number="INV-LEDGER-1",
             created_by=self.user,
             payment_type="credit",
             line_items=[
@@ -93,7 +92,6 @@ class InventoryBalanceTests(TestCase):
         with self.assertRaises(Exception):
             create_invoice(
                 customer=self.customer,
-                invoice_number="INV-LEDGER-OVER",
                 created_by=self.user,
                 payment_type="credit",
                 line_items=[

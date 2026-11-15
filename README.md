@@ -84,7 +84,8 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 - **Payment Types & Credit Limits:** Support for immediate cash billing and credit sales validated against real-time customer available credit.
 - **Payments & Receipts (`Payment`):** Incremental payment collection linked to invoices and customer accounts with receipt generation.
 - **Payment Reversals:** Audited payment reversal workflow for bounced cheques or erroneous entries.
-- **Credit Notes (`CreditNote`):** Controlled return and credit allowance mechanism linked to original invoices without mutating posted invoices.
+- **Credit Notes (`CreditNote`):** Controlled return and credit allowance mechanism linked to original invoices without mutating posted invoices. Each note gets a consecutive per-financial-year number such as `CN/26-27/00001`.
+- **GST Document Numbering:** Tax-invoice numbers (`DE/26-27/00001`) are assigned by the server when an invoice is posted, never by the browser and never for drafts (drafts show as `Draft #<id>`). The series is consecutive, gapless, per financial year (IST), at most 16 characters (CGST Rules 46(b) and 53), and the invoice date is the posting date. Prefixes come from `INVOICE_NUMBER_PREFIX` / `CREDIT_NOTE_NUMBER_PREFIX` (defaults `DE` / `CN`). To start a year's series after an existing serial, run `python manage.py set_document_counter --doc invoice|credit_note --fy 26-27 --last-serial N`. Older `INV-…` invoices keep their original numbers.
 - **Invoice Amendment Workflow:** Supervised correction workflow allowing cancellation and re-issuance with explicit amendment lineage.
 - **Historical Invoice Snapshots:** Immutable capture of customer billing address, product name, SKU, HSN, rate, discount, and tax at the moment of posting.
 - **PDF Invoice Generation:** Server-rendered GST-compliant tax invoices generated via WeasyPrint.

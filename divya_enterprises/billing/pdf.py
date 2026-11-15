@@ -7,7 +7,7 @@ INVOICE_TEMPLATE = """
     <style>table, th, td { border: 1px solid black; border-collapse: collapse; padding: 5px; }</style>
   </head>
   <body>
-    <h1>Invoice: {{ invoice.invoice_number }}</h1>
+    <h1>Invoice: {{ invoice.invoice_number|default:'DRAFT' }}</h1>
     {% if invoice.state == 'CANCELLED' %}<h2>CANCELLED</h2><p>{{ invoice.cancellation_reason }}</p>{% endif %}
 
     <div>

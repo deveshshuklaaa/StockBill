@@ -202,7 +202,6 @@ class InvoiceItemSummaryTests(APITestCase):
         # - Manglori Mix: 15 pcs
         cls.inv_1 = create_invoice(
             customer=cls.customer,
-            invoice_number="INV-SUM-001",
             created_by=cls.admin,
             payment_type="credit",
             line_items=[
@@ -218,7 +217,6 @@ class InvoiceItemSummaryTests(APITestCase):
         # - Yellow Banana Chips: 12 pcs
         cls.inv_2 = create_invoice(
             customer=cls.customer,
-            invoice_number="INV-SUM-002",
             created_by=cls.admin,
             payment_type="credit",
             line_items=[
@@ -233,7 +231,6 @@ class InvoiceItemSummaryTests(APITestCase):
         # - Classic Salted 50g: 10 pcs
         cls.inv_3_box = create_invoice(
             customer=cls.customer,
-            invoice_number="INV-SUM-003",
             created_by=cls.admin,
             payment_type="credit",
             line_items=[
@@ -259,7 +256,6 @@ class InvoiceItemSummaryTests(APITestCase):
         # - Tasty Nuts: 14 pcs (e.g. promo or separate batch)
         cls.inv_4_multi = create_invoice(
             customer=cls.customer,
-            invoice_number="INV-SUM-004",
             created_by=cls.admin,
             payment_type="credit",
             line_items=[
@@ -272,7 +268,6 @@ class InvoiceItemSummaryTests(APITestCase):
         # - Yellow Banana Chips: 100 pcs (MUST NOT contribute)
         cls.inv_draft = create_invoice(
             customer=cls.customer,
-            invoice_number="INV-SUM-DRAFT-005",
             created_by=cls.admin,
             payment_type="credit",
             state=Invoice.STATE_DRAFT,
@@ -285,7 +280,6 @@ class InvoiceItemSummaryTests(APITestCase):
         # - Yellow Banana Chips: 50 pcs (MUST NOT contribute)
         cls.inv_cancelled = create_invoice(
             customer=cls.customer,
-            invoice_number="INV-SUM-CANCEL-006",
             created_by=cls.admin,
             payment_type="credit",
             line_items=[
@@ -313,7 +307,7 @@ class InvoiceItemSummaryTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         data = res.data
         self.assertEqual(data["invoice_count"], 1)
-        self.assertEqual(data["invoice_numbers"], ["INV-SUM-001"])
+        self.assertEqual(data["invoice_numbers"], [self.inv_1.invoice_number])
         self.assertEqual(data["total_products"], 3)
         self.assertEqual(Decimal(data["total_base_quantity"]), Decimal("22.000"))
 
@@ -340,7 +334,7 @@ class InvoiceItemSummaryTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         data = res.data
         self.assertEqual(data["invoice_count"], 2)
-        self.assertEqual(set(data["invoice_numbers"]), {"INV-SUM-001", "INV-SUM-002"})
+        self.assertEqual(set(data["invoice_numbers"]), {self.inv_1.invoice_number, self.inv_2.invoice_number})
         self.assertEqual(data["total_products"], 4)
         self.assertEqual(Decimal(data["total_base_quantity"]), Decimal("73.000"))
 
@@ -407,7 +401,7 @@ class InvoiceItemSummaryTests(APITestCase):
         data = res.data
         # Only inv_1 should be counted
         self.assertEqual(data["invoice_count"], 1)
-        self.assertEqual(data["invoice_numbers"], ["INV-SUM-001"])
+        self.assertEqual(data["invoice_numbers"], [self.inv_1.invoice_number])
         item_map = {item["product_id"]: item for item in data["items"]}
         # Banana chips should be 4 pcs, NOT 104 pcs
         self.assertEqual(Decimal(item_map[self.product_banana.id]["total_base_quantity"]), Decimal("4.000"))
@@ -424,7 +418,7 @@ class InvoiceItemSummaryTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         data = res.data
         self.assertEqual(data["invoice_count"], 1)
-        self.assertEqual(data["invoice_numbers"], ["INV-SUM-001"])
+        self.assertEqual(data["invoice_numbers"], [self.inv_1.invoice_number])
         item_map = {item["product_id"]: item for item in data["items"]}
         # Banana chips should be 4 pcs, NOT 54 pcs
         self.assertEqual(Decimal(item_map[self.product_banana.id]["total_base_quantity"]), Decimal("4.000"))
@@ -647,8 +641,8 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         wb = self._open_wb(res.content)
         ws = wb.active
         invoices_str = ws["B3"].value
-        self.assertIn("INV-SUM-001", invoices_str)
-        self.assertIn("INV-SUM-002", invoices_str)
+        self.assertIn(self.inv_1.invoice_number, invoices_str)
+        self.assertIn(self.inv_2.invoice_number, invoices_str)
 
     def test_3_correct_selected_invoice_numbers(self):
         """3. Correct selected invoice numbers rendered in header cell."""
@@ -661,7 +655,7 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         wb = self._open_wb(res.content)
         ws = wb.active
-        self.assertEqual(ws["B3"].value, "INV-SUM-001")
+        self.assertEqual(ws["B3"].value, self.inv_1.invoice_number)
 
     def test_4_correct_product_aggregation(self):
         """4. Correct product aggregation across selected invoices."""
@@ -729,9 +723,9 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         wb = self._open_wb(res.content)
         ws = wb.active
         invoices_str = ws["B3"].value
-        self.assertIn("INV-SUM-001", invoices_str)
-        self.assertNotIn("INV-SUM-DRAFT", invoices_str)
-        self.assertNotIn("INV-SUM-CANCELLED", invoices_str)
+        self.assertIn(self.inv_1.invoice_number, invoices_str)
+        self.assertNotIn("None", invoices_str)  # drafts are unnumbered and excluded
+        self.assertNotIn(self.inv_cancelled.invoice_number, invoices_str)
 
     def test_8_unauthorized_invoice_handling(self):
         """8. Anonymous and non-staff requests are rejected with 401/403."""
@@ -762,7 +756,7 @@ class InvoiceItemSummaryExportTests(InvoiceItemSummaryTests):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         wb = self._open_wb(res.content)
         ws = wb.active
-        self.assertEqual(ws["B3"].value, "INV-SUM-001")
+        self.assertEqual(ws["B3"].value, self.inv_1.invoice_number)
 
     def test_10_simplified_columns_present_and_unneeded_removed(self):
         """10. Simplified 4 columns present; SKU, Variant/Pack, Base Unit, Invoice Count removed."""

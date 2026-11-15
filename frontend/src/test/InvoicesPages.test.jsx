@@ -62,7 +62,7 @@ const PAGE_WITH_DRAFT = {
   results: [
     {
       id: 21,
-      invoice_number: 'INV-DRAFT-1',
+      invoice_number: null,
       invoice_date: '2026-09-12',
       customer_name: 'Draft Customer',
       payment_type: 'credit',
@@ -503,7 +503,7 @@ describe('InvoiceDetailPage', () => {
     const DRAFT_DETAIL = {
       ...DETAIL,
       id: 21,
-      invoice_number: 'INV-DRAFT-1',
+      invoice_number: null,
       state: 'DRAFT',
       created_by: 1,
     }
@@ -511,9 +511,9 @@ describe('InvoiceDetailPage', () => {
     it('shows Delete Draft for DRAFT rows and hides it for POSTED and CANCELLED rows on list', async () => {
       vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue(PAGE_WITH_DRAFT)
       mountPage('list')
-      await screen.findByText('INV-DRAFT-1')
+      await screen.findByText('Draft #21')
 
-      const deleteBtn = screen.getByRole('button', { name: /Delete draft invoice INV-DRAFT-1/i })
+      const deleteBtn = screen.getByRole('button', { name: /Delete draft invoice Draft #21/i })
       expect(deleteBtn).toBeInTheDocument()
 
       expect(screen.queryByRole('button', { name: /Delete draft invoice INV-POSTED-1/i })).not.toBeInTheDocument()
@@ -526,9 +526,9 @@ describe('InvoiceDetailPage', () => {
       const deleteSpy = vi.spyOn(invoicesApi, 'deleteDraftInvoice').mockResolvedValue({ detail: 'Draft invoice deleted successfully.' })
 
       mountPage('list')
-      await screen.findByText('INV-DRAFT-1')
+      await screen.findByText('Draft #21')
 
-      const deleteBtn = screen.getByRole('button', { name: /Delete draft invoice INV-DRAFT-1/i })
+      const deleteBtn = screen.getByRole('button', { name: /Delete draft invoice Draft #21/i })
       await user.click(deleteBtn)
 
       expect(screen.getByRole('heading', { name: 'Delete Draft Invoice?' })).toBeInTheDocument()
@@ -539,7 +539,7 @@ describe('InvoiceDetailPage', () => {
 
       expect(deleteSpy).toHaveBeenCalledWith(21)
       await waitFor(() => {
-        expect(screen.queryByText('INV-DRAFT-1')).not.toBeInTheDocument()
+        expect(screen.queryByText('Draft #21')).not.toBeInTheDocument()
       })
       expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument()
     })
@@ -547,7 +547,7 @@ describe('InvoiceDetailPage', () => {
     it('shows Delete draft button on detail page for DRAFT', async () => {
       vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
       mountPage('detail', { route: '/invoices/21' })
-      await screen.findByText('INV-DRAFT-1')
+      await screen.findByText('Draft #21')
       expect(screen.getByRole('button', { name: 'Delete draft' })).toBeInTheDocument()
     })
 
@@ -565,7 +565,7 @@ describe('InvoiceDetailPage', () => {
       vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue({ count: 0, results: [] })
 
       mountPage('detail', { route: '/invoices/21' })
-      await screen.findByText('INV-DRAFT-1')
+      await screen.findByText('Draft #21')
 
       await user.click(screen.getByRole('button', { name: 'Delete draft' }))
 
@@ -586,9 +586,9 @@ describe('InvoiceDetailPage', () => {
       })
 
       mountPage('list')
-      await screen.findByText('INV-DRAFT-1')
+      await screen.findByText('Draft #21')
 
-      await user.click(screen.getByRole('button', { name: /Delete draft invoice INV-DRAFT-1/i }))
+      await user.click(screen.getByRole('button', { name: /Delete draft invoice Draft #21/i }))
       await screen.findByRole('heading', { name: 'Delete Draft Invoice?' })
       const confirmBtn = screen.getAllByRole('button', { name: 'Delete Draft' }).find(b => b.classList.contains('primary-button'))
       await user.click(confirmBtn)
@@ -596,7 +596,7 @@ describe('InvoiceDetailPage', () => {
       await waitFor(() => {
         expect(screen.getByText(/You do not have permission to perform this action/i)).toBeInTheDocument()
       })
-      expect(screen.getByText('INV-DRAFT-1')).toBeInTheDocument()
+      expect(screen.getByText('Draft #21')).toBeInTheDocument()
     })
   })
 
@@ -606,7 +606,7 @@ describe('InvoiceDetailPage', () => {
       id: 21,
       customer: 42,
       customer_name: 'J K Traders',
-      invoice_number: 'INV-DRAFT-1',
+      invoice_number: null,
       notes: 'Urgent delivery draft note',
       state: 'DRAFT',
       created_by: 1,
@@ -625,15 +625,15 @@ describe('InvoiceDetailPage', () => {
     it('shows View / Edit link and clickable invoice number for DRAFT rows on list', async () => {
       vi.spyOn(invoicesApi, 'fetchInvoices').mockResolvedValue(PAGE_WITH_DRAFT)
       mountPage('list')
-      await screen.findByText('INV-DRAFT-1')
+      await screen.findByText('Draft #21')
 
       // Draft row has View / Edit action pointing to /invoices/new?edit=21
-      const viewEditLink = screen.getByRole('link', { name: /View \/ Edit draft invoice INV-DRAFT-1/i })
+      const viewEditLink = screen.getByRole('link', { name: /View \/ Edit draft invoice Draft #21/i })
       expect(viewEditLink).toBeInTheDocument()
       expect(viewEditLink.getAttribute('href')).toBe('/invoices/new?edit=21')
 
       // Clickable invoice number links to draft editor for DRAFT
-      const draftNumberLink = screen.getByRole('link', { name: 'INV-DRAFT-1' })
+      const draftNumberLink = screen.getByRole('link', { name: 'Draft #21' })
       expect(draftNumberLink.getAttribute('href')).toBe('/invoices/new?edit=21')
 
       // Non-draft rows have View link and link to detail page
@@ -646,7 +646,7 @@ describe('InvoiceDetailPage', () => {
     it('shows View / Edit draft link on detail page for DRAFT', async () => {
       vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
       mountPage('detail', { route: '/invoices/21' })
-      await screen.findByText('INV-DRAFT-1')
+      await screen.findByText('Draft #21')
       const editLink = screen.getByRole('link', { name: 'View / Edit draft' })
       expect(editLink).toBeInTheDocument()
       expect(editLink.getAttribute('href')).toBe('/invoices/new?edit=21')
@@ -690,7 +690,7 @@ describe('InvoiceDetailPage', () => {
     it('modifies draft invoice and saves changes via updateDraftInvoice', async () => {
       const user = userEvent.setup()
       vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
-      const updateSpy = vi.spyOn(invoicesApi, 'updateDraftInvoice').mockResolvedValue({ id: 21, invoice_number: 'INV-DRAFT-1' })
+      const updateSpy = vi.spyOn(invoicesApi, 'updateDraftInvoice').mockResolvedValue({ id: 21, invoice_number: null })
       vi.spyOn(client.default, 'get').mockImplementation((url) => {
         if (url === '/customers/') return Promise.resolve({ data: { results: [] } })
         if (url === '/customers/42/') return Promise.resolve({ data: { id: 42, name: 'J K Traders', state_code: '27' } })
@@ -728,7 +728,7 @@ describe('InvoiceDetailPage', () => {
     it('posts draft invoice directly from reopened editor', async () => {
       const user = userEvent.setup()
       vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DRAFT_DETAIL)
-      const updateSpy = vi.spyOn(invoicesApi, 'updateDraftInvoice').mockResolvedValue({ id: 21, invoice_number: 'INV-DRAFT-1' })
+      const updateSpy = vi.spyOn(invoicesApi, 'updateDraftInvoice').mockResolvedValue({ id: 21, invoice_number: null })
       const postSpy = vi.spyOn(invoicesApi, 'postInvoice').mockResolvedValue({ id: 21, state: 'POSTED' })
       vi.spyOn(client.default, 'get').mockImplementation((url) => {
         if (url === '/customers/') return Promise.resolve({ data: { results: [] } })

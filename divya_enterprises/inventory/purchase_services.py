@@ -25,6 +25,7 @@ from .models import (
     InventoryBalance,
     Product,
     ProductAttributeValue,
+    PurchaseIdempotencyKey,
     PurchaseInvoice,
     PurchaseLineItem,
     StockLedger,
@@ -640,5 +641,9 @@ def delete_purchase(*, purchase_id):
             {"state": "Only draft purchases can be deleted."}
         )
     pk = purchase.pk
+    # A draft created through the API carries its Idempotency-Key record,
+    # which PROTECTs the purchase. Drop it with the draft (the DB trigger
+    # permits this only while the purchase is still DRAFT).
+    PurchaseIdempotencyKey.objects.filter(purchase_id=pk).delete()
     purchase.delete()
     return pk

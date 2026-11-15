@@ -145,7 +145,7 @@ def _customer_statement(customer):
         rows.append(
             {
                 "date": credit_note.note_date,
-                "reference": f"Credit note #{credit_note.pk} · {credit_note.original_invoice.invoice_number}",
+                "reference": f"Credit note {credit_note.credit_note_number} · {credit_note.original_invoice.invoice_number}",
                 "type": "CREDIT_NOTE",
                 "debit": None,
                 "credit": credit_note.total_amount,
