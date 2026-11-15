@@ -158,10 +158,34 @@ export default function PurchasesPage() {
     </div>
 
     {draftToDelete && (
-      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="delete-draft-title">
-        <div className="modal-dialog">
-          <h3 id="delete-draft-title">Delete Draft Purchase</h3>
-          <p>
+      <div
+        className="modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-draft-title"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}
+      >
+        <div
+          className="modal-content"
+          style={{
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            padding: '1.5rem',
+            maxWidth: '450px',
+            width: '90%',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
+          }}
+        >
+          <h3 id="delete-draft-title" style={{ marginTop: 0, color: '#111827' }}>Delete Draft Purchase</h3>
+          <p style={{ color: '#4b5563', lineHeight: 1.5 }}>
             Are you sure you want to permanently delete draft purchase{' '}
             <strong>{draftToDelete.purchase_number || `Draft #${draftToDelete.id}`}</strong> from supplier{' '}
             <strong>{draftToDelete.supplier_name}</strong>?

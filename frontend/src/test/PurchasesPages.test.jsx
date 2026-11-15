@@ -155,6 +155,36 @@ describe('Purchases List and Draft Reopen / Edit Flow', () => {
     expect(screen.queryByRole('link', { name: /View \/ Edit draft purchase 44/i })).not.toBeInTheDocument()
   })
 
+  it('1b. Delete on a draft row opens a visible confirmation overlay and deletes on confirm', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(purchasesApi, 'fetchPurchases').mockResolvedValue({
+      count: 2,
+      results: [SAMPLE_DRAFT_PURCHASE, SAMPLE_POSTED_PURCHASE],
+    })
+    const deleteSpy = vi.spyOn(purchasesApi, 'deletePurchase').mockResolvedValue(undefined)
+
+    render(
+      <MemoryRouter>
+        <PurchasesPage />
+      </MemoryRouter>
+    )
+
+    await user.click(await screen.findByRole('button', { name: /Delete draft purchase 42/i }))
+
+    // The dialog must be a fixed, on-top overlay; unstyled, it rendered
+    // below the table and the Delete button looked like it did nothing.
+    const dialog = screen.getByRole('dialog', { name: 'Delete Draft Purchase' })
+    expect(dialog.style.position).toBe('fixed')
+    expect(Number(dialog.style.zIndex)).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('button', { name: 'Delete Draft' }))
+
+    expect(deleteSpy).toHaveBeenCalledWith(42)
+    await waitFor(() => expect(screen.queryByText('Draft #42')).not.toBeInTheDocument())
+    expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
   it('2. Reopening a draft loads all previously entered information into the editor', async () => {
     vi.spyOn(purchasesApi, 'fetchPurchase').mockResolvedValue(SAMPLE_DRAFT_PURCHASE)
     vi.spyOn(api, 'get').mockImplementation((url) => {
