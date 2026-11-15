@@ -7,11 +7,41 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import IsAdminOrReadOnly
+from accounts.permissions import IsAdminOrReadOnly, IsAdminUser
+from billing.csv_export import csv_response, export_filename, money, yes_no
 from billing.models import AuditLog, CreditNote, Payment
 from inventory.models import Product
 from .models import Customer, CustomerMRPPricing
 from .serializers import CustomerMRPPricingSerializer, CustomerSerializer
+
+
+def filter_customers(queryset, params):
+    """Search / status filters shared by the customer list and its CSV exports."""
+    params = params or {}
+    search = (params.get("search") or "").strip()
+    if search:
+        queryset = queryset.filter(
+            Q(name__icontains=search)
+            | Q(contact_info__icontains=search)
+            | Q(gstin__icontains=search)
+        )
+    status = (params.get("is_active") or "").strip().lower()
+    if status:
+        if status not in {"true", "false"}:
+            raise ValidationError({"is_active": ["is_active must be 'true' or 'false'."]})
+        queryset = queryset.filter(is_active=status == "true")
+    return queryset
+
+
+def _export_filters(params):
+    """The list filters actually applied, for the export and its audit entry."""
+    params = params or {}
+    applied = {}
+    for key in ("search", "is_active"):
+        value = (params.get(key) or "").strip()
+        if value:
+            applied[key] = value
+    return applied
 
 
 class CustomerListCreateView(generics.ListCreateAPIView):
@@ -22,20 +52,7 @@ class CustomerListCreateView(generics.ListCreateAPIView):
         # -id tiebreak: created_at shares a value across rows created in one
         # transaction/transactional test setup, so ordering needs a stable key.
         queryset = Customer.objects.all().order_by("-created_at", "-id")
-        params = self.request.query_params or {}
-        search = (params.get("search") or "").strip()
-        if search:
-            queryset = queryset.filter(
-                Q(name__icontains=search)
-                | Q(contact_info__icontains=search)
-                | Q(gstin__icontains=search)
-            )
-        status = (params.get("is_active") or "").strip().lower()
-        if status:
-            if status not in {"true", "false"}:
-                raise ValidationError({"is_active": ["is_active must be 'true' or 'false'."]})
-            queryset = queryset.filter(is_active=status == "true")
-        return queryset
+        return filter_customers(queryset, self.request.query_params)
 
     def perform_create(self, serializer):
         customer = serializer.save()
@@ -44,6 +61,101 @@ class CustomerListCreateView(generics.ListCreateAPIView):
             action="customer_created",
             entity_type="Customer",
             entity_id=customer.pk,
+        )
+
+
+class CustomerExportView(APIView):
+    """Admin-only CSV of customer registration details (no balances).
+
+    Columns are exactly the fields captured on the customer form. Honours the
+    list page's search / status filters. Bulk personal data, so every export
+    is written to the AuditLog.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    HEADERS = [
+        "Name", "Phone", "Customer type", "GST registration", "GSTIN", "Address",
+        "Shipping address", "State", "State code", "Pincode", "Credit limit",
+        "Credit days", "Regular customer",
+    ]
+    TEXT_COLUMNS = {
+        "Name", "Phone", "Customer type", "GST registration", "GSTIN", "Address",
+        "Shipping address", "State", "State code", "Pincode",
+    }
+    # Kept as text in Excel (no 9.82E+09 phones, no lost leading zeros).
+    EXCEL_TEXT_COLUMNS = {"Phone", "State code", "Pincode"}
+
+    def get(self, request):
+        filters = _export_filters(request.query_params)
+        customers = filter_customers(Customer.objects.all(), filters).order_by("name", "id")
+        rows = [
+            [
+                customer.name,
+                customer.contact_info,
+                customer.get_customer_type_display(),
+                customer.get_gst_registration_type_display(),
+                customer.gstin,
+                customer.billing_address,
+                customer.shipping_address,
+                customer.state,
+                customer.state_code,
+                customer.pincode,
+                money(customer.credit_limit),
+                str(customer.credit_days),
+                yes_no(customer.is_regular),
+            ]
+            for customer in customers
+        ]
+        AuditLog.objects.create(
+            user=request.user,
+            action="customers_exported",
+            entity_type="Customer",
+            entity_id=0,
+            metadata={"row_count": len(rows), "filters": filters},
+        )
+        return csv_response(
+            headers=self.HEADERS,
+            rows=rows,
+            filename=export_filename("customers"),
+            text_columns=self.TEXT_COLUMNS,
+            excel_text_columns=self.EXCEL_TEXT_COLUMNS,
+        )
+
+
+class CustomerOutstandingExportView(APIView):
+    """Admin-only CSV: customer name, address, outstanding amount.
+
+    The amount is Customer.outstanding_balance, the same property the rest of
+    the app uses (no second formula). Only customers whose outstanding is not
+    zero are included, sorted by name, honouring the list page's filters.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+
+    HEADERS = ["Customer name", "Address", "Outstanding amount"]
+    TEXT_COLUMNS = {"Customer name", "Address"}
+
+    def get(self, request):
+        filters = _export_filters(request.query_params)
+        customers = filter_customers(Customer.objects.all(), filters).order_by("name", "id")
+        rows = []
+        for customer in customers:
+            outstanding = customer.outstanding_balance
+            if outstanding != 0:
+                rows.append([customer.name, customer.billing_address, money(outstanding)])
+        AuditLog.objects.create(
+            user=request.user,
+            action="customer_outstanding_exported",
+            entity_type="Customer",
+            entity_id=0,
+            metadata={"row_count": len(rows), "filters": filters},
+        )
+        return csv_response(
+            headers=self.HEADERS,
+            rows=rows,
+            filename=export_filename("customer-outstanding"),
+            text_columns=self.TEXT_COLUMNS,
         )
 
 

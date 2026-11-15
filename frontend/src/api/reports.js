@@ -1,4 +1,5 @@
 import api from './client'
+import { defaultCsvName, saveBlobResponse } from './download'
 
 // All report endpoints are read-only GETs; totals come from backend
 // aggregation, never computed in React.
@@ -99,4 +100,14 @@ export async function exportSalesGstReportXlsx({ from, to }) {
   link.remove()
   URL.revokeObjectURL(url)
   return blob
+}
+
+export async function exportInventoryCsv({ warehouse = '', category = '', isActive = '', search = '' } = {}) {
+  const params = {}
+  if (warehouse) params.warehouse = warehouse
+  if (category) params.category = category
+  if (isActive) params.is_active = isActive
+  if (search) params.search = search
+  const response = await api.get('/reports/inventory/export/', { params, responseType: 'blob' })
+  return saveBlobResponse(response, defaultCsvName('inventory'), 'text/csv')
 }

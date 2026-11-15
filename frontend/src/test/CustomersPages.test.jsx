@@ -181,6 +181,36 @@ describe('CustomersPage', () => {
     })
   })
 
+  it('shows both export buttons to admins and sends the current filters', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(customersApi, 'fetchCustomers').mockResolvedValue(LIST_PAGE_1)
+    const detailsSpy = vi.spyOn(customersApi, 'exportCustomersCsv').mockResolvedValue('stockbill-customers.csv')
+    const outstandingSpy = vi.spyOn(customersApi, 'exportCustomerOutstandingCsv').mockResolvedValue('stockbill-customer-outstanding.csv')
+
+    mountPage('list')
+    await screen.findByText('J K Traders')
+    await user.selectOptions(screen.getByLabelText('Filter by status'), 'true')
+    await user.type(screen.getByLabelText('Search customers'), 'J K')
+    await waitFor(() => expect(customersApi.fetchCustomers).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'J K', isActive: 'true' })))
+
+    await user.click(screen.getByRole('button', { name: 'Export customer details CSV' }))
+    expect(detailsSpy).toHaveBeenCalledWith({ search: 'J K', isActive: 'true' })
+    await user.click(screen.getByRole('button', { name: 'Export outstanding amounts CSV' }))
+    expect(outstandingSpy).toHaveBeenCalledWith({ search: 'J K', isActive: 'true' })
+  })
+
+  it('hides both export buttons from staff', async () => {
+    vi.spyOn(customersApi, 'fetchCustomers').mockResolvedValue(LIST_PAGE_1)
+    const detailsSpy = vi.spyOn(customersApi, 'exportCustomersCsv')
+
+    mountPage('list', { role: 'staff' })
+    await screen.findByText('J K Traders')
+    expect(screen.queryByRole('button', { name: 'Export customer details CSV' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Export outstanding amounts CSV' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Export/ })).not.toBeInTheDocument()
+    expect(detailsSpy).not.toHaveBeenCalled()
+  })
+
   it('shows the empty state when no customers match', async () => {
     vi.spyOn(customersApi, 'fetchCustomers').mockResolvedValue({
       count: 0, next: null, previous: null, results: [],

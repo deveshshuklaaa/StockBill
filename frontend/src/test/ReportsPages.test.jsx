@@ -276,6 +276,42 @@ describe('InventoryReportPage', () => {
       expect(captured.isActive).toBe('true')
     })
   })
+
+  it('Export CSV sends the currently applied filters', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(reportsApi, 'fetchInventoryReport').mockResolvedValue(INVENTORY)
+    vi.spyOn(warehousesApi, 'fetchWarehouses').mockResolvedValue(warehousesList)
+    let resolveExport
+    const exportSpy = vi.spyOn(reportsApi, 'exportInventoryCsv').mockImplementation(
+      () => new Promise((resolve) => { resolveExport = resolve })
+    )
+
+    mount(<InventoryReportPage />)
+    await screen.findAllByText('₹924.00')
+    await user.selectOptions(screen.getByLabelText('Filter by warehouse'), '1')
+    await user.selectOptions(screen.getByLabelText('Filter by status'), 'true')
+    await user.type(screen.getByLabelText('Search products'), 'chips')
+    await waitFor(() => expect(reportsApi.fetchInventoryReport).toHaveBeenLastCalledWith({ warehouse: '1', isActive: 'true', search: 'chips' }))
+
+    const button = screen.getByRole('button', { name: 'Export stock CSV' })
+    await user.click(button)
+    expect(exportSpy).toHaveBeenCalledWith({ warehouse: '1', isActive: 'true', search: 'chips' })
+    expect(button).toBeDisabled()
+    resolveExport('stockbill-inventory.csv')
+    await waitFor(() => expect(button).not.toBeDisabled())
+  })
+
+  it('shows an export error from the API', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(reportsApi, 'fetchInventoryReport').mockResolvedValue(INVENTORY)
+    vi.spyOn(warehousesApi, 'fetchWarehouses').mockResolvedValue(warehousesList)
+    vi.spyOn(reportsApi, 'exportInventoryCsv').mockRejectedValue({ response: { status: 400, data: { detail: 'warehouse does not exist.' } } })
+
+    mount(<InventoryReportPage />)
+    await screen.findAllByText('₹924.00')
+    await user.click(screen.getByRole('button', { name: 'Export stock CSV' }))
+    expect(await screen.findByText(/warehouse does not exist/)).toBeInTheDocument()
+  })
 })
 
 describe('StockMovementReportPage', () => {
