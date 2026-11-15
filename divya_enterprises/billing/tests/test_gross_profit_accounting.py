@@ -191,8 +191,8 @@ class GrossProfitAccountingTestCase(APITestCase):
         self.assertEqual(profit_data["gross_profit"], Decimal("69.00"))
         self.assertEqual(profit_data["sales_gst"], Decimal("36.75"))
         self.assertEqual(profit_data["total_sales_value"], Decimal("771.75"))
-        # Margin % = 69.00 / 735.00 * 100 = 9.3877... -> 9.39%
-        self.assertEqual(profit_data["gross_margin_percent"], Decimal("9.4"))
+        # Business Margin % = 69.00 / 666.00 * 100 = 10.360... -> 10.4%.
+        self.assertEqual(profit_data["gross_margin_percent"], Decimal("10.4"))
 
         # Explicit assertion that profit != 771.75 - 666.00 (105.75)
         self.assertNotEqual(profit_data["gross_profit"], Decimal("105.75"))
@@ -707,6 +707,7 @@ class GrossProfitAccountingTestCase(APITestCase):
         self.assertEqual(Decimal(str(res_profit.data["gross_profit"])), Decimal("400.00"))
         self.assertEqual(Decimal(str(res_profit.data["revenue"])), Decimal("1000.00"))
         self.assertEqual(Decimal(str(res_profit.data["cogs"])), Decimal("600.00"))
+        self.assertEqual(res_profit.data["gross_margin_percent"], Decimal("66.7"))
 
         # 2. Dashboard Report View
         res_dash = self.client.get(f"/api/reports/dashboard/?from={TODAY}&to={TODAY}")
@@ -714,6 +715,7 @@ class GrossProfitAccountingTestCase(APITestCase):
         self.assertEqual(Decimal(str(res_dash.data["period"]["gross_profit"])), Decimal("400.00"))
         self.assertEqual(Decimal(str(res_dash.data["period"]["revenue"])), Decimal("1000.00"))
         self.assertEqual(Decimal(str(res_dash.data["period"]["cogs"])), Decimal("600.00"))
+        self.assertEqual(res_dash.data["period"]["gross_margin_percent"], Decimal("66.7"))
 
         # 3. Product Sales Report View
         res_prod = self.client.get(f"/api/reports/products/?from={TODAY}&to={TODAY}")
@@ -726,6 +728,7 @@ class GrossProfitAccountingTestCase(APITestCase):
         self.assertEqual(Decimal(str(row["taxable_sales_revenue"])), Decimal("1000.00"))
         self.assertEqual(Decimal(str(row["cogs"])), Decimal("600.00"))
         self.assertEqual(Decimal(str(row["gross_profit"])), Decimal("400.00"))
+        self.assertEqual(row["margin_percent"], Decimal("66.7"))
 
         # 4. Sales Summary View
         res_summary = self.client.get(f"/api/reports/sales/?from={TODAY}&to={TODAY}")
@@ -733,3 +736,68 @@ class GrossProfitAccountingTestCase(APITestCase):
         self.assertEqual(Decimal(str(res_summary.data["gross_profit"])), Decimal("400.00"))
         self.assertEqual(Decimal(str(res_summary.data["taxable_sales"])), Decimal("1000.00"))
         self.assertEqual(Decimal(str(res_summary.data["cogs"])), Decimal("600.00"))
+
+    def _assert_profit_on_cost(self, *, cost, rate, quantity, revenue, cogs, profit, percent, tax_mode=Invoice.TAX_MODE_EXCLUSIVE):
+        """Exercise posting and all percentage-report consumers with synthetic data."""
+        product = self._create_product("Profit on cost", rate, self.tax_5)
+        create_purchase(
+            supplier=self.supplier_intra,
+            warehouse=self.warehouse,
+            invoice_date=TODAY,
+            line_items=[{"product": product, "quantity": Decimal(quantity), "rate": Decimal(cost)}],
+            created_by=self.admin,
+            post=True,
+        )
+        create_invoice(
+            customer=self.customer_intra,
+            invoice_number="INV-PROFIT-ON-COST",
+            created_by=self.admin,
+            payment_type="credit",
+            tax_mode=tax_mode,
+            line_items=[{"product": product, "quantity": Decimal(quantity), "rate_charged": Decimal(rate)}],
+        )
+        expected_percent = Decimal(percent) if percent is not None else None
+        for endpoint in ("profit", "dashboard", "products"):
+            response = self.client.get(f"/api/reports/{endpoint}/?from={TODAY}&to={TODAY}")
+            self.assertEqual(response.status_code, 200)
+            row = response.data
+            if endpoint == "dashboard":
+                row = row["period"]
+            elif endpoint == "products":
+                row = row["products"][0]
+            self.assertEqual(row["taxable_sales_revenue"], Decimal(revenue))
+            self.assertEqual(row["taxable_cogs"], Decimal(cogs))
+            self.assertEqual(row["gross_profit"], Decimal(profit))
+            field = "margin_percent" if endpoint == "products" else "gross_margin_percent"
+            self.assertEqual(row[field], expected_percent)
+
+    def test_profit_percentage_uses_cost_for_108_piece_sale(self):
+        self._assert_profit_on_cost(
+            cost="6.66", rate="8.10", quantity="108", revenue="874.80",
+            cogs="719.28", profit="155.52", percent="21.6",
+        )
+
+    def test_inclusive_sale_percentage_excludes_gst_from_revenue_and_cost(self):
+        self._assert_profit_on_cost(
+            cost="175.66", rate="199.20", quantity="12", revenue="2276.57",
+            cogs="2107.92", profit="168.65", percent="8.0",
+            tax_mode=Invoice.TAX_MODE_INCLUSIVE,
+        )
+
+    def test_zero_cost_sale_has_undefined_percentage(self):
+        self._assert_profit_on_cost(
+            cost="0.00", rate="8.10", quantity="10", revenue="81.00",
+            cogs="0.00", profit="81.00", percent=None,
+        )
+
+    def test_loss_is_a_negative_percentage_of_cost(self):
+        self._assert_profit_on_cost(
+            cost="10.00", rate="8.00", quantity="10", revenue="80.00",
+            cogs="100.00", profit="-20.00", percent="-20.0",
+        )
+
+    def test_zero_revenue_with_positive_cost_is_a_complete_loss(self):
+        self._assert_profit_on_cost(
+            cost="10.00", rate="0.00", quantity="10", revenue="0.00",
+            cogs="100.00", profit="-100.00", percent="-100.0",
+        )

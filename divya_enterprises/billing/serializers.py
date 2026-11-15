@@ -3,6 +3,7 @@ from rest_framework import serializers
 from decimal import Decimal
 
 from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
+from .profit import get_invoice_profit_data
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
@@ -146,6 +147,17 @@ class InvoiceSerializer(serializers.ModelSerializer):
             state=self.context.get("invoice_state", Invoice.STATE_POSTED),
             **validated_data,
         )
+
+
+class InvoiceDetailSerializer(InvoiceSerializer):
+    profit_summary = serializers.SerializerMethodField()
+
+    class Meta(InvoiceSerializer.Meta):
+        fields = InvoiceSerializer.Meta.fields + ["profit_summary"]
+        read_only_fields = InvoiceSerializer.Meta.read_only_fields + ["profit_summary"]
+
+    def get_profit_summary(self, obj):
+        return get_invoice_profit_data(obj)
 
 
 class CreditNoteLineItemSerializer(serializers.ModelSerializer):

@@ -440,14 +440,14 @@ class ProductSalesReportTests(ReportTestBase):
     def test_historical_cogs_not_current_cost(self):
         # Historical COGS: 10 × 6 = 60 (WAC at sale time).
         # Tax-exclusive revenue: 100.00. Tax-exclusive profit: 100.00 - 60.00 = 40.00.
-        # Margin %: 40.00 / 100.00 = 40.0%.
+        # Business Margin % uses historical cost: 40.00 / 60.00 = 66.7%.
         response = self.client.get(
             f"/api/reports/products/?from={TODAY}&to={TODAY}"
         ).data
         rows = {row["product_name"]: row for row in response["products"]}
         self.assertEqual(rows["Report Product A"]["cogs"], Decimal("60.00"))
         self.assertEqual(rows["Report Product A"]["gross_profit"], Decimal("40.00"))
-        self.assertEqual(rows["Report Product A"]["margin_percent"], Decimal("40.0"))
+        self.assertEqual(rows["Report Product A"]["margin_percent"], Decimal("66.7"))
 
     def test_no_current_cost_contamination_after_wac_change(self):
         # Receive more stock at a different rate so the WAC moves.
@@ -634,8 +634,8 @@ class ProfitReportTests(ReportTestBase):
         self.assertEqual(response.data["cogs"], Decimal("76.00"))
         # Gross profit: 140.00 - 76.00 = 64.00
         self.assertEqual(response.data["gross_profit"], Decimal("64.00"))
-        # Gross margin %: (64.00 / 140.00) * 100 = 45.714...% -> 45.7%
-        self.assertEqual(response.data["gross_margin_percent"], Decimal("45.7"))
+        # Business Margin %: (64.00 / 76.00) * 100 = 84.210...% -> 84.2%
+        self.assertEqual(response.data["gross_margin_percent"], Decimal("84.2"))
 
     def test_cancelled_invoices_excluded(self):
         # The cancelled sale (3 × A) would add 30.00 taxable revenue / 18 COGS.
@@ -694,6 +694,7 @@ class ProfitReportTests(ReportTestBase):
         self.assertEqual(response["cogs"], Decimal("64.00"))
         # Gross profit: 120.00 - 64.00 = 56.00
         self.assertEqual(response["gross_profit"], Decimal("56.00"))
+        self.assertEqual(response["gross_margin_percent"], Decimal("87.5"))
 
 
 class TopProductsReportTests(ReportTestBase):

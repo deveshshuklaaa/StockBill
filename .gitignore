@@ -49,6 +49,8 @@ sample_*.png
 divya_enterprises/sample_*.png
 
 # Local backups and reference data
+*.dump
+backups/
 divya_enterprises/pre_cleanup_backup.json
 divya_enterprises/pre_cleanup_products_snapshot.json
 divya_enterprises_sales_book_august_2026.csv

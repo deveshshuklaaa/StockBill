@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { formatQuantity, formatQuantityWithUnit } from '../utils/format'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
+function percent(value) { return value == null ? '—' : `${Number(value).toFixed(1)}%` }
 
 const STATE_BADGE = {
   DRAFT: 'type-chip',
@@ -115,6 +116,7 @@ export default function InvoiceDetailPage() {
 
   const isCancelled = invoice.state === 'CANCELLED'
   const isPosted = invoice.state === 'POSTED'
+  const profit = invoice.state === 'DRAFT' ? null : invoice.profit_summary
   const canDeleteDraft = invoice.state === 'DRAFT' && (isAdmin || !invoice.created_by || invoice.created_by === user?.id)
   const totalDiscount = (invoice.line_items || []).reduce((sum, line) => sum + Number(line.discount_amount || 0), 0)
   const totalTaxable = (invoice.line_items || []).reduce((sum, line) => sum + Number(line.taxable_value_snapshot || 0), 0)
@@ -274,6 +276,32 @@ export default function InvoiceDetailPage() {
       </div>
       {isCancelled && <p className="field-help" style={{ marginTop: 14 }}>This invoice was cancelled. Stock was restored through a sale-reversal movement; the original sale remains in the ledger.</p>}
     </div>
+
+    {profit && <section className="record-form invoice-profit-panel" aria-labelledby="invoice-margin-title">
+      <div className="form-heading"><div><p className="eyebrow">Profitability</p><h2 id="invoice-margin-title">Invoice margin</h2></div></div>
+      <p className="field-help">Original invoice amounts, excluding GST. Margin = gross profit ÷ cost × 100. Credit notes are not deducted here.</p>
+      {isCancelled && <p className="field-help">Cancelled invoice: original figures for reference only; excluded from active reports.</p>}
+      <div className="metric-grid">
+        <div className="metric-card"><div className="metric-label">Taxable sales</div><div className="metric-value">{money(profit.taxable_sales_revenue)}</div></div>
+        <div className="metric-card"><div className="metric-label">Cost of goods sold</div><div className="metric-value">{money(profit.taxable_cogs)}</div></div>
+        <div className="metric-card"><div className="metric-label">Gross profit</div><div className="metric-value">{money(profit.gross_profit)}</div></div>
+        <div className="metric-card"><div className="metric-label">Margin</div><div className="metric-value">{percent(profit.margin_percent)}</div></div>
+      </div>
+      <div className="table-scroll">
+        <table aria-label="Product margins in this invoice">
+          <thead><tr><th>Product</th><th>Qty (base units)</th><th>Taxable sales</th><th>Cost</th><th>Gross profit</th><th>Margin</th></tr></thead>
+          <tbody>{profit.products.map((product) => <tr key={`${product.product_id}-${product.product_name}-${product.base_unit}`}>
+            <td>{product.product_name}</td>
+            <td>{formatQuantityWithUnit(product.base_quantity, product.base_unit || 'piece')}</td>
+            <td>{money(product.taxable_sales_revenue)}</td>
+            <td>{money(product.taxable_cogs)}</td>
+            <td>{money(product.gross_profit)}</td>
+            <td>{percent(product.margin_percent)}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+    </section>}
+    {invoice.state === 'DRAFT' && <p className="field-help">Margin is available after posting, when historical costs are finalized.</p>}
 
     {showDeleteModal && (
       <div

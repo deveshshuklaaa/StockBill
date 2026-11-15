@@ -4,7 +4,7 @@
 // view link) and /invoices/:id detail (snapshot fields, cancel action
 // visibility by role, error surfacing) against the real API contract.
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -276,6 +276,56 @@ describe('InvoicesPage', () => {
 })
 
 describe('InvoiceDetailPage', () => {
+  const PROFIT_SUMMARY = {
+    taxable_sales_revenue: '1000.00', taxable_cogs: '600.00', gross_profit: '400.00', margin_percent: '66.7',
+    products: [{ product_id: 1, product_name: 'Margin product', base_unit: 'piece', base_quantity: '20.000', taxable_sales_revenue: '1000.00', taxable_cogs: '600.00', gross_profit: '400.00', margin_percent: '66.7' }],
+  }
+
+  it('renders backend invoice and product margins in a separate panel', async () => {
+    vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue({ ...DETAIL, profit_summary: PROFIT_SUMMARY })
+    mountPage('detail', { route: '/invoices/11' })
+    const panel = await screen.findByRole('region', { name: 'Invoice margin' })
+    expect(within(panel).getAllByText('66.7%')).toHaveLength(2)
+    expect(within(panel).getAllByText('₹400.00')).toHaveLength(2)
+    const table = within(panel).getByRole('table', { name: 'Product margins in this invoice' })
+    expect(within(table).getByText('Margin product')).toBeInTheDocument()
+    expect(within(table).getByText('₹600.00')).toBeInTheDocument()
+    expect(panel.closest('.print-sheet')).toBeNull()
+    expect(panel).toHaveClass('invoice-profit-panel')
+  })
+
+  it('uses the backend percentage verbatim and preserves zero versus undefined', async () => {
+    vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue({
+      ...DETAIL,
+      profit_summary: { ...PROFIT_SUMMARY, margin_percent: '21.6', products: [
+        { ...PROFIT_SUMMARY.products[0], product_id: 1, margin_percent: null },
+        { ...PROFIT_SUMMARY.products[0], product_id: 2, product_name: 'Break-even product', margin_percent: '0.0' },
+      ] },
+    })
+    mountPage('detail', { route: '/invoices/11' })
+    const panel = await screen.findByRole('region', { name: 'Invoice margin' })
+    expect(within(panel).getByText('21.6%')).toBeInTheDocument()
+    expect(within(panel).getByText('—')).toBeInTheDocument()
+    expect(within(panel).getByText('0.0%')).toBeInTheDocument()
+  })
+
+  it('marks cancelled invoice profit as historical reference', async () => {
+    vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue({ ...DETAIL, state: 'CANCELLED', profit_summary: PROFIT_SUMMARY })
+    mountPage('detail', { route: '/invoices/11' })
+    const panel = await screen.findByRole('region', { name: 'Invoice margin' })
+    expect(within(panel).getByText(/original figures for reference only/)).toBeInTheDocument()
+  })
+
+  it('waits until draft posting before showing margin', async () => {
+    vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue({ ...DETAIL, state: 'DRAFT', profit_summary: null })
+    vi.spyOn(invoicesApi, 'postInvoice').mockResolvedValue({ ...DETAIL, profit_summary: PROFIT_SUMMARY })
+    mountPage('detail', { route: '/invoices/11' })
+    await screen.findByText(/Margin is available after posting/)
+    expect(screen.queryByRole('region', { name: 'Invoice margin' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Post invoice' }))
+    expect(await screen.findByRole('region', { name: 'Invoice margin' })).toBeInTheDocument()
+  })
+
   it('renders invoice snapshot data, tax breakdown, and totals', async () => {
     vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue(DETAIL)
 

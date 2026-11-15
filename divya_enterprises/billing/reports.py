@@ -38,6 +38,7 @@ PRODUCT SALES — /api/reports/products/
   cogs_amount, cost_price_snapshot. Current product cost/WAC is NEVER
   read. Variant = product_name_snapshot.
   gross_profit = taxable_sales_revenue − taxable_cogs.
+  margin_percent = gross_profit / taxable_cogs × 100 (business label: Margin).
 
 CUSTOMER SALES — /api/reports/customers/
   POSTED invoices grouped by customer (walk-in = customer null, identified
@@ -55,6 +56,7 @@ PROFIT — /api/reports/profit/
   POSTED lines only. revenue = Σ effective_taxable_revenue (tax-exclusive),
   cogs = Σ effective_cogs (historical snapshots), gross_profit = revenue − cogs.
   Credit notes reduce revenue and COGS proportionally.
+  gross_margin_percent = gross_profit / cogs × 100 (business label: Margin).
   Per-product and per-customer breakdowns aggregate the same terms.
 
 TOP PRODUCTS — /api/reports/top-products/
@@ -104,6 +106,7 @@ from inventory.models import (
 )
 
 from .models import BusinessProfile, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
+from .profit import profit_percent_on_cost
 from .tax_engine import round_inr
 
 MONEY_FIELD = DecimalField(max_digits=18, decimal_places=2)
@@ -676,18 +679,14 @@ class ProductSalesReportView(APIView):
                     "cogs": cogs,
                     "taxable_cogs": cogs,
                     "gross_profit": profit,
-                    "margin_percent": (
-                        (profit / taxable_revenue * Decimal("100")).quantize(Decimal("0.1"))
-                        if taxable_revenue > 0
-                        else None
-                    ),
+                    "margin_percent": profit_percent_on_cost(profit, cogs),
                 }
             )
         return Response(
             {
                 "from": from_date,
                 "to": to_date,
-                "rules": "POSTED lines only; taxable_sales_revenue is tax-exclusive revenue; COGS is the historical cogs_amount snapshot; gross_profit = taxable_sales_revenue − cogs.",
+                "rules": "POSTED lines only; taxable_sales_revenue is tax-exclusive revenue; COGS is the historical cogs_amount snapshot; gross_profit = taxable_sales_revenue − cogs; margin_percent = gross_profit / cogs × 100.",
                 "products": products,
                 "total_revenue": total_taxable_revenue,
                 "total_taxable_sales": total_taxable_revenue,
@@ -839,6 +838,7 @@ def get_profit_report_data(from_date, to_date):
       net of credit-note returns.
       Input GST paid on purchases is an ITC asset, excluded from WAC/inventory cost.
     - Gross Profit: Taxable Sales Revenue - Taxable COGS.
+    - Percentage displayed as Margin: Gross Profit / Taxable COGS * 100.
     """
     lines = (
         _posted_invoice_lines(from_date, to_date)
@@ -886,11 +886,7 @@ def get_profit_report_data(from_date, to_date):
     sales_gst = totals["sales_gst"] or ZERO_MONEY
     total_sales_value = totals["total_sales_value"] or ZERO_MONEY
     gross_profit = taxable_sales_revenue - taxable_cogs
-    gross_margin_percent = (
-        (gross_profit / taxable_sales_revenue * Decimal("100")).quantize(Decimal("0.1"))
-        if taxable_sales_revenue > 0
-        else None
-    )
+    gross_margin_percent = profit_percent_on_cost(gross_profit, taxable_cogs)
 
     by_product_rows = list(
         lines.values("product_id", "product__name")
@@ -919,7 +915,8 @@ def get_profit_report_data(from_date, to_date):
         "rules": (
             "POSTED lines only. Revenue = taxable_sales_revenue (tax-exclusive), "
             "COGS = historical cogs_amount snapshot (tax-exclusive). "
-            "Gross profit = taxable_sales_revenue − taxable_cogs. Credit notes reduce both proportionally."
+            "Gross profit = taxable_sales_revenue − taxable_cogs. "
+            "Margin = gross_profit / taxable_cogs × 100. Credit notes reduce both proportionally."
         ),
         "revenue": taxable_sales_revenue,
         "taxable_sales_revenue": taxable_sales_revenue,

@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import IsAdminUser, IsStaffUser
 from .models import AuditLog, BusinessProfile, CreditNote, Invoice, InvoiceIdempotencyKey, InvoiceLineItem, Payment
-from .serializers import AuditLogSerializer, BusinessProfileSerializer, CreditNoteSerializer, InvoiceSerializer, PaymentSerializer
+from .serializers import AuditLogSerializer, BusinessProfileSerializer, CreditNoteSerializer, InvoiceDetailSerializer, InvoiceSerializer, PaymentSerializer
 from .services import (
     amend_invoice,
     build_item_summary_xlsx,
@@ -184,7 +184,7 @@ class InvoiceDetailView(generics.RetrieveAPIView):
         .prefetch_related("line_items")
         .all()
     )
-    serializer_class = InvoiceSerializer
+    serializer_class = InvoiceDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
 
 
@@ -270,7 +270,7 @@ class InvoiceCancelView(APIView):
         if not reason:
             return Response({"reason": "A cancellation reason is required."}, status=status.HTTP_400_BAD_REQUEST)
         invoice = cancel_invoice(invoice_id=pk, cancelled_by=request.user, reason=reason)
-        return Response(InvoiceSerializer(invoice).data)
+        return Response(InvoiceDetailSerializer(invoice).data)
 
 
 class InvoiceDraftCreateView(APIView):
@@ -287,7 +287,7 @@ class InvoicePostView(APIView):
 
     def post(self, request, pk):
         invoice = post_invoice(invoice_id=pk, posted_by=request.user)
-        return Response(InvoiceSerializer(invoice).data)
+        return Response(InvoiceDetailSerializer(invoice).data)
 
 
 class PaymentReverseView(APIView):
