@@ -12,6 +12,7 @@ Target specifications:
 from decimal import Decimal
 import io
 import os
+import re
 from pathlib import Path
 
 from django.conf import settings
@@ -265,6 +266,69 @@ def get_item_row_height(desc_lines: list[str]) -> float:
     return ITEM_ROW_HEIGHT + (num_lines - 1) * ITEM_LINE_LEADING
 
 
+# Customer ("Bill To") block. The recipient's name and address are tax-invoice
+# particulars, so they are wrapped and shrunk to fit, never cut off.
+CUSTOMER_COLUMN_RATIO = 0.60          # left (customer) share of the block width
+CUSTOMER_NAME_X = 78.0                # name starts after "Bill To / Recipient:"
+CUSTOMER_NAME_SIZES = (8.5, 7.5)      # shrink once, then wrap at 7.5 pt
+CUSTOMER_NAME_LEADING = 9.0
+CUSTOMER_ADDRESS_LABEL = "Address: "
+CUSTOMER_ADDRESS_SIZES = (7.5, 7.0, 6.5)
+CUSTOMER_ADDRESS_MAX_LINES = 3        # beyond this, step the font down first
+_LINE_BREAKS = re.compile(r"\r\n|\r|\n")
+
+
+def normalize_address(text) -> str:
+    """One-line address: line breaks become ", ", blank parts are dropped."""
+    parts = (part.strip() for part in _LINE_BREAKS.split(str(text or "")))
+    return ", ".join(part for part in parts if part)
+
+
+def fit_wrapped_text(text: str, max_w: float, font_name: str, sizes, max_lines: int):
+    """Wrap ``text`` to ``max_w`` at the first size that needs <= max_lines.
+
+    If even the smallest size needs more lines, all of them are returned at
+    that size: text is never dropped. Returns (lines, font_size).
+    """
+    for size in sizes:
+        lines = wrap_product_description(text, max_w, font_name=font_name, font_size=size)
+        if len(lines) <= max_lines:
+            return lines, size
+    return lines, size
+
+
+def layout_customer_block(cust_name, cust_address) -> dict:
+    """Lines, font sizes and box height for the Bill To block."""
+    col_w = PRINTABLE_WIDTH * CUSTOMER_COLUMN_RATIO
+    name = " ".join(str(cust_name or "").split()) or "-"
+    name_lines, name_size = fit_wrapped_text(
+        name, col_w - CUSTOMER_NAME_X - 6, "Helvetica-Bold", CUSTOMER_NAME_SIZES, max_lines=1
+    )
+    label_w = stringWidth(CUSTOMER_ADDRESS_LABEL, "Helvetica", 7.5)
+    address = normalize_address(cust_address)
+    if address:
+        addr_lines, addr_size = fit_wrapped_text(
+            address, col_w - 12 - label_w, "Helvetica", CUSTOMER_ADDRESS_SIZES, CUSTOMER_ADDRESS_MAX_LINES
+        )
+    else:
+        addr_lines, addr_size = ["-"], CUSTOMER_ADDRESS_SIZES[0]
+    addr_leading = addr_size + 1.0
+    box_h = (
+        CUSTOMER_BOX_MIN_HEIGHT
+        + (len(name_lines) - 1) * CUSTOMER_NAME_LEADING
+        + (len(addr_lines) - 1) * addr_leading
+    )
+    return {
+        "name_lines": name_lines,
+        "name_size": name_size,
+        "addr_lines": addr_lines,
+        "addr_size": addr_size,
+        "addr_leading": addr_leading,
+        "addr_label_w": label_w,
+        "box_h": box_h,
+    }
+
+
 def rows_area_height(cust_box_h: float, is_first_page: bool, is_last_page: bool) -> float:
     """Vertical space for item rows between the table header and the footer."""
     rows_top = PAGE_HEIGHT - MARGIN - HEADER_HEIGHT - cust_box_h - TABLE_HEADER_HEIGHT
@@ -453,7 +517,9 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         col_headers = ["Sr.", "Qty.", "Pack", "Product Description", "HSN", "MRP", "Rate / Piece", "Dis", "SGST", "CGST", "Amount"]
 
     # Paginate by measured row height (wrapped product names make rows taller).
-    cust_box_h = CUSTOMER_BOX_MIN_HEIGHT
+    # The Bill To box grows with the wrapped name/address, on every page.
+    cust_layout = layout_customer_block(cust_name, cust_address)
+    cust_box_h = cust_layout["box_h"]
     row_heights = [
         get_item_row_height(
             wrap_product_description(
@@ -612,22 +678,30 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         cust_bottom = header_bottom - cust_box_h
         c.line(left_x, cust_bottom, right_x, cust_bottom)
 
-        cust_col1_w = usable_w * 0.60
+        cust_col1_w = usable_w * CUSTOMER_COLUMN_RATIO
         cust_col2_w = usable_w - cust_col1_w
         cust_col2_x = left_x + cust_col1_w
         c.line(cust_col2_x, header_bottom, cust_col2_x, cust_bottom)
 
-        # Left: Customer Details
+        # Left: Customer Details (full name and address, wrapped to the column)
         cy = header_bottom - 9
         c.setFont("Helvetica-Bold", 7.5)
         c.drawString(left_x + 6, cy, "Bill To / Recipient:")
-        c.setFont("Helvetica-Bold", 8.5)
-        c.drawString(left_x + 78, cy, cust_name[:45])
+        c.setFont("Helvetica-Bold", cust_layout["name_size"])
+        for i, name_line in enumerate(cust_layout["name_lines"]):
+            if i:
+                cy -= CUSTOMER_NAME_LEADING
+            c.drawString(left_x + CUSTOMER_NAME_X, cy, name_line)
 
         cy -= 9
         c.setFont("Helvetica", 7.5)
-        addr_line = cust_address[:75]
-        c.drawString(left_x + 6, cy, f"Address: {addr_line}" if addr_line else "Address: -")
+        c.drawString(left_x + 6, cy, CUSTOMER_ADDRESS_LABEL.strip())
+        c.setFont("Helvetica", cust_layout["addr_size"])
+        addr_x = left_x + 6 + cust_layout["addr_label_w"]
+        for i, addr_line in enumerate(cust_layout["addr_lines"]):
+            if i:
+                cy -= cust_layout["addr_leading"]
+            c.drawString(addr_x, cy, addr_line)
 
         cy -= 8.5
         c.setFont("Helvetica-Bold", 7.5)

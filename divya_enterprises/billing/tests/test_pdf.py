@@ -782,3 +782,88 @@ class InvoicePdfPaginationTests(InvoicePdfLayoutHelpers, APITestCase):
         self.assertEqual(split(18), [13, 5])
         self.assertEqual(split(25), [13, 12])
         self.assertEqual(split(27), [13, 13, 1])  # was [13, 14]: 14 overprinted the totals
+
+
+class InvoicePdfCustomerBlockTests(InvoicePdfLayoutHelpers, APITestCase):
+    """Customer name and address print in full: no box glyphs, no truncation."""
+
+    setUpTestData = InvoicePdfGenerationTests.__dict__["setUpTestData"]
+
+    LONG_ADDRESS = (
+        "Shop No 12 and 13, Ground Floor, Shree Krishna Commercial Complex, Opposite Malad Railway Station West, "
+        "Near Hanuman Mandir, S V Road, Malad West, Mumbai 400064"
+    )
+    LONG_NAME = "Shree Siddhivinayak General Stores and Wholesale Provision Suppliers 1"
+
+    def render(self, *, address=None, name=None, lines=None):
+        # In-memory only: the posted invoice is never saved.
+        if address is not None:
+            self.invoice.billing_address_snapshot = address
+        if name is not None:
+            self.invoice.customer_name_snapshot = name
+        return pymupdf.open("pdf", build_invoice_a5_pdf(self.invoice, lines=lines))
+
+    @staticmethod
+    def flat(text):
+        return " ".join(text.split())
+
+    def word_box(self, page, word):
+        return next(w for w in page.get_text("words") if w[4] == word)
+
+    def test_multiline_address_prints_every_part_without_box_glyphs(self):
+        doc = self.render(address="Shop 4, ABC Complex\nStation Road\r\n\nMalad East\r")
+        text = doc[0].get_text()
+        self.assertIn("Shop 4, ABC Complex, Station Road, Malad East", text)
+        self.assertNotIn("\u25a0", text)  # black square
+        self.assertNotIn("\ufffd", text)  # replacement character
+        controls = [ch for ch in text if ord(ch) < 32 and ch != "\n"]
+        self.assertEqual(controls, [])
+
+    def test_long_address_is_printed_in_full_on_several_lines(self):
+        address = self.LONG_ADDRESS + ", Maharashtra, India 400064 Extra"  # > 180 characters
+        self.assertGreater(len(address), 180)
+        doc = self.render(address=address)
+        page = doc[0]
+        text = page.get_text()
+        self.assertIn(address, self.flat(text))  # every word, in order
+        address_lines = [ln for ln in text.splitlines() if ln.strip() and ln.strip() in address]
+        self.assertGreaterEqual(len(address_lines), 2, "a long address must wrap, not run on")
+        # The box grew: the last address word sits above the table header.
+        self.assertLess(self.word_box(page, "Extra")[3], self.word_box(page, "Sr.")[1])
+        self.assertLess(self.word_box(page, "Extra")[2], page.rect.width * 0.62)  # stays in the left column
+
+    def test_very_long_address_shrinks_font_but_keeps_all_text(self):
+        from billing.pdf_engine import CUSTOMER_ADDRESS_SIZES, layout_customer_block
+
+        address = ", ".join([self.LONG_ADDRESS] * 3)
+        layout = layout_customer_block("N P AGENCY", address)
+        self.assertEqual(layout["addr_size"], CUSTOMER_ADDRESS_SIZES[-1])
+        self.assertGreater(len(layout["addr_lines"]), 3)
+        self.assertEqual(" ".join(layout["addr_lines"]), address)
+        text = self.flat(self.render(address=address)[0].get_text())
+        self.assertIn(address, text)
+
+    def test_short_address_keeps_the_original_box_height(self):
+        from billing.pdf_engine import CUSTOMER_BOX_MIN_HEIGHT, layout_customer_block
+
+        layout = layout_customer_block("N P AGENCY", "First Floor, 79/630, Motilal Nagar, Mumbai")
+        self.assertEqual(layout["box_h"], CUSTOMER_BOX_MIN_HEIGHT)
+        self.assertEqual(layout_customer_block("N P AGENCY", "")["addr_lines"], ["-"])
+
+    def test_seventy_character_name_is_printed_in_full(self):
+        self.assertEqual(len(self.LONG_NAME), 70)
+        text = self.flat(self.render(name=self.LONG_NAME)[0].get_text())
+        self.assertIn(self.LONG_NAME, text)
+
+    def test_long_multipage_invoice_with_three_line_address_paginates_correctly(self):
+        lines = self.make_lines(40)
+        doc = self.render(address=self.LONG_ADDRESS + ", Maharashtra", name=self.LONG_NAME, lines=lines)
+        self.assertGreater(len(doc), 2)
+        self.assertEqual(sum(self.item_numbers_per_page(doc), []), list(range(1, 41)))
+        self.assert_rows_clear_of_footer(doc)
+        self.assert_totals_carried_forward(doc)
+        for page in doc:  # the full address is on every page
+            self.assertIn(self.LONG_ADDRESS, self.flat(page.get_text()))
+        last = doc[-1].get_text()
+        self.assertIn(f"Rs. {self.invoice.total_amount:.2f}", last)
+        self.assertIn(f"Page {len(doc)} of {len(doc)}", last)
