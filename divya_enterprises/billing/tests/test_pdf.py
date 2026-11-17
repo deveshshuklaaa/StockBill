@@ -687,3 +687,98 @@ class InvoicePdfGenerationTests(APITestCase):
         # 10 column separators between the 11 columns (in header and body)
         self.assertGreaterEqual(len(sep_lines), 10, "Thin vertical separators must be drawn across columns")
 
+
+class InvoicePdfLayoutHelpers:
+    """Shared builders/assertions for layout tests (same fixture as above)."""
+
+    def make_lines(self, count, name=lambda i: f"Multi Item {i + 1}"):
+        base_line = self.invoice.line_items.first()
+        return [
+            InvoiceLineItem(
+                invoice=self.invoice,
+                product=base_line.product,
+                product_name_snapshot=name(i),
+                quantity=Decimal("5"),
+                sales_unit_name="piece",
+                conversion_factor=Decimal("1.000"),
+                base_quantity=Decimal("5"),
+                rate_charged=Decimal("50.00"),
+                discount_amount=Decimal("0.00"),
+                tax_rate=Decimal("5.00"),
+                tax_amount=Decimal("12.50"),
+                cgst_rate=Decimal("2.50"),
+                cgst_amount=Decimal("6.25"),
+                sgst_rate=Decimal("2.50"),
+                sgst_amount=Decimal("6.25"),
+                igst_rate=Decimal("0.00"),
+                igst_amount=Decimal("0.00"),
+                line_total=Decimal("262.50"),
+                taxable_value_snapshot=Decimal("250.00"),
+                mrp_snapshot=Decimal("60.00"),
+                hsn_sac_snapshot="21069099",
+            )
+            for i in range(count)
+        ]
+
+    def assert_rows_clear_of_footer(self, doc, marker="Multi"):
+        """Every item row on every page ends above that page's footer labels."""
+        for pno, page in enumerate(doc, start=1):
+            words = page.get_text("words")
+            item_bottoms = [w[3] for w in words if w[4] == marker]
+            footer_tops = [w[1] for w in words if w[4] in ("CLASS", "Continued...")]
+            self.assertTrue(footer_tops, f"page {pno} has no footer")
+            if item_bottoms:
+                self.assertLess(max(item_bottoms), min(footer_tops) - 2, f"rows overprint the footer on page {pno}")
+
+    def item_numbers_per_page(self, doc):
+        pages = []
+        for page in doc:
+            words = [w[4] for w in page.get_text("words")]
+            pages.append([int(words[i + 2]) for i in range(len(words) - 2) if words[i] == "Multi" and words[i + 1] == "Item"])
+        return pages
+
+    def assert_totals_carried_forward(self, doc, line_total=Decimal("262.50")):
+        """Each continuation page's TOTAL B/F equals all rows on earlier pages."""
+        per_page = self.item_numbers_per_page(doc)
+        before = 0
+        for pno, page in enumerate(doc, start=1):
+            if pno > 1:
+                self.assertIn(f"{line_total * before:.2f}", page.get_text(), f"wrong TOTAL B/F on page {pno}")
+            before += len(per_page[pno - 1])
+
+
+class InvoicePdfPaginationTests(InvoicePdfLayoutHelpers, APITestCase):
+    """Rows never overprint the footer; pages break by measured row height."""
+
+    setUpTestData = InvoicePdfGenerationTests.__dict__["setUpTestData"]
+
+    def test_last_page_rows_do_not_overprint_totals(self):
+        # 27 rows used to be split 13 + 14, and the 14 rows of the final page
+        # ran into the GST summary.
+        doc = pymupdf.open("pdf", build_invoice_a5_pdf(self.invoice, lines=self.make_lines(27)))
+        self.assert_rows_clear_of_footer(doc)
+        self.assertEqual(sum(self.item_numbers_per_page(doc), []), list(range(1, 28)))
+        self.assert_totals_carried_forward(doc)
+        self.assertIn(f"Page {len(doc)} of {len(doc)}", doc[-1].get_text())
+        self.assertIn(f"Rs. {self.invoice.total_amount:.2f}", doc[-1].get_text())
+
+    def test_wrapped_product_names_paginate_by_height(self):
+        long_name = lambda i: f"Multi Item {i + 1} Chheda Special Roasted Salted Cashew Nut Premium Family Pack Combo"
+        doc = pymupdf.open("pdf", build_invoice_a5_pdf(self.invoice, lines=self.make_lines(10, name=long_name)))
+        self.assertGreater(len(doc), 1)  # ten three-line rows do not fit one page
+        self.assert_rows_clear_of_footer(doc)
+        self.assertEqual(sum(self.item_numbers_per_page(doc), []), list(range(1, 11)))
+        self.assert_totals_carried_forward(doc)
+
+    def test_page_split_matches_previous_budgets_for_single_line_rows(self):
+        from billing.pdf_engine import CUSTOMER_BOX_MIN_HEIGHT, ITEM_ROW_HEIGHT, paginate_line_heights
+
+        def split(n):
+            return paginate_line_heights([ITEM_ROW_HEIGHT] * n, CUSTOMER_BOX_MIN_HEIGHT)
+
+        self.assertEqual(split(3), [3])
+        self.assertEqual(split(10), [10])
+        self.assertEqual(split(13), [13])  # 11-13 rows always fitted one page
+        self.assertEqual(split(18), [13, 5])
+        self.assertEqual(split(25), [13, 12])
+        self.assertEqual(split(27), [13, 13, 1])  # was [13, 14]: 14 overprinted the totals

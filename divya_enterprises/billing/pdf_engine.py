@@ -150,6 +150,18 @@ ITEM_ROW_FONT_SIZE = 9.0   # Visually prominent ERP item font size (9.0 pt stric
 ITEM_ROW_HEIGHT = 13.0     # Standard single-line row height
 ITEM_LINE_LEADING = 10.0   # Vertical spacing for wrapped 9 pt lines
 
+# Fixed blocks of each page (unscaled pt). Pagination measures the space left
+# between them, so the drawing code below uses the same values.
+HEADER_HEIGHT = 56.0
+CUSTOMER_BOX_MIN_HEIGHT = 30.0
+TABLE_HEADER_HEIGHT = 14.0
+FOOTER_HEIGHT_LAST = 115.0       # GST summary, totals, words, terms, signatures
+FOOTER_HEIGHT_CONTINUED = 85.0   # "Continued..." footer on non-final pages
+# Upper limits on item rows per page (kept from the original fixed budgets);
+# a page also ends earlier when the next row would not fit above its footer.
+MAX_LINES_PAGE_ONE = 13
+MAX_LINES_SUBSEQUENT = 14
+
 
 def format_qty_presentation(line) -> tuple[str, str]:
     """Format quantity and pack strings according to StockBill unit rules.
@@ -251,6 +263,51 @@ def get_item_row_height(desc_lines: list[str]) -> float:
     if num_lines == 1:
         return ITEM_ROW_HEIGHT
     return ITEM_ROW_HEIGHT + (num_lines - 1) * ITEM_LINE_LEADING
+
+
+def rows_area_height(cust_box_h: float, is_first_page: bool, is_last_page: bool) -> float:
+    """Vertical space for item rows between the table header and the footer."""
+    rows_top = PAGE_HEIGHT - MARGIN - HEADER_HEIGHT - cust_box_h - TABLE_HEADER_HEIGHT
+    if not is_first_page:
+        rows_top -= ITEM_ROW_HEIGHT  # "TOTAL B/F" row
+    footer = FOOTER_HEIGHT_LAST if is_last_page else FOOTER_HEIGHT_CONTINUED
+    return rows_top - (MARGIN + footer)
+
+
+def paginate_line_heights(row_heights: list[float], cust_box_h: float) -> list[int]:
+    """Split item rows into pages; returns the number of rows on each page.
+
+    A page holds at most MAX_LINES_PAGE_ONE / MAX_LINES_SUBSEQUENT rows and
+    never more height than fits above its footer. The final page needs the
+    taller totals footer, so rows that fit only above the shorter
+    "Continued..." footer move on to a further page instead of overprinting
+    the GST summary.
+    """
+    counts = []
+    start = 0
+    is_first = True
+    total = len(row_heights)
+    while True:
+        remaining = row_heights[start:]
+        limit = MAX_LINES_PAGE_ONE if is_first else MAX_LINES_SUBSEQUENT
+        if len(remaining) <= limit and sum(remaining) <= rows_area_height(cust_box_h, is_first, True) + 0.01:
+            counts.append(len(remaining))
+            return counts
+        capacity = rows_area_height(cust_box_h, is_first, False) + 0.01
+        used = 0.0
+        taken = 0
+        for height in remaining[:limit]:
+            if taken and used + height > capacity:
+                break
+            used += height
+            taken += 1
+        if start + taken == total and taken > 1:
+            # Everything fit only above the short footer: leave at least one
+            # row for the final page, which carries the totals.
+            taken -= 1
+        counts.append(taken)
+        start += taken
+        is_first = False
 
 
 def draw_product_description(
@@ -376,22 +433,6 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
     else:
         lines = list(lines)
 
-    # Multi-page budgets for A5 landscape
-    MAX_LINES_SINGLE_PAGE = 10
-    MAX_LINES_PAGE_ONE = 13
-    MAX_LINES_SUBSEQUENT = 14
-
-    pages_chunks = []
-    if len(lines) <= MAX_LINES_SINGLE_PAGE:
-        pages_chunks.append(lines)
-    else:
-        pages_chunks.append(lines[:MAX_LINES_PAGE_ONE])
-        remaining = lines[MAX_LINES_PAGE_ONE:]
-        while remaining:
-            pages_chunks.append(remaining[:MAX_LINES_SUBSEQUENT])
-            remaining = remaining[MAX_LINES_SUBSEQUENT:]
-
-    total_pages = len(pages_chunks)
     c = NumberedCanvas(buffer, pagesize=A4)
     c.setViewerPreference("PrintScaling", "None")
     logo_path = _resolve_logo_path()
@@ -410,6 +451,26 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
     else:
         col_widths = [18, 48, 35, 166, 48, 42, 56, 30, 36, 36, 51.94]
         col_headers = ["Sr.", "Qty.", "Pack", "Product Description", "HSN", "MRP", "Rate / Piece", "Dis", "SGST", "CGST", "Amount"]
+
+    # Paginate by measured row height (wrapped product names make rows taller).
+    cust_box_h = CUSTOMER_BOX_MIN_HEIGHT
+    row_heights = [
+        get_item_row_height(
+            wrap_product_description(
+                line.product_name_snapshot or (line.product.name if line.product else "Item"),
+                col_widths[3] - 8.0,
+                font_name="Helvetica",
+                font_size=ITEM_ROW_FONT_SIZE,
+            )
+        )
+        for line in lines
+    ]
+    pages_chunks = []
+    start = 0
+    for count in paginate_line_heights(row_heights, cust_box_h):
+        pages_chunks.append(lines[start:start + count])
+        start += count
+    total_pages = len(pages_chunks)
 
     for page_idx, page_lines in enumerate(pages_chunks):
         c.saveState()
@@ -448,7 +509,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         # ------------------------------------------------------------------
         # 1. HEADER SECTION (Company Details + Invoice Metadata)
         # ------------------------------------------------------------------
-        header_height = 56
+        header_height = HEADER_HEIGHT
         header_bottom = top_y - header_height
 
         seller_w = usable_w * 0.58
@@ -547,7 +608,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         # ------------------------------------------------------------------
         # 2. CUSTOMER BLOCK (Bill To)
         # ------------------------------------------------------------------
-        cust_box_h = 30
+        # cust_box_h is computed before pagination (above).
         cust_bottom = header_bottom - cust_box_h
         c.line(left_x, cust_bottom, right_x, cust_bottom)
 
@@ -603,7 +664,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         # 3. PRODUCT TABLE HEADERS
         # ------------------------------------------------------------------
         tbl_top = cust_bottom
-        th_height = 14
+        th_height = TABLE_HEADER_HEIGHT
         th_bottom = tbl_top - th_height
 
         c.setFillColor(COLOR_HEADER_BG)
@@ -721,7 +782,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         # ------------------------------------------------------------------
         # 5. FOOTER & SUMMARY SECTION
         # ------------------------------------------------------------------
-        footer_height = 115 if is_last_page else 85
+        footer_height = FOOTER_HEIGHT_LAST if is_last_page else FOOTER_HEIGHT_CONTINUED
         footer_top = bottom_y + footer_height
 
         # Draw thin vertical column separators throughout the entire item table body down to footer
