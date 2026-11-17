@@ -1,7 +1,21 @@
 import axios from 'axios'
 
+// VITE_API_BASE_URL wins when set (dev: http://127.0.0.1:8000/api in
+// frontend/.env). A production build otherwise talks to its own origin,
+// where nginx proxies /api to Django.
+export function resolveApiBaseUrl(env = {}) {
+  if (env.VITE_API_BASE_URL) return env.VITE_API_BASE_URL
+  return env.PROD ? '/api' : 'http://localhost:8000/api'
+}
+
+// Fired when the API rejects the stored token (expired or revoked);
+// AuthProvider listens, clears the session and ProtectedRoute sends the
+// user to /login.
+export const SESSION_EXPIRED_EVENT = 'stockbill:session-expired'
+const LOGIN_PATH = '/auth/token/'
+
 const api = axios.create({
-  baseURL: import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8000/api',
+  baseURL: resolveApiBaseUrl(import.meta.env),
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -14,6 +28,11 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    // A wrong password on the login form is a 400, but guard the login call
+    // anyway so it can never bounce the login page to itself.
+    if (error.response?.status === 401 && error.config?.url !== LOGIN_PATH && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+    }
     if (error.response?.data instanceof Blob) {
       try {
         const text = await error.response.data.text()

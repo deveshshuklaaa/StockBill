@@ -71,3 +71,8 @@ divya_enterprises/inventory/test_clean_demo_data.py
 divya_enterprises/inventory/test_import_chheda_purchases.py
 divya_enterprises/inventory/test_set_all_products_brand.py
 divya_enterprises/inventory/test_set_all_products_gst.py
+
+# Committed templates (placeholders only; real .env files stay ignored)
+!.env.example
+!.env.production.example
+!frontend/.env.production

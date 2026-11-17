@@ -1,0 +1,91 @@
+# StockBill production stack (Oracle ARM64 VPS behind a Cloudflare Tunnel).
+# The dev stack in docker-compose.yml is separate and unchanged.
+#
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Runtime settings come from .env.production (copy .env.production.example).
+# Nothing is published to the network except nginx on 127.0.0.1:8080;
+# the public route is the cloudflared tunnel (profile "tunnel").
+# See deploy/README-production.md.
+
+# Own project name: without it Compose would use the folder name, the same
+# project as the dev docker-compose.yml, and its "db" service would take over
+# the dev database container.
+name: stockbill-prod
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    # Keep the major version >= the source database when restoring a dump.
+    image: postgres:${POSTGRES_VERSION:-16}-bookworm
+    restart: unless-stopped
+    env_file: .env.production
+    volumes:
+      - stockbill_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    # No "ports:": only the backend reaches PostgreSQL, on the compose network.
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: backend
+    image: stockbill-backend:latest
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8000/api/health/', headers={'Host': 'localhost'}), timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
+    # No "ports:": nginx proxies to backend:8000 on the compose network.
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: nginx
+    image: stockbill-nginx:latest
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # Loopback only: for local checks and SSH port-forwarding. Never 0.0.0.0.
+      - "127.0.0.1:8080:80"
+    logging: *default-logging
+
+  cloudflared:
+    # Optional: started only with "--profile tunnel" (needs TUNNEL_TOKEN in
+    # .env.production). In the Cloudflare dashboard, point the tunnel's
+    # public hostname at http://nginx:80.
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.6.0}
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    env_file: .env.production
+    depends_on:
+      - nginx
+    logging: *default-logging
+
+volumes:
+  stockbill_pgdata:

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import api, { apiErrorMessage } from '../api/client'
+import api, { SESSION_EXPIRED_EVENT, apiErrorMessage } from '../api/client'
 
 const AuthContext = createContext(null)
 const TOKEN_KEY = 'stockbill_token'
@@ -28,6 +28,13 @@ export function AuthProvider({ children }) {
       .catch(() => logout())
       .finally(() => setLoading(false))
   }, [token, user])
+
+  // Any API call answered with 401 (token expired or revoked) signs out;
+  // ProtectedRoute then redirects to /login.
+  useEffect(() => {
+    window.addEventListener(SESSION_EXPIRED_EVENT, logout)
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, logout)
+  }, [])
 
   async function login(username, password) {
     setAuthError('')

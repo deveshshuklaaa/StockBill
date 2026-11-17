@@ -120,7 +120,8 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 
 ### Security & Integrity
 - **Role-Based Authorization:** Clear privilege separation between `admin` (supervisory controls, pricing edits, adjustments, configuration) and `staff` (routine billing, customer/inventory viewing).
-- **Session Security:** Token authentication stored exclusively in `sessionStorage` (cleared immediately upon browser close or logout).
+- **Session Security:** Token authentication stored exclusively in `sessionStorage` (cleared immediately upon browser close or logout). Tokens expire `TOKEN_TTL_HOURS` after login (default 7 days); each login replaces the previous token, and any 401 sends the browser back to the login page. Login attempts are rate-limited (`LOGIN_THROTTLE_RATE`, default `5/min`).
+- **Fail-Closed Settings:** `DEBUG` defaults to off; with `DEBUG` off Django refuses to start without a real `SECRET_KEY`. Django admin (`/admin/`) is mounted only when `ENABLE_DJANGO_ADMIN` is on (it follows `DEBUG` when unset).
 - **Posted Document Immutability:** Posted invoices and purchases cannot be edited; corrections require formal cancellation, credit notes, or amendments.
 - **Append-Only Ledger & Reversals:** Stock movements, payments, and credit notes are strictly append-only; payments cannot be deleted, only formally reversed with audit reason.
 - **PostgreSQL Immutability Triggers:** Database-level trigger functions protect historical tables against unauthorized `UPDATE` or `DELETE` operations.
@@ -232,7 +233,10 @@ pip install -r requirements.txt
 ```
 
 ### 4. Configure Environment Variables
-Create a `.env` file in the repository root:
+Create a `.env` file in the repository root (template: `.env.example`).
+`DEBUG=True` is **required** for local development and the shop PC: `DEBUG`
+defaults to `False`, and with it off Django refuses to start unless
+`SECRET_KEY` is set to a real secret.
 ```ini
 # Development PC only: shows a red "DEVELOPMENT - test data" bar on every
 # screen. Leave it out on the shop PC (default is production: no bar).
@@ -292,6 +296,15 @@ Frontend web application will be available at `http://localhost:5173/`.
 cd frontend
 npm run build
 ```
+Production builds call the API on their own origin (`/api`, set in
+`frontend/.env.production`); nginx proxies it to Django.
+
+### Production Containers
+The server deployment (Docker Compose: PostgreSQL, Gunicorn, nginx,
+Cloudflare Tunnel) is described in `deploy/README-production.md`, using
+`Dockerfile.prod`, `docker-compose.prod.yml` and `.env.production.example`.
+The dev `docker-compose.yml` is unchanged. `GET /api/health/` is an
+unauthenticated health check for uptime monitoring.
 
 ---
 

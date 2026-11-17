@@ -1,0 +1,84 @@
+# syntax=docker/dockerfile:1
+# Production images for StockBill. Build from the repository root:
+#   docker compose -f docker-compose.prod.yml build
+# Targets: "backend" (Django + Gunicorn) and "nginx" (built React + proxy).
+# Base images are multi-arch, so this builds on linux/amd64 and linux/arm64.
+
+ARG PYTHON_VERSION=3.12
+ARG NODE_VERSION=22
+ARG NGINX_VERSION=1.27
+
+# ---------------------------------------------------------------- frontend
+FROM node:${NODE_VERSION}-bookworm-slim AS frontend-build
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+# Same-origin API behind nginx. A real env var outranks any .env file.
+ENV VITE_API_BASE_URL=/api
+RUN npm run build
+
+# ---------------------------------------------------------------- backend
+FROM python:${PYTHON_VERSION}-slim-bookworm AS backend
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# libpq for psycopg2; Pango/HarfBuzz/Cairo/GDK-Pixbuf for WeasyPrint;
+# DejaVu + Noto fonts (DejaVu Sans has the rupee sign U+20B9).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       libpq5 \
+       libpango-1.0-0 \
+       libpangoft2-1.0-0 \
+       libpangocairo-1.0-0 \
+       libharfbuzz0b \
+       libharfbuzz-subset0 \
+       libcairo2 \
+       libgdk-pixbuf-2.0-0 \
+       libffi8 \
+       shared-mime-info \
+       fontconfig \
+       fonts-dejavu-core \
+       fonts-noto-core \
+    && fc-cache -f \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system --gid 10001 stockbill \
+    && useradd --system --uid 10001 --gid stockbill --home-dir /app --shell /usr/sbin/nologin stockbill
+
+WORKDIR /app
+COPY requirements.txt requirements-prod.txt ./
+RUN pip install -r requirements-prod.txt
+
+COPY divya_enterprises ./divya_enterprises
+WORKDIR /app/divya_enterprises
+
+# collectstatic needs settings to load; a throwaway key is fine at build time
+# (static files do not depend on it) and is not kept in the image env.
+RUN DEBUG=False SECRET_KEY=collectstatic-build-only STATIC_ROOT=/app/staticfiles \
+    python manage.py collectstatic --noinput \
+    && chown -R stockbill:stockbill /app/staticfiles
+
+# The app user's home is read-only; fontconfig/WeasyPrint caches go to /tmp.
+ENV STATIC_ROOT=/app/staticfiles \
+    XDG_CACHE_HOME=/tmp/.cache \
+    GUNICORN_WORKERS=3 \
+    GUNICORN_TIMEOUT=60
+
+USER stockbill
+EXPOSE 8000
+
+# Migrations are NOT run here; they are an explicit command (see
+# deploy/README-production.md).
+CMD ["sh", "-c", "exec gunicorn divya_enterprises.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS} --timeout ${GUNICORN_TIMEOUT} --access-logfile - --error-logfile -"]
+
+# ---------------------------------------------------------------- nginx
+FROM nginx:${NGINX_VERSION}-alpine AS nginx
+RUN rm -f /etc/nginx/conf.d/default.conf
+COPY deploy/nginx/stockbill.conf /etc/nginx/conf.d/stockbill.conf
+COPY --from=frontend-build /frontend/dist /usr/share/nginx/html
+# Django admin CSS/JS, served only if ENABLE_DJANGO_ADMIN is on.
+COPY --from=backend /app/staticfiles /usr/share/nginx/static
