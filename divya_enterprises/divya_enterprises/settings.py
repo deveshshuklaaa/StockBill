@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
@@ -82,7 +83,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
-    "rest_framework.authtoken",
+    "knox",
     "accounts",
     "customers",
     "inventory",
@@ -160,10 +161,18 @@ AUTH_USER_MODEL = "accounts.User"
 # DEBUG, so it is off in production unless ENABLE_DJANGO_ADMIN=true.
 ENABLE_DJANGO_ADMIN = env_bool("ENABLE_DJANGO_ADMIN", DEBUG)
 
-# API tokens expire this many hours after they were issued (login).
+# API tokens (django-rest-knox) expire this many hours after login. Each
+# login gets its own token, so several devices can be signed in at once and
+# logging out revokes only that device's token.
 TOKEN_TTL_HOURS = env_int("TOKEN_TTL_HOURS", 168)
 if TOKEN_TTL_HOURS < 1:
     raise ImproperlyConfigured("TOKEN_TTL_HOURS must be at least 1.")
+REST_KNOX = {
+    "TOKEN_TTL": timedelta(hours=TOKEN_TTL_HOURS),
+    "AUTO_REFRESH": False,
+    # Keeps the frontend header unchanged: "Authorization: Token <key>".
+    "AUTH_HEADER_PREFIX": "Token",
+}
 
 # Shared across Gunicorn workers (login throttling). Create the table with
 # "python manage.py createcachetable"; accounts/0002 also creates it on migrate.
@@ -209,7 +218,7 @@ REST_FRAMEWORK = {
     # "WWW-Authenticate: Token" (DRF takes the header from the first class).
     # A logged-in user without the needed role still gets 403.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "accounts.authentication.ExpiringTokenAuthentication",
+        "knox.auth.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_THROTTLE_RATES": {

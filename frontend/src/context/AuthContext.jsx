@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import api, { SESSION_EXPIRED_EVENT, apiErrorMessage } from '../api/client'
+import api, { LOGOUT_PATH, SESSION_EXPIRED_EVENT, apiErrorMessage } from '../api/client'
 
 const AuthContext = createContext(null)
 const TOKEN_KEY = 'stockbill_token'
@@ -25,15 +25,15 @@ export function AuthProvider({ children }) {
         setUser(normalizeUser(data))
         sessionStorage.setItem(USER_KEY, JSON.stringify(data))
       })
-      .catch(() => logout())
+      .catch(() => clearSession())
       .finally(() => setLoading(false))
   }, [token, user])
 
   // Any API call answered with 401 (token expired or revoked) signs out;
   // ProtectedRoute then redirects to /login.
   useEffect(() => {
-    window.addEventListener(SESSION_EXPIRED_EVENT, logout)
-    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, logout)
+    window.addEventListener(SESSION_EXPIRED_EVENT, clearSession)
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, clearSession)
   }, [])
 
   async function login(username, password) {
@@ -51,7 +51,18 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // Sign out on this device: revoke this device's token on the server
+  // (other devices stay signed in), then clear the session locally. The
+  // local sign-out never waits for, or depends on, the server answering.
   function logout() {
+    const current = sessionStorage.getItem(TOKEN_KEY)
+    if (current) {
+      api.post(LOGOUT_PATH, null, { headers: { Authorization: `Token ${current}` } }).catch(() => {})
+    }
+    clearSession()
+  }
+
+  function clearSession() {
     sessionStorage.removeItem(TOKEN_KEY)
     sessionStorage.removeItem(USER_KEY)
     setToken(null)

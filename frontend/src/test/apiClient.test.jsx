@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import api, { SESSION_EXPIRED_EVENT, resolveApiBaseUrl } from '../api/client'
 import ProtectedRoute from '../components/ProtectedRoute'
-import { AuthProvider } from '../context/AuthContext'
+import { AuthProvider, useAuth } from '../context/AuthContext'
 
 describe('resolveApiBaseUrl', () => {
   it('uses the same-origin /api in a production build', () => {
@@ -91,5 +91,59 @@ describe('expired session', () => {
     await expect(api.get('/customers/')).rejects.toBeTruthy()
     window.removeEventListener(SESSION_EXPIRED_EVENT, listener)
     await waitFor(() => expect(listener).toHaveBeenCalledTimes(1))
+  })
+})
+
+function LogoutProbe() {
+  const { logout, token } = useAuth()
+  return (
+    <div>
+      <span>{token ? 'signed in' : 'signed out'}</span>
+      <button onClick={logout}>Log out</button>
+    </div>
+  )
+}
+
+describe('logout', () => {
+  let originalAdapter
+
+  beforeEach(() => {
+    originalAdapter = api.defaults.adapter
+    sessionStorage.setItem('stockbill_token', 'device-token')
+    sessionStorage.setItem('stockbill_user', JSON.stringify({ id: 1, username: 'clerk', role: 'staff' }))
+  })
+
+  afterEach(() => {
+    api.defaults.adapter = originalAdapter
+    sessionStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('revokes this device token on the server and clears the session', async () => {
+    const calls = []
+    api.defaults.adapter = async (config) => {
+      calls.push({ method: config.method, url: config.url, auth: config.headers.Authorization })
+      return { status: 204, statusText: 'No Content', data: '', headers: {}, config }
+    }
+    render(<AuthProvider><LogoutProbe /></AuthProvider>)
+    screen.getByText('signed in')
+    screen.getByRole('button', { name: 'Log out' }).click()
+
+    expect(await screen.findByText('signed out')).toBeInTheDocument()
+    expect(sessionStorage.getItem('stockbill_token')).toBeNull()
+    await waitFor(() => expect(calls).toEqual([{ method: 'post', url: '/auth/logout/', auth: 'Token device-token' }]))
+  })
+
+  it('still signs out locally when the server call fails, without a session-expired loop', async () => {
+    api.defaults.adapter = respondWith(401)
+    const listener = vi.fn()
+    window.addEventListener(SESSION_EXPIRED_EVENT, listener)
+    render(<AuthProvider><LogoutProbe /></AuthProvider>)
+    screen.getByRole('button', { name: 'Log out' }).click()
+
+    expect(await screen.findByText('signed out')).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    window.removeEventListener(SESSION_EXPIRED_EVENT, listener)
+    expect(listener).not.toHaveBeenCalled()
   })
 })

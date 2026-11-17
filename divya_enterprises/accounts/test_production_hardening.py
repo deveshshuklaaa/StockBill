@@ -15,11 +15,10 @@ from django.db import OperationalError
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import clear_url_caches
 from django.utils import timezone
-from rest_framework.authtoken.models import Token
+from knox.models import AuthToken
 from rest_framework.test import APIClient
 from rest_framework.throttling import ScopedRateThrottle
 
-from accounts.authentication import SESSION_EXPIRED_MESSAGE
 from accounts.models import User
 
 BACKEND_DIR = settings.BASE_DIR
@@ -116,79 +115,169 @@ class FailClosedSettingsTests(SimpleTestCase):
         self.assertFalse(values["ENABLE_DJANGO_ADMIN"])  # follows DEBUG when unset
 
 
-class TokenExpiryTests(TestCase):
+class TokenSessionTests(TestCase):
+    """knox tokens: one per login (device), fixed lifetime, per-device logout."""
+
+    PASSWORD = "Counter-pass-42"
+
     def setUp(self):
         cache.clear()
-        self.client = APIClient()
-        self.user = User.objects.create_user(username="clerk", password="Counter-pass-42", role=User.ROLE_STAFF)
+        self.user = User.objects.create_user(username="clerk", password=self.PASSWORD, role=User.ROLE_STAFF)
 
-    def authed(self, key):
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {key}")
-        return self.client.get("/api/auth/me/")
+    def login(self, client=None):
+        client = client or APIClient()
+        response = client.post("/api/auth/token/", {"username": "clerk", "password": self.PASSWORD}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        return response
 
-    def test_fresh_token_works(self):
-        token = Token.objects.create(user=self.user)
-        response = self.authed(token.key)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["username"], "clerk")
+    def me(self, key):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {key}")
+        return client.get("/api/auth/me/")
+
+    def post_as(self, key, url):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {key}")
+        return client.post(url)
+
+    def test_login_response_shape_and_lifetime(self):
+        before = timezone.now()
+        data = self.login().data
+        self.assertEqual(set(data), {"token", "expiry"})
+        token = AuthToken.objects.get(user=self.user)
+        expected = before + timedelta(hours=settings.TOKEN_TTL_HOURS)
+        self.assertAlmostEqual(token.expiry.timestamp(), expected.timestamp(), delta=60)
+        self.assertEqual(self.me(data["token"]).status_code, 200)
+        self.assertEqual(self.me(data["token"]).data["username"], "clerk")
+
+    def test_two_devices_stay_signed_in_together(self):
+        shop_pc = self.login().data["token"]
+        phone = self.login().data["token"]
+        self.assertNotEqual(shop_pc, phone)
+        self.assertEqual(AuthToken.objects.filter(user=self.user).count(), 2)
+        self.assertEqual(self.me(shop_pc).status_code, 200)
+        self.assertEqual(self.me(phone).status_code, 200)
+
+    def test_logout_revokes_only_this_device(self):
+        shop_pc = self.login().data["token"]
+        phone = self.login().data["token"]
+        self.assertEqual(self.post_as(phone, "/api/auth/logout/").status_code, 204)
+        self.assertEqual(self.me(phone).status_code, 401)
+        self.assertEqual(self.me(shop_pc).status_code, 200)
+        self.assertEqual(AuthToken.objects.filter(user=self.user).count(), 1)
+
+    def test_logout_all_revokes_every_device(self):
+        shop_pc = self.login().data["token"]
+        phone = self.login().data["token"]
+        self.assertEqual(self.post_as(shop_pc, "/api/auth/logoutall/").status_code, 204)
+        self.assertEqual(self.me(shop_pc).status_code, 401)
+        self.assertEqual(self.me(phone).status_code, 401)
+        self.assertFalse(AuthToken.objects.filter(user=self.user).exists())
+
+    def test_logout_needs_a_valid_token(self):
+        self.assertEqual(APIClient().post("/api/auth/logout/").status_code, 401)
+        self.assertEqual(self.post_as("not-a-real-token", "/api/auth/logoutall/").status_code, 401)
 
     def test_expired_token_gets_401_and_is_deleted(self):
-        token = Token.objects.create(user=self.user)
-        Token.objects.filter(pk=token.pk).update(
-            created=timezone.now() - timedelta(hours=settings.TOKEN_TTL_HOURS, minutes=1)
-        )
-        response = self.authed(token.key)
+        key = self.login().data["token"]
+        AuthToken.objects.filter(user=self.user).update(expiry=timezone.now() - timedelta(minutes=1))
+        response = self.me(key)
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.data["detail"], SESSION_EXPIRED_MESSAGE)
         self.assertEqual(response["WWW-Authenticate"], "Token")
-        self.assertFalse(Token.objects.filter(pk=token.pk).exists())
-        # Still rejected afterwards (now as an unknown token).
-        self.assertEqual(self.authed(token.key).status_code, 401)
+        self.assertFalse(AuthToken.objects.filter(user=self.user).exists())
 
-    def test_token_just_inside_lifetime_still_works(self):
-        token = Token.objects.create(user=self.user)
-        Token.objects.filter(pk=token.pk).update(
-            created=timezone.now() - timedelta(hours=settings.TOKEN_TTL_HOURS) + timedelta(minutes=5)
-        )
-        self.assertEqual(self.authed(token.key).status_code, 200)
+    def test_no_auto_refresh(self):
+        key = self.login().data["token"]
+        expiry = AuthToken.objects.get(user=self.user).expiry
+        self.me(key)
+        self.assertEqual(AuthToken.objects.get(user=self.user).expiry, expiry)
 
-    @override_settings(TOKEN_TTL_HOURS=1)
-    def test_lifetime_comes_from_settings(self):
-        token = Token.objects.create(user=self.user)
-        Token.objects.filter(pk=token.pk).update(created=timezone.now() - timedelta(minutes=61))
-        self.assertEqual(self.authed(token.key).status_code, 401)
+    def test_tokens_are_not_stored_in_plain_text(self):
+        key = self.login().data["token"]
+        stored = AuthToken.objects.get(user=self.user)
+        self.assertNotEqual(stored.digest, key)
+        self.assertTrue(key.startswith(stored.token_key))
 
-    def test_login_rotates_the_token(self):
-        old = Token.objects.create(user=self.user)
-        response = self.client.post("/api/auth/token/", {"username": "clerk", "password": "Counter-pass-42"}, format="json")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(set(response.data), {"token"})
-        new_key = response.data["token"]
-        self.assertNotEqual(new_key, old.key)
-        self.assertEqual(list(Token.objects.filter(user=self.user).values_list("key", flat=True)), [new_key])
-        self.assertEqual(self.authed(old.key).status_code, 401)
-        self.assertEqual(self.authed(new_key).status_code, 200)
+    def test_old_drf_tokens_no_longer_work(self):
+        # A 40-hex DRF authtoken key still in a browser after the deploy.
+        self.assertEqual(self.me("9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b").status_code, 401)
 
-    def test_login_after_expiry_issues_a_working_token(self):
-        old = Token.objects.create(user=self.user)
-        Token.objects.filter(pk=old.pk).update(created=timezone.now() - timedelta(days=30))
-        self.assertEqual(self.authed(old.key).status_code, 401)
-        self.client.credentials()
-        response = self.client.post("/api/auth/token/", {"username": "clerk", "password": "Counter-pass-42"}, format="json")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.authed(response.data["token"]).status_code, 200)
+    def test_login_ignores_a_stale_token_header(self):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Token expired-or-revoked-token")
+        self.assertIn("token", self.login(client).data)
 
-    def test_wrong_password_is_400_and_keeps_existing_token(self):
-        token = Token.objects.create(user=self.user)
-        response = self.client.post("/api/auth/token/", {"username": "clerk", "password": "wrong"}, format="json")
+    def test_wrong_password_is_400_with_drf_style_error(self):
+        response = APIClient().post("/api/auth/token/", {"username": "clerk", "password": "wrong"}, format="json")
         self.assertEqual(response.status_code, 400)
-        self.assertTrue(Token.objects.filter(pk=token.pk).exists())
+        self.assertEqual(response.data["non_field_errors"], ["Unable to log in with provided credentials."])
+        self.assertFalse(AuthToken.objects.exists())
+
+    def test_inactive_user_cannot_log_in(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        response = APIClient().post("/api/auth/token/", {"username": "clerk", "password": self.PASSWORD}, format="json")
+        self.assertEqual(response.status_code, 400)
 
     def test_anonymous_gets_401_but_wrong_role_gets_403(self):
-        self.assertEqual(self.client.get("/api/users/").status_code, 401)
-        token = Token.objects.create(user=self.user)  # staff, not admin
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
-        self.assertEqual(self.client.get("/api/users/").status_code, 403)
+        self.assertEqual(APIClient().get("/api/users/").status_code, 401)
+        key = self.login().data["token"]  # staff, not admin
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {key}")
+        self.assertEqual(client.get("/api/users/").status_code, 403)
+
+
+class LoginSessionAdminTests(TestCase):
+    """Django admin lists login sessions and lets an admin revoke them."""
+
+    def setUp(self):
+        self.admin_user = User.objects.create_superuser(username="boss", password="Boss-pass-42", email="")
+        self.clerk = User.objects.create_user(username="clerk", password="Counter-pass-42")
+        self.clerk_tokens = [AuthToken.objects.create(user=self.clerk)[0] for _ in range(2)]
+        AuthToken.objects.create(user=self.admin_user)
+        self.client.force_login(self.admin_user)
+
+    def admin_get(self, url):
+        with override_settings(ENABLE_DJANGO_ADMIN=True):
+            import divya_enterprises.urls as root_urls
+
+            importlib.reload(root_urls)
+            clear_url_caches()
+            try:
+                return self.client.get(url)
+            finally:
+                importlib.reload(root_urls)
+                clear_url_caches()
+
+    def admin_post(self, url, data):
+        with override_settings(ENABLE_DJANGO_ADMIN=True):
+            import divya_enterprises.urls as root_urls
+
+            importlib.reload(root_urls)
+            clear_url_caches()
+            try:
+                return self.client.post(url, data)
+            finally:
+                importlib.reload(root_urls)
+                clear_url_caches()
+
+    def test_lists_one_users_sessions(self):
+        response = self.admin_get(f"/admin/knox/authtoken/?user__id__exact={self.clerk.pk}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["cl"].result_count, 2)
+
+    def test_admin_can_revoke_a_session(self):
+        target = self.clerk_tokens[0]
+        response = self.admin_post(
+            "/admin/knox/authtoken/",
+            {"action": "delete_selected", "_selected_action": [target.pk], "post": "yes"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(AuthToken.objects.filter(pk=target.pk).exists())
+        self.assertEqual(AuthToken.objects.filter(user=self.clerk).count(), 1)
+
+    def test_sessions_cannot_be_created_or_edited_in_admin(self):
+        self.assertEqual(self.admin_get("/admin/knox/authtoken/add/").status_code, 403)
 
 
 @patch.object(ScopedRateThrottle, "THROTTLE_RATES", {"login": "3/min"})

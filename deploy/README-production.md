@@ -85,9 +85,15 @@ Important behaviour:
   `SECRET_KEY` is missing or a placeholder.
 - `SECURE_SSL_REDIRECT` is off on purpose: TLS ends at Cloudflare and nginx
   passes `X-Forwarded-Proto` on, which Django trusts.
-- Login tokens expire `TOKEN_TTL_HOURS` after login (default 168 = 7 days).
-  Each login replaces the user's previous token, so one account signed in on
-  two devices signs the first device out.
+- Login tokens (django-rest-knox) expire `TOKEN_TTL_HOURS` after login
+  (default 168 = 7 days) and are not extended by use. Each login is its own
+  token, so one account can be signed in on the shop PC and phones at once.
+  Logout revokes only that device's token; `POST /api/auth/logoutall/`
+  revokes every device of the calling user. With `ENABLE_DJANGO_ADMIN=true`,
+  an admin (Django `is_staff` user) can list and revoke sessions under
+  Knox > Auth tokens.
+- After the first deploy with knox, existing logins stop working once:
+  everyone signs in again.
 - Login is throttled per client address (`LOGIN_THROTTLE_RATE`, default
   `5/min`). nginx sends Cloudflare's `CF-Connecting-IP` as the client address
   and `NUM_PROXIES=1` makes Django use it.

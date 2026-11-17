@@ -13,6 +13,9 @@ export function resolveApiBaseUrl(env = {}) {
 // user to /login.
 export const SESSION_EXPIRED_EVENT = 'stockbill:session-expired'
 const LOGIN_PATH = '/auth/token/'
+export const LOGOUT_PATH = '/auth/logout/'
+// A 401 from these never means "your session just expired".
+const NO_SESSION_EVENT_PATHS = new Set([LOGIN_PATH, LOGOUT_PATH])
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(import.meta.env),
@@ -30,7 +33,7 @@ api.interceptors.response.use(
   async (error) => {
     // A wrong password on the login form is a 400, but guard the login call
     // anyway so it can never bounce the login page to itself.
-    if (error.response?.status === 401 && error.config?.url !== LOGIN_PATH && typeof window !== 'undefined') {
+    if (error.response?.status === 401 && !NO_SESSION_EVENT_PATHS.has(error.config?.url) && typeof window !== 'undefined') {
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
     }
     if (error.response?.data instanceof Blob) {

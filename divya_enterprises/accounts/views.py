@@ -1,41 +1,51 @@
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.contrib.auth.signals import user_logged_in
+from knox.models import AuthToken
+from knox.settings import knox_settings
+from knox.views import LogoutAllView as KnoxLogoutAllView
+from knox.views import LogoutView as KnoxLogoutView
 from rest_framework import generics, permissions
-from rest_framework.authtoken.models import Token
-from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.fields import DateTimeField
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from .permissions import IsAdminUser
-from .serializers import StaffUserSerializer, UserSerializer
+from .serializers import LoginSerializer, StaffUserSerializer, UserSerializer
 
 User = get_user_model()
 
 
-class LoginView(ObtainAuthToken):
-    """POST username/password -> {"token": ...}; same contract as DRF's view.
+class LoginView(APIView):
+    """POST username/password -> {"token": ..., "expiry": ...}.
 
-    Every successful login issues a brand-new token and deletes the user's
-    old one, so the token lifetime (TOKEN_TTL_HOURS) restarts at login. DRF
-    keeps one token per user, so logging in on a second device signs the
-    first one out. Attempts are throttled per client ("login" scope).
+    Issues a new knox token for this device; the user's other tokens (other
+    devices) stay valid. The token expires TOKEN_TTL_HOURS after login.
+    Attempts are throttled per client ("login" scope).
     """
 
+    # Anonymous by design: a stale token left in the browser must not turn a
+    # login attempt into a 401.
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "login"
 
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        serializer = LoginSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
-        with transaction.atomic():
-            # Row lock serialises two simultaneous logins of the same user,
-            # which would otherwise race on Token's one-per-user constraint.
-            User.objects.select_for_update().only("pk").get(pk=user.pk)
-            Token.objects.filter(user=user).delete()
-            token = Token.objects.create(user=user)
-        return Response({"token": token.key})
+        instance, token = AuthToken.objects.create(user=user, expiry=knox_settings.TOKEN_TTL)
+        user_logged_in.send(sender=user.__class__, request=request, user=user)
+        return Response({"token": token, "expiry": DateTimeField().to_representation(instance.expiry)})
+
+
+class LogoutView(KnoxLogoutView):
+    """POST: revoke the token that made this request (this device only). 204."""
+
+
+class LogoutAllView(KnoxLogoutAllView):
+    """POST: revoke every token of this user (all devices). 204. API only."""
 
 
 class UserListCreateView(generics.ListCreateAPIView):
