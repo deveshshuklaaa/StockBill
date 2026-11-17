@@ -19,7 +19,7 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 - **Language:** Python 3.12+
 - **Web Framework:** Django 5.x
 - **API Framework:** Django REST Framework (DRF)
-- **PDF Generation:** WeasyPrint (with ReportLab / PyMuPDF utilities)
+- **PDF Generation:** ReportLab (PyMuPDF and pypdf in tests only, via `requirements-dev.txt`)
 - **Excel Processing:** openpyxl
 
 ### Database
@@ -88,7 +88,7 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 - **GST Document Numbering:** Tax-invoice numbers (`DE/26-27/00001`) are assigned by the server when an invoice is posted, never by the browser and never for drafts (drafts show as `Draft #<id>`). The series is consecutive, gapless, per financial year (IST), at most 16 characters (CGST Rules 46(b) and 53), and the invoice date is the posting date. Prefixes come from `INVOICE_NUMBER_PREFIX` / `CREDIT_NOTE_NUMBER_PREFIX` (defaults `DE` / `CN`). To start a year's series after an existing serial, run `python manage.py set_document_counter --doc invoice|credit_note --fy 26-27 --last-serial N`. Older `INV-…` invoices keep their original numbers.
 - **Invoice Amendment Workflow:** Supervised correction workflow allowing cancellation and re-issuance with explicit amendment lineage.
 - **Historical Invoice Snapshots:** Immutable capture of customer billing address, product name, SKU, HSN, rate, discount, and tax at the moment of posting.
-- **PDF Invoice Generation:** Server-rendered GST-compliant tax invoices generated via WeasyPrint.
+- **PDF Invoice Generation:** Server-rendered GST-compliant tax invoices drawn with ReportLab.
 
 ### Customers
 - Full CRUD operations with soft-archival (`is_active`).
@@ -341,8 +341,10 @@ Refer to `RESTORE_INSTRUCTIONS.md` inside the migration package for the exact re
 ## Testing & Quality Assurance
 
 ### Backend Test Suite
-Run the full Django test suite from `divya_enterprises/`:
+Install the test-only dependencies (PyMuPDF, pypdf) once, then run the full
+Django test suite from `divya_enterprises/`:
 ```powershell
+pip install -r requirements-dev.txt
 cd divya_enterprises
 ..\.venv\Scripts\python.exe manage.py test
 ```
