@@ -17,9 +17,9 @@ from django.urls import clear_url_caches
 from django.utils import timezone
 from knox.models import AuthToken
 from rest_framework.test import APIClient
-from rest_framework.throttling import ScopedRateThrottle
 
 from accounts.models import User
+from accounts.throttling import LoginRateThrottle
 
 BACKEND_DIR = settings.BASE_DIR
 
@@ -280,17 +280,24 @@ class LoginSessionAdminTests(TestCase):
         self.assertEqual(self.admin_get("/admin/knox/authtoken/add/").status_code, 403)
 
 
-@patch.object(ScopedRateThrottle, "THROTTLE_RATES", {"login": "3/min"})
+@patch.object(LoginRateThrottle, "THROTTLE_RATES", {"login": "3/min"})
 class LoginThrottleTests(TestCase):
+    NGINX = "172.18.0.4"  # every proxied request reaches Django from nginx
+
     def setUp(self):
         cache.clear()
         self.client = APIClient()
         User.objects.create_user(username="clerk", password="Counter-pass-42")
 
-    def attempt(self, password="wrong", ip="203.0.113.7"):
+    def attempt(self, password="wrong", ip="203.0.113.7", **headers):
         return self.client.post(
-            "/api/auth/token/", {"username": "clerk", "password": password}, format="json", REMOTE_ADDR=ip
+            "/api/auth/token/", {"username": "clerk", "password": password}, format="json", REMOTE_ADDR=ip, **headers
         )
+
+    def lock_out(self, **kwargs):
+        for _ in range(3):
+            self.assertEqual(self.attempt(**kwargs).status_code, 400)
+        self.assertEqual(self.attempt(**kwargs).status_code, 429)
 
     def test_request_after_the_limit_gets_429(self):
         for _ in range(3):
@@ -300,10 +307,43 @@ class LoginThrottleTests(TestCase):
         self.assertIn("Retry-After", response)
 
     def test_limit_is_per_client_address(self):
-        for _ in range(3):
-            self.attempt(ip="203.0.113.7")
-        self.assertEqual(self.attempt(ip="203.0.113.7").status_code, 429)
+        self.lock_out(ip="203.0.113.7")
         self.assertEqual(self.attempt(password="Counter-pass-42", ip="198.51.100.9").status_code, 200)
+
+    @override_settings(TRUST_CF_CONNECTING_IP=True)
+    def test_cloudflare_clients_behind_one_proxy_are_throttled_separately(self):
+        self.lock_out(ip=self.NGINX, HTTP_CF_CONNECTING_IP="203.0.113.7")
+        # Same nginx peer, different real client: not locked out.
+        ok = self.attempt(password="Counter-pass-42", ip=self.NGINX, HTTP_CF_CONNECTING_IP="198.51.100.9")
+        self.assertEqual(ok.status_code, 200)
+        # IPv6 clients work too.
+        ok6 = self.attempt(password="Counter-pass-42", ip=self.NGINX, HTTP_CF_CONNECTING_IP="2001:db8::25")
+        self.assertEqual(ok6.status_code, 200)
+        # The locked-out client stays locked out.
+        again = self.attempt(password="Counter-pass-42", ip=self.NGINX, HTTP_CF_CONNECTING_IP="203.0.113.7")
+        self.assertEqual(again.status_code, 429)
+
+    @override_settings(TRUST_CF_CONNECTING_IP=False)
+    def test_header_is_ignored_unless_trusted(self):
+        self.lock_out(ip=self.NGINX, HTTP_CF_CONNECTING_IP="203.0.113.7")
+        # A different header value does not escape: the key is REMOTE_ADDR.
+        response = self.attempt(password="Counter-pass-42", ip=self.NGINX, HTTP_CF_CONNECTING_IP="198.51.100.9")
+        self.assertEqual(response.status_code, 429)
+
+    def test_header_is_ignored_by_default(self):
+        self.assertFalse(settings.TRUST_CF_CONNECTING_IP)  # dev / shop PC default
+
+    @override_settings(TRUST_CF_CONNECTING_IP=True)
+    def test_invalid_header_falls_back_to_the_peer_address(self):
+        self.lock_out(ip=self.NGINX, HTTP_CF_CONNECTING_IP="not-an-ip")
+        response = self.attempt(password="Counter-pass-42", ip=self.NGINX, HTTP_CF_CONNECTING_IP="also bogus")
+        self.assertEqual(response.status_code, 429)
+
+    def test_x_forwarded_for_cannot_pick_a_new_bucket(self):
+        # NUM_PROXIES is unset, so X-Forwarded-For is ignored entirely.
+        self.lock_out(ip=self.NGINX, HTTP_X_FORWARDED_FOR="203.0.113.7")
+        response = self.attempt(password="Counter-pass-42", ip=self.NGINX, HTTP_X_FORWARDED_FOR="198.51.100.9")
+        self.assertEqual(response.status_code, 429)
 
     def test_throttle_uses_the_shared_database_cache(self):
         self.assertEqual(settings.CACHES["default"]["BACKEND"], "django.core.cache.backends.db.DatabaseCache")

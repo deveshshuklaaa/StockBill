@@ -7,11 +7,11 @@ from knox.views import LogoutView as KnoxLogoutView
 from rest_framework import generics, permissions
 from rest_framework.fields import DateTimeField
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from .permissions import IsAdminUser
 from .serializers import LoginSerializer, StaffUserSerializer, UserSerializer
+from .throttling import LoginRateThrottle
 
 User = get_user_model()
 
@@ -21,14 +21,15 @@ class LoginView(APIView):
 
     Issues a new knox token for this device; the user's other tokens (other
     devices) stay valid. The token expires TOKEN_TTL_HOURS after login.
-    Attempts are throttled per client ("login" scope).
+    Attempts are throttled per client address ("login" scope; behind
+    Cloudflare the address comes from CF-Connecting-IP, see throttling.py).
     """
 
     # Anonymous by design: a stale token left in the browser must not turn a
     # login attempt into a 401.
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [LoginRateThrottle]
     throttle_scope = "login"
 
     def post(self, request, *args, **kwargs):

@@ -95,12 +95,55 @@ Important behaviour:
 - After the first deploy with knox, existing logins stop working once:
   everyone signs in again.
 - Login is throttled per client address (`LOGIN_THROTTLE_RATE`, default
-  `5/min`). nginx sends Cloudflare's `CF-Connecting-IP` as the client address
-  and `NUM_PROXIES=1` makes Django use it.
+  `5/min`); see "Client address and login throttling" below.
 - `/admin/` exists only with `ENABLE_DJANGO_ADMIN=true`.
 - `/api/health/` needs no login and returns only `{"status": "ok"}` (or 503).
   Behind Cloudflare Access, an external monitor needs an Access bypass (or
   service token) for that one path.
+
+## Client address and login throttling
+
+Request path in production:
+
+```
+client -> Cloudflare edge -> cloudflared (container) -> nginx :80 -> Gunicorn
+```
+
+Django's `REMOTE_ADDR` is always the nginx container, so throttling on it
+would put every user in one bucket: one person's wrong passwords would lock
+out the whole shop. The throttle therefore needs the real client address,
+and it must come from something a client cannot forge:
+
+- **`CF-Connecting-IP`** is set by Cloudflare to the address that connected
+  to it, overwriting anything the client sent. With
+  `TRUST_CF_CONNECTING_IP=True`, the login throttle
+  (`accounts/throttling.py`) keys on it (after checking it parses as an IP
+  address).
+- **Only cloudflared can deliver that header.** nginx has two listeners:
+  `:80` is the tunnel target and is not published, so only containers on the
+  compose network (cloudflared) reach it; it passes `CF-Connecting-IP`
+  through unchanged. `:8081` is published as `127.0.0.1:8080` for local
+  checks and SSH port-forwarding, and strips the header. No path except the
+  tunnel can choose a throttle key. Requests on the loopback listener share
+  one bucket (nginx's address), which only matters for someone already on
+  the server.
+- **`NUM_PROXIES=0`** (the default). With 0, DRF ignores
+  `X-Forwarded-For` and uses `REMOTE_ADDR` whenever `CF-Connecting-IP` is
+  not trusted. Other values are worse for this chain:
+  - unset (`None`, DRF's own default) keys on the *entire*
+    `X-Forwarded-For` string as sent, so a client could send a new value
+    on every attempt and never be throttled;
+  - `1` or more picks an entry counted from the end. Cloudflare appends the
+    real client to whatever `X-Forwarded-For` the client sent, and
+    cloudflared/nginx may add hops of their own, so the right index cannot
+    be confirmed until the tunnel runs. A wrong index either lets clients
+    choose their key or puts everyone in one bucket.
+- Keep `TRUST_CF_CONNECTING_IP` off anywhere that is not behind this exact
+  setup (dev PC, shop PC): there the header would be client-controlled.
+- nginx's tunnel access log records `CF-Connecting-IP` first on each line.
+
+Phase 4 check: from two different networks (e.g. shop Wi-Fi and a phone on
+mobile data), fail the login 6 times on one; the other must still log in.
 
 ## Building for ARM64 from another machine
 

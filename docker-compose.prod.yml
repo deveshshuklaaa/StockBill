@@ -71,13 +71,15 @@ services:
         condition: service_healthy
     ports:
       # Loopback only: for local checks and SSH port-forwarding. Never 0.0.0.0.
-      - "127.0.0.1:8080:80"
+      # Container port 8081 is the listener that strips CF-Connecting-IP;
+      # port 80 (tunnel) is reachable only by cloudflared on this network.
+      - "127.0.0.1:8080:8081"
     logging: *default-logging
 
   cloudflared:
     # Optional: started only with "--profile tunnel" (needs TUNNEL_TOKEN in
     # .env.production). In the Cloudflare dashboard, point the tunnel's
-    # public hostname at http://nginx:80.
+    # public hostname at http://nginx:80 (the tunnel listener, not 8081).
     profiles: ["tunnel"]
     image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.6.0}
     restart: unless-stopped

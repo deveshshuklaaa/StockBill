@@ -79,6 +79,8 @@ CMD ["sh", "-c", "exec gunicorn divya_enterprises.wsgi:application --bind 0.0.0.
 FROM nginx:${NGINX_VERSION}-alpine AS nginx
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/stockbill.conf /etc/nginx/conf.d/stockbill.conf
+# Shared locations, included by both listeners (outside conf.d on purpose).
+COPY deploy/nginx/stockbill-common.conf /etc/nginx/stockbill/common.conf
 COPY --from=frontend-build /frontend/dist /usr/share/nginx/html
 # Django admin CSS/JS, served only if ENABLE_DJANGO_ADMIN is on.
 COPY --from=backend /app/staticfiles /usr/share/nginx/static

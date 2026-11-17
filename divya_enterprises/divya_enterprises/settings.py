@@ -161,6 +161,12 @@ AUTH_USER_MODEL = "accounts.User"
 # DEBUG, so it is off in production unless ENABLE_DJANGO_ADMIN=true.
 ENABLE_DJANGO_ADMIN = env_bool("ENABLE_DJANGO_ADMIN", DEBUG)
 
+# Login throttling keys on Cloudflare's CF-Connecting-IP header only when
+# this is on. Turn it on only behind the Cloudflare tunnel, where nginx
+# passes that header from cloudflared and strips it everywhere else
+# (accounts/throttling.py, deploy/nginx/stockbill.conf).
+TRUST_CF_CONNECTING_IP = env_bool("TRUST_CF_CONNECTING_IP", False)
+
 # API tokens (django-rest-knox) expire this many hours after login. Each
 # login gets its own token, so several devices can be signed in at once and
 # logging out revokes only that device's token.
@@ -224,9 +230,11 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "login": os.getenv("LOGIN_THROTTLE_RATE", "5/min"),
     },
-    # Number of proxies in front of Django that set X-Forwarded-For (nginx in
-    # production), so throttling sees the real client address. Unset in dev.
-    "NUM_PROXIES": env_int("NUM_PROXIES", None),
+    # 0 = throttle on REMOTE_ADDR and ignore X-Forwarded-For entirely. (DRF's
+    # own default, None, keys on the whole client-supplied X-Forwarded-For,
+    # so anyone could pick a fresh bucket per request.) Behind Cloudflare the
+    # real client comes from CF-Connecting-IP (TRUST_CF_CONNECTING_IP).
+    "NUM_PROXIES": env_int("NUM_PROXIES", 0),
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
