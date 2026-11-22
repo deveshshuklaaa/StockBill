@@ -867,3 +867,130 @@ class InvoicePdfCustomerBlockTests(InvoicePdfLayoutHelpers, APITestCase):
         last = doc[-1].get_text()
         self.assertIn(f"Rs. {self.invoice.total_amount:.2f}", last)
         self.assertIn(f"Page {len(doc)} of {len(doc)}", last)
+
+
+class InvoicePdfFooterTests(APITestCase):
+    """Terms and the "For <business name>" line wrap instead of being cut."""
+
+    setUpTestData = InvoicePdfGenerationTests.__dict__["setUpTestData"]
+
+    DEFAULT_TERMS = [
+        "1. Goods once sold will not be taken back or exchanged.",
+        "2. Bills not paid on due date will attract 24% interest p.a.",
+        "3. Subject to Mumbai Jurisdiction.",
+    ]
+    LONG_NAME = "Shree Siddhivinayak Wholesale Provision Traders and Sons LLP"
+
+    def render(self, *, terms=None, seller_name=None, lines=None):
+        if terms is not None:
+            BusinessProfile.objects.filter(pk=self.profile.pk).update(terms_and_conditions=terms)
+        if seller_name is not None:
+            self.invoice.seller_business_name_snapshot = seller_name  # in memory only
+        return pymupdf.open("pdf", build_invoice_a5_pdf(self.invoice, lines=lines))
+
+    @staticmethod
+    def flat(text):
+        return " ".join(text.split())
+
+    @staticmethod
+    def spans(page):
+        for block in page.get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                for span in line["spans"]:
+                    if span["text"].strip():
+                        yield span
+
+    @staticmethod
+    def word(page, text):
+        return next(w for w in page.get_text("words") if w[4] == text)
+
+    def test_default_three_terms_print_in_full(self):
+        text = self.flat(self.render(terms="")[0].get_text())
+        for line in self.DEFAULT_TERMS:
+            self.assertIn(line, text)  # previously cut at 50 characters ("excha...")
+
+    def test_profile_terms_print_in_full(self):
+        text = self.flat(self.render()[0].get_text())
+        self.assertIn("Goods once sold will not be taken back.", text)
+        self.assertIn("Interest 24% after due date.", text)
+
+    def test_six_long_terms_stay_inside_the_terms_box(self):
+        terms = "\n".join(
+            f"{i}. Clause {i}: goods are delivered at the buyer's risk and payment is due within thirty days of the bill date."
+            for i in range(1, 7)
+        )
+        page = self.render(terms=terms)[0]
+        receiver = self.word(page, "Receiver's")
+        authorised = self.word(page, "Authorised")
+        title = self.word(page, "Terms")
+        terms_spans = [s for s in self.spans(page) if s["bbox"][1] > title[3] - 0.5 and s["bbox"][0] < receiver[0]]
+        self.assertTrue(terms_spans)
+        # The Receiver's Signature box starts at 45% of the invoice width.
+        signature_boxes_left = page.get_text("words") and min(
+            receiver[0], authorised[0]
+        ) - 20
+        for span in terms_spans:
+            self.assertLess(span["bbox"][2], signature_boxes_left, span["text"])
+            self.assertGreaterEqual(round(span["size"] / 0.98, 1), 5.0)  # never below 5 pt
+            # no overlap with either signature label
+            for label in (receiver, authorised):
+                overlaps = span["bbox"][2] > label[0] and span["bbox"][0] < label[2] and span["bbox"][3] > label[1] and span["bbox"][1] < label[3]
+                self.assertFalse(overlaps, span["text"])
+        text = self.flat(page.get_text())
+        fits_in_full = all(f"Clause {i}:" in text for i in range(1, 7)) and "…" not in text
+        self.assertTrue(fits_in_full or text.count("…") == 1, "either everything fits or it ends with an ellipsis")
+
+    def test_terms_layout_steps_font_then_ellipsis(self):
+        from billing.pdf_engine import layout_terms
+
+        # Same geometry as the invoice: 42 pt box, first baseline 14.5 below its top, 2 pt bottom margin.
+        short = layout_terms("\n".join(self.DEFAULT_TERMS), 247, first_baseline=27.5, min_baseline=2)
+        self.assertEqual((short["font_size"], short["truncated"]), (6.0, False))
+        self.assertEqual(short["lines"], self.DEFAULT_TERMS)
+        six = layout_terms("\n".join(["word " * 9] * 6), 247, first_baseline=27.5, min_baseline=2)
+        self.assertEqual(six["font_size"], 5.0)  # 6 lines fit only at 5 pt
+        self.assertEqual(len(six["lines"]), 6)
+        self.assertFalse(six["truncated"])
+        huge = layout_terms("\n".join(["word " * 60] * 10), 247, first_baseline=27.5, min_baseline=2)
+        self.assertEqual((huge["font_size"], huge["truncated"]), (5.0, True))
+        self.assertTrue(huge["lines"][-1].endswith("…"))
+        self.assertEqual(len(huge["lines"]), int((27.5 - 2) // 5.0) + 1)
+
+    def test_too_long_terms_are_logged_and_end_with_ellipsis(self):
+        with self.assertLogs("billing.pdf_engine", level="WARNING") as logs:
+            page = self.render(terms="\n".join(["word " * 60] * 10))[0]
+        self.assertIn("too long for the terms box", logs.output[0])
+        self.assertEqual(page.get_text().count("…"), 1)
+
+    def test_sixty_character_business_name_prints_in_full_after_for(self):
+        self.assertEqual(len(self.LONG_NAME), 60)
+        page = self.render(seller_name=self.LONG_NAME)[0]
+        self.assertIn(f"For {self.LONG_NAME}", self.flat(page.get_text()))
+        authorised = self.word(page, "Authorised")
+        for_word = next(w for w in page.get_text("words") if w[4] == "For" and w[0] > authorised[0] - 60)
+        name_words = [w for w in page.get_text("words") if w[0] >= for_word[0] - 1 and for_word[1] - 1 <= w[1] < authorised[1]]
+        self.assertTrue(name_words)
+        invoice_right = self.word(page, "Amount")[2] + 4  # right-aligned 4 pt inside the border
+        self.assertLessEqual(max(w[2] for w in name_words), invoice_right)  # inside the signature column
+        self.assertGreaterEqual(min(w[0] for w in name_words), authorised[0] - 60)
+
+    def test_signature_name_layout(self):
+        from billing.pdf_engine import layout_signature_name
+
+        self.assertEqual(layout_signature_name("Divya Enterprises", 158)["font_size"], 7.0)
+        long_name = layout_signature_name(self.LONG_NAME, 158)
+        self.assertFalse(long_name["truncated"])
+        self.assertLessEqual(len(long_name["lines"]), 2)
+        self.assertEqual(" ".join(long_name["lines"]), f"For {self.LONG_NAME}")
+        absurd = layout_signature_name("Very Long Business Name " * 10, 158)
+        self.assertTrue(absurd["truncated"])
+        self.assertEqual(len(absurd["lines"]), 2)
+        self.assertTrue(absurd["lines"][-1].endswith("…"))
+
+    def test_continuation_pages_use_the_same_footer(self):
+        doc = self.render(seller_name=self.LONG_NAME, lines=InvoicePdfLayoutHelpers.make_lines(self, 20))
+        self.assertGreater(len(doc), 1)
+        for page in doc:
+            text = self.flat(page.get_text())
+            self.assertIn(f"For {self.LONG_NAME}", text)
+            self.assertIn("Interest 24% after due date.", text)
