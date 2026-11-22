@@ -7,6 +7,12 @@ from .profit import get_invoice_profit_data
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
+    # The logo itself is served by /api/business-profile/logo/.
+    has_logo = serializers.SerializerMethodField()
+
+    def get_has_logo(self, obj):
+        return bool(obj.logo)
+
     class Meta:
         model = BusinessProfile
         fields = [
@@ -22,8 +28,10 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "email",
             "terms_and_conditions",
             "round_off_invoice_total",
+            "has_logo",
+            "logo_updated_at",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "has_logo", "logo_updated_at"]
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

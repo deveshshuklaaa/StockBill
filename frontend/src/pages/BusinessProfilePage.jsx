@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiErrorMessage } from '../api/client'
 import { fetchBusinessProfile, updateBusinessProfile } from '../api/settings'
+import LogoSettings from '../components/LogoSettings'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 
@@ -17,6 +18,7 @@ export default function BusinessProfilePage() {
     contact_details: '',
     round_off_invoice_total: true,
   })
+  const [hasLogo, setHasLogo] = useState(false)
   const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -36,6 +38,7 @@ export default function BusinessProfilePage() {
           contact_details: data.contact_details || '',
           round_off_invoice_total: data.round_off_invoice_total !== false,
         })
+        setHasLogo(Boolean(data.has_logo))
       })
       .catch((err) => setError(apiErrorMessage(err)))
       .finally(() => setBusy(false))
@@ -119,5 +122,7 @@ export default function BusinessProfilePage() {
         </button>
       </div>
     </form>
+
+    <LogoSettings hasLogo={hasLogo} />
   </section>
 }
