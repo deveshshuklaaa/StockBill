@@ -266,7 +266,7 @@ export default function CustomerDetailPage() {
     <div className="print-sheet">
       <div className="invoice-detail-head">
         <div>
-          <p className="eyebrow">Divya Enterprises / Customer account</p>
+          <p className="eyebrow">Customer account</p>
           <h1>{customer.name}</h1>
           <p>{customer.customer_type}{customer.is_regular ? ' · Regular' : ''}{customer.is_active ? '' : ' · ARCHIVED'}</p>
         </div>

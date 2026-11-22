@@ -16,3 +16,15 @@ html.env-banner-on .login-page, html.env-banner-on .login-aside, html.env-banner
   .env-banner { display: none !important; }
   html.env-banner-on body { padding-top: 0 !important; }
 }
+
+/* StockBill product lockup (branding/BRAND.md). */
+:root { --sb-teal: #0F5E57; --sb-ink: #10231F; --sb-amber: #F2B84B; --sb-dark: #0E1B19; }
+.sb-lockup { display: inline-flex; align-items: center; gap: 10px; }
+.sb-icon { display: block; flex: none; }
+.sb-wordmark { font-family: 'Space Grotesk', 'DM Sans', sans-serif; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+.sb-lockup-light .sb-stock { color: var(--sb-ink); }
+.sb-lockup-light .sb-bill { color: var(--sb-teal); }
+.sb-lockup-dark .sb-stock { color: #fff; }
+.sb-lockup-dark .sb-bill { color: var(--sb-amber); }
+.sidebar-brand { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sidebar-shop-name { color: #c9d8cd; font-size: 12px; line-height: 1.3; padding-left: 38px; overflow-wrap: anywhere; }
