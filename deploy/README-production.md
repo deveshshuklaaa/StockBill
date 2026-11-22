@@ -55,6 +55,19 @@ docker compose -f docker-compose.prod.yml --profile tunnel down       # stop (da
 
 Never add `-v` to `down`: that deletes the database volume.
 
+### Quick tunnel (testing, no domain yet)
+
+```bash
+docker compose -f docker-compose.prod.yml --profile quick-tunnel up -d
+docker compose -f docker-compose.prod.yml logs cloudflared-quick | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com'
+```
+
+The hostname is random and changes whenever the `cloudflared-quick`
+container restarts (including a server reboot). Put it in `ALLOWED_HOSTS`
+and `CSRF_TRUSTED_ORIGINS` (as `https://...`), then
+`docker compose -f docker-compose.prod.yml up -d backend` to reload the
+settings. Switch to the named tunnel (profile `tunnel`) before real use.
+
 ## Deploying a new version
 
 ```bash

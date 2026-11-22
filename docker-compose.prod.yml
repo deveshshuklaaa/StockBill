@@ -89,5 +89,21 @@ services:
       - nginx
     logging: *default-logging
 
+  cloudflared-quick:
+    # Testing only, until a domain is on Cloudflare: a TryCloudflare quick
+    # tunnel (no account, no token). Start with "--profile quick-tunnel".
+    # Cloudflare picks a random https://<words>.trycloudflare.com hostname,
+    # printed in this service's log, and a NEW one on every container
+    # restart, so ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS must be updated each
+    # time. Like the named tunnel it targets nginx:80, so CF-Connecting-IP
+    # (the login-throttle key) arrives intact. Never run both profiles.
+    profiles: ["quick-tunnel"]
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.6.0}
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://nginx:80
+    depends_on:
+      - nginx
+    logging: *default-logging
+
 volumes:
   stockbill_pgdata:

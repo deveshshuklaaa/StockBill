@@ -14,6 +14,7 @@ htmlcov/
 # Environment
 .env
 .env.*
+*.env
 !frontend/.env.example
 
 # Virtualenv
