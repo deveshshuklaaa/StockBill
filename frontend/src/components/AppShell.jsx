@@ -1,12 +1,24 @@
-import { Suspense } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { fetchMeta } from '../api/meta'
 import { useAuth } from '../context/AuthContext'
+import StockBillLogo from './StockBillLogo'
 import PageLoadingFallback from './PageLoadingFallback'
 
 export default function AppShell() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const isAdmin = user?.role === 'admin'
+  // Shop name from the Business Profile (via /api/meta/, signed-in only).
+  const [shopName, setShopName] = useState('')
+
+  useEffect(() => {
+    let active = true
+    fetchMeta()
+      .then((meta) => { if (active) setShopName(meta?.business_name || '') })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
 
   function signOut() {
     logout()
@@ -22,10 +34,9 @@ export default function AppShell() {
           title="Go to Dashboard"
           aria-label="Go to Dashboard"
         >
-          <div className="brand-mark">DE</div>
-          <div>
-            <strong>Divya Enterprises</strong>
-            <span>StockBill operations</span>
+          <div className="sidebar-brand">
+            <StockBillLogo tone="dark" iconSize={28} textSize={18} />
+            {shopName && <span className="sidebar-shop-name" data-testid="shop-name">{shopName}</span>}
           </div>
         </Link>
         <nav className="primary-nav" aria-label="Primary navigation">

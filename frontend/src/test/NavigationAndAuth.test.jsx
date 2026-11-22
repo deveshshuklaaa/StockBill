@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import api from '../api/client'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -176,10 +177,13 @@ describe('Authentication and Navigation Improvements', () => {
     })
   })
 
-  describe('Divya Enterprises Logo as Home Button', () => {
-    it('renders Divya Enterprises logo as a link to /dashboard with accessible label', () => {
+  describe('StockBill logo as Home Button', () => {
+    it('renders the StockBill lockup and the shop name as a link to /dashboard', async () => {
       authContextState.token = 'valid-token'
       authContextState.user = { id: 1, username: 'admin', role: 'admin' }
+      api.get.mockImplementation((url) => Promise.resolve(
+        url === '/meta/' ? { data: { environment: 'production', business_name: 'Sharma General Store' } } : { data: {} }
+      ))
 
       render(
         <MemoryRouter initialEntries={['/products']}>
@@ -192,8 +196,10 @@ describe('Authentication and Navigation Improvements', () => {
       expect(logoLink).toHaveAttribute('href', '/dashboard')
       expect(logoLink).toHaveAttribute('title', 'Go to Dashboard')
       expect(logoLink).toHaveClass('brand-home-link')
-      expect(logoLink).toHaveTextContent('Divya Enterprises')
-      expect(logoLink).toHaveTextContent('StockBill operations')
+      expect(logoLink).toHaveTextContent('StockBill')
+      expect(await screen.findByTestId('shop-name')).toHaveTextContent('Sharma General Store')
+      expect(api.get).toHaveBeenCalledWith('/meta/')
+      expect(logoLink).not.toHaveTextContent(/divya/i)
     })
 
     it('works correctly for staff users without showing admin-only nav links', () => {
