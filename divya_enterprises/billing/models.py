@@ -86,6 +86,9 @@ class Invoice(models.Model):
     customer_registration_type_snapshot = models.CharField(max_length=20, blank=True)
     billing_address_snapshot = models.TextField(blank=True)
     shipping_address_snapshot = models.TextField(blank=True)
+    # Terms & conditions in force when the invoice was issued (contractual,
+    # e.g. an interest clause). Set at posting with the seller snapshots.
+    terms_snapshot = models.TextField(blank=True)
     state_snapshot = models.CharField(max_length=100, blank=True)
     pincode_snapshot = models.CharField(max_length=20, blank=True)
     place_of_supply = models.CharField(max_length=10, blank=True)
@@ -159,7 +162,7 @@ class Invoice(models.Model):
                     "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
                     "seller_state_snapshot", "seller_state_code_snapshot",
                     "customer_state_code_snapshot", "customer_registration_type_snapshot",
-                    "place_of_supply", "tax_mode",
+                    "place_of_supply", "tax_mode", "terms_snapshot",
                 ]
                 if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
                     raise ValueError("Posted and cancelled invoice financial fields are immutable.")
