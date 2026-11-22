@@ -82,6 +82,7 @@ const MOCK_SUMMARY = {
   selected_invoice_numbers: ['INV-001', 'INV-002'],
   total_products: 4,
   total_base_quantity: '73.000',
+  business_name: 'Sharma General Store',
   items: [
     {
       product_id: 1,
@@ -402,7 +403,8 @@ describe('Item-wise Summary Frontend Feature', () => {
     })
 
     const printDoc = screen.getByTestId('item-summary-print-doc')
-    expect(within(printDoc).getByText('DIVYA ENTERPRISES')).toBeInTheDocument()
+    // Shop name from the Business Profile (via the summary API), never a literal.
+    expect(within(printDoc).getByText('Sharma General Store')).toBeInTheDocument()
     expect(within(printDoc).getByText('INV-001, INV-002')).toBeInTheDocument()
     expect(within(printDoc).getByText('Yellow Banana Chips')).toBeInTheDocument()
     expect(within(printDoc).getByText('73 pcs')).toBeInTheDocument()
@@ -467,6 +469,7 @@ describe('Item-wise Summary Frontend Feature', () => {
       invoice_numbers: ['INV-001', 'INV-002', 'INV-003', 'INV-004', 'INV-005'],
       total_products: 17,
       total_base_quantity: '1530.000',
+      business_name: 'Sharma General Store',
       items: SEVENTEEN_PRODUCTS,
     }
 
@@ -519,7 +522,7 @@ describe('Item-wise Summary Frontend Feature', () => {
     expect(within(footer).getByText('1,530 pcs')).toBeInTheDocument()
 
     // 4. Header elements appear exactly once
-    expect(within(printDoc).getAllByText('DIVYA ENTERPRISES')).toHaveLength(1)
+    expect(within(printDoc).getAllByText('Sharma General Store')).toHaveLength(1)
     expect(within(printDoc).getAllByText('ITEM-WISE SUMMARY')).toHaveLength(1)
 
     // 5. The print table uses table-header-group in styles for natural repeating

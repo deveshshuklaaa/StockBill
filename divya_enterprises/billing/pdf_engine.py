@@ -369,20 +369,36 @@ def layout_terms(terms_text, max_w, first_baseline, min_baseline):
     return {"lines": kept, "font_size": size, "truncated": True}
 
 
-def layout_signature_name(co_name, max_w):
-    """"For <business name>": shrink to fit (down to 6 pt), then wrap to 2
-    lines; a name that still does not fit ends with a visible "…"."""
-    text = f"For {' '.join(str(co_name or '').split())}".rstrip()
-    for size in SIGNATURE_NAME_FONT_SIZES:
-        if stringWidth(text, "Helvetica-Bold", size) <= max_w:
-            return {"lines": [text], "font_size": size, "truncated": False}
-    size = SIGNATURE_NAME_FONT_SIZES[-1]
-    lines = wrap_product_description(text, max_w, "Helvetica-Bold", size)
-    if len(lines) <= SIGNATURE_NAME_MAX_LINES:
+def shrink_then_wrap(text, max_w, font_name, sizes, max_lines):
+    """Fit ``text`` on one line at the first size in ``sizes`` that fits;
+    otherwise wrap it at the smallest size into at most ``max_lines`` lines.
+    Text that still does not fit ends with a visible "…" (truncated=True),
+    never a silent cut."""
+    text = " ".join(str(text or "").split())
+    for size in sizes:
+        if stringWidth(text, font_name, size) <= max_w:
+            return {"lines": [text] if text else [], "font_size": size, "truncated": False}
+    size = sizes[-1]
+    lines = wrap_product_description(text, max_w, font_name, size)
+    if len(lines) <= max_lines:
         return {"lines": lines, "font_size": size, "truncated": False}
-    kept = lines[:SIGNATURE_NAME_MAX_LINES]
-    kept[-1] = _with_ellipsis(" ".join([kept[-1]] + lines[SIGNATURE_NAME_MAX_LINES:]), max_w, "Helvetica-Bold", size)
+    kept = lines[:max_lines]
+    kept[-1] = _with_ellipsis(" ".join([kept[-1]] + lines[max_lines:]), max_w, font_name, size)
     return {"lines": kept, "font_size": size, "truncated": True}
+
+
+def layout_signature_name(co_name, max_w):
+    """"For <business name>": shrink to fit (down to 6 pt), then wrap to 2 lines."""
+    text = f"For {' '.join(str(co_name or '').split())}".rstrip()
+    return shrink_then_wrap(text, max_w, "Helvetica-Bold", SIGNATURE_NAME_FONT_SIZES, SIGNATURE_NAME_MAX_LINES)
+
+
+HEADER_NAME_FONT_SIZES = (11.0, 10.0, 9.0, 8.0)  # 8 pt minimum, then 2 lines
+
+
+def layout_header_name(co_name, max_w):
+    """Business name in the invoice header (upper case): shrink, then wrap."""
+    return shrink_then_wrap(str(co_name or "").upper(), max_w, "Helvetica-Bold", HEADER_NAME_FONT_SIZES, 2)
 
 
 def draw_footer_boxes(c, *, left_x, right_x, bottom_y, words_bot, usable_w, terms_text, co_name):
@@ -533,49 +549,37 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
     """
     buffer = io.BytesIO()
 
-    # Use invoice snapshots as authoritative source for posted invoices.
-    # BusinessProfile is only a fallback for drafts or missing snapshots.
+    # Every shop detail comes from the invoice's snapshots or the Business
+    # Profile, never from code. Issued (posted/cancelled) invoices use their
+    # snapshots first; drafts use the current profile first. A value that
+    # exists in neither prints as blank, never as another business's data.
     profile = BusinessProfile.objects.first()
-    is_posted = invoice.state == Invoice.STATE_POSTED
+    is_issued = invoice.state in (Invoice.STATE_POSTED, Invoice.STATE_CANCELLED)
 
-    default_company = "DIVYA ENTERPRISES"
-    default_address = "GROUND FLOOR SHOP NO 30 SHAH ARCADE\n3 RANI SATI MARG MALAD EAST MUMBAI 400097"
-    default_phone = "9930008633"
-    default_email = "divyaenterprises2501@gmail.com"
-    default_gstin = "27ECNPS6389P1Z5"
-    default_state = "Maharashtra"
-    default_state_code = "27"
-    default_terms = (
-        "1. Goods once sold will not be taken back or exchanged.\n"
-        "2. Bills not paid on due date will attract 24% interest p.a.\n"
-        "3. Subject to Mumbai Jurisdiction."
-    )
+    def profile_value(field):
+        return (getattr(profile, field, "") or "") if profile else ""
 
-    if is_posted:
-        co_name = invoice.seller_business_name_snapshot or (profile.business_name if (profile and profile.business_name) else default_company)
-        co_address = invoice.seller_address_snapshot or (profile.registered_address if (profile and profile.registered_address) else default_address)
-        co_phone = (profile.phone if (profile and profile.phone) else None) or (profile.contact_details if (profile and profile.contact_details) else None) or default_phone
-        co_email = (profile.email if (profile and profile.email) else None) or default_email
-        co_gstin = invoice.seller_gstin_snapshot or (profile.gstin if (profile and profile.gstin) else default_gstin)
-        co_state = invoice.seller_state_snapshot or (profile.state if (profile and profile.state) else default_state)
-        co_state_code = invoice.seller_state_code_snapshot or (profile.state_code if (profile and profile.state_code) else default_state_code)
-        terms_text = (profile.terms_and_conditions if (profile and profile.terms_and_conditions) else None) or default_terms
-    else:
-        co_name = (profile.business_name if (profile and profile.business_name) else None) or invoice.seller_business_name_snapshot or default_company
-        co_address = (profile.registered_address if (profile and profile.registered_address) else None) or invoice.seller_address_snapshot or default_address
-        co_phone = (profile.phone if (profile and profile.phone) else None) or (profile.contact_details if (profile and profile.contact_details) else None) or default_phone
-        co_email = (profile.email if (profile and profile.email) else None) or default_email
-        co_gstin = (profile.gstin if (profile and profile.gstin) else None) or invoice.seller_gstin_snapshot or default_gstin
-        co_state = (profile.state if (profile and profile.state) else None) or invoice.seller_state_snapshot or default_state
-        co_state_code = (profile.state_code if (profile and profile.state_code) else None) or invoice.seller_state_code_snapshot or default_state_code
-        terms_text = (profile.terms_and_conditions if (profile and profile.terms_and_conditions) else None) or default_terms
+    def seller_value(snapshot_field, profile_field):
+        snapshot = getattr(invoice, snapshot_field, "") or ""
+        current = profile_value(profile_field)
+        return (snapshot or current) if is_issued else (current or snapshot)
+
+    co_name = seller_value("seller_business_name_snapshot", "business_name")
+    co_address = seller_value("seller_address_snapshot", "registered_address")
+    co_gstin = seller_value("seller_gstin_snapshot", "gstin")
+    co_state = seller_value("seller_state_snapshot", "state")
+    co_state_code = seller_value("seller_state_code_snapshot", "state_code")
+    co_phone = profile_value("phone") or profile_value("contact_details")
+    co_email = profile_value("email")
+    terms_text = profile_value("terms_and_conditions")
 
     cust_name = invoice.customer_name_snapshot or (invoice.customer.name if invoice.customer else "Walk-in Customer")
     cust_address = invoice.billing_address_snapshot or (invoice.customer.billing_address if invoice.customer else "")
     cust_phone = (invoice.customer.contact_info if invoice.customer else "")
     cust_gstin = invoice.customer_gstin_snapshot or (invoice.customer.gstin if invoice.customer else "") or "Unregistered"
-    cust_state = invoice.state_snapshot or (invoice.customer.state if invoice.customer else "") or "Maharashtra"
-    cust_state_code = invoice.customer_state_code_snapshot or (invoice.customer.state_code if invoice.customer else "") or "27"
+    # A customer with no state is billed in the seller's state.
+    cust_state = invoice.state_snapshot or (invoice.customer.state if invoice.customer else "") or co_state
+    cust_state_code = invoice.customer_state_code_snapshot or (invoice.customer.state_code if invoice.customer else "") or co_state_code
     pos = invoice.place_of_supply or cust_state_code or co_state_code
 
     # Presentation copy labels
@@ -697,9 +701,16 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
                 text_start_x = left_x + 4
 
         cur_y = top_y - 11
-        c.setFont("Helvetica-Bold", 11)
         c.setFillColor(COLOR_TEXT)
-        c.drawString(text_start_x, cur_y, co_name.upper()[:40])
+        # Full business name: shrinks to fit the seller column, then wraps.
+        header_name = layout_header_name(co_name, (left_x + seller_w - 4) - text_start_x)
+        c.setFont("Helvetica-Bold", header_name["font_size"])
+        for i, name_line in enumerate(header_name["lines"]):
+            if i:
+                cur_y -= header_name["font_size"] + 1
+            c.drawString(text_start_x, cur_y, name_line)
+        # A two-line name leaves less room: tighten the lines below it.
+        detail_leading = 8.5 if len(header_name["lines"]) <= 1 else 8.0
 
         c.setFont("Helvetica", 7)
         cur_y -= 9
@@ -714,19 +725,25 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
                 addr_lines = [", ".join(addr_parts)]
         for addr_line in addr_lines[:2]:  # max 2 lines in header
             c.drawString(text_start_x, cur_y, addr_line[:60])
-            cur_y -= 8.5
+            cur_y -= detail_leading
 
-        contact_line = ""
+        # Only the details the profile has; no empty "Phone:" / "E-Mail:" labels.
+        contact_parts = []
         if co_phone:
-            contact_line += f"Phone: {co_phone}"
+            contact_parts.append(f"Phone: {co_phone}")
         if co_email:
-            contact_line += f" | E-Mail: {co_email}"
-        if contact_line:
-            c.drawString(text_start_x, cur_y, contact_line[:60])
-            cur_y -= 8.5
+            contact_parts.append(f"E-Mail: {co_email}")
+        if contact_parts:
+            c.drawString(text_start_x, cur_y, " | ".join(contact_parts)[:60])
+            cur_y -= detail_leading
 
+        tax_parts = []
+        if co_gstin:
+            tax_parts.append(f"GSTIN: {co_gstin}")
+        if co_state or co_state_code:
+            tax_parts.append(f"State: {co_state} ({co_state_code})" if co_state_code else f"State: {co_state}")
         c.setFont("Helvetica-Bold", 7.5)
-        c.drawString(text_start_x, cur_y, f"GSTIN: {co_gstin} | State: {co_state} ({co_state_code})")
+        c.drawString(text_start_x, cur_y, " | ".join(tax_parts))
 
         # Right side: Invoice Title + Copy Badge + Meta
         title_box_h = 16
