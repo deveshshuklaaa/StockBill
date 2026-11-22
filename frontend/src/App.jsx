@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import AppShell from './components/AppShell'
+import EnvironmentBanner from './components/EnvironmentBanner'
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './context/AuthContext'
 import './App.css'
@@ -53,6 +54,7 @@ const TopProductsReportPage = lazy(() => import('./pages/reports/TopProductsRepo
 function App() {
   return (
     <AuthProvider>
+      <EnvironmentBanner />
       <BrowserRouter>
         <Routes>
           <Route

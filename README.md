@@ -234,6 +234,9 @@ pip install -r requirements.txt
 ### 4. Configure Environment Variables
 Create a `.env` file in the repository root:
 ```ini
+# Development PC only: shows a red "DEVELOPMENT - test data" bar on every
+# screen. Leave it out on the shop PC (default is production: no bar).
+STOCKBILL_ENV=development
 DEBUG=True
 SECRET_KEY=<your-development-secret-key>
 ALLOWED_HOSTS=localhost,127.0.0.1
@@ -250,6 +253,12 @@ POSTGRES_PASSWORD=<your-postgresql-password>
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 ```
+
+`STOCKBILL_ENV` accepts `production` (default), `development` or `staging`;
+any other value stops Django from starting. Outside production,
+`GET /api/meta/` also reports the database (`NAME@HOST:PORT`) and the
+frontend shows it in a red bar at the top of every screen (hidden when
+printing; never part of generated PDFs).
 
 ### 5. Validate System & Migrations
 ```powershell

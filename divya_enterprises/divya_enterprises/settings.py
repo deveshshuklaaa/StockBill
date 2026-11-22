@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
@@ -10,6 +11,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-dev-key")
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
+
+# Which installation this is. Anything other than "production" shows a red
+# banner on every screen (frontend, via GET /api/meta/) so a development or
+# staging copy can never be mistaken for the shop. Default is production, so
+# an installation that does not set it shows nothing.
+STOCKBILL_ENVIRONMENTS = ("production", "development", "staging")
+STOCKBILL_ENV = (os.getenv("STOCKBILL_ENV") or "production").strip().lower()
+if STOCKBILL_ENV not in STOCKBILL_ENVIRONMENTS:
+    raise ImproperlyConfigured(
+        f"STOCKBILL_ENV must be one of {', '.join(STOCKBILL_ENVIRONMENTS)}; got {STOCKBILL_ENV!r}."
+    )
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip()]
 CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
