@@ -28,6 +28,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "email",
             "terms_and_conditions",
             "round_off_invoice_total",
+            "show_stockbill_credit",
             "has_logo",
             "logo_updated_at",
         ]
