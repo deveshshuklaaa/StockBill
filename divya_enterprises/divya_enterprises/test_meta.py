@@ -6,7 +6,7 @@ import sys
 
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
-from rest_framework.authtoken.models import Token
+from knox.models import AuthToken
 
 
 class MetaEndpointTests(SimpleTestCase):
@@ -82,13 +82,13 @@ class MetaBusinessNameTests(TestCase):
         from billing.models import BusinessProfile
 
         cls.user = User.objects.create_user(username="meta-staff", password="Pass-12345!", role="staff")
-        cls.token = Token.objects.create(user=cls.user)
+        cls.token = AuthToken.objects.create(user=cls.user)[1]  # knox: (instance, raw token)
         BusinessProfile.objects.create(business_name="Sharma General Store", gstin="27AAAAA0000A1Z5",
                                        registered_address="Pune", state="Maharashtra", state_code="27")
 
     @override_settings(STOCKBILL_ENV="production")
     def test_token_authenticated_request_gets_the_business_name(self):
-        body = self.client.get("/api/meta/", HTTP_AUTHORIZATION=f"Token {self.token.key}").json()
+        body = self.client.get("/api/meta/", HTTP_AUTHORIZATION=f"Token {self.token}").json()
         self.assertEqual(body, {"environment": "production", "business_name": "Sharma General Store"})
 
     @override_settings(STOCKBILL_ENV="production")
@@ -109,5 +109,5 @@ class MetaBusinessNameTests(TestCase):
 
     @override_settings(STOCKBILL_ENV="production")
     def test_profile_endpoint_stays_admin_only(self):
-        response = self.client.get("/api/business-profile/", HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        response = self.client.get("/api/business-profile/", HTTP_AUTHORIZATION=f"Token {self.token}")
         self.assertEqual(response.status_code, 403)
