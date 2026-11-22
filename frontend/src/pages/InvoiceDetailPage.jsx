@@ -238,7 +238,7 @@ export default function InvoiceDetailPage() {
         </div>
         <div>
           <span>Seller</span>
-          <strong>{invoice.seller_business_name_snapshot || 'Divya Enterprises'}</strong>
+          <strong>{invoice.seller_business_name_snapshot || ''}</strong>
           <span>{invoice.seller_gstin_snapshot || ''}</span>
           <span>{invoice.seller_address_snapshot || ''}</span>
         </div>

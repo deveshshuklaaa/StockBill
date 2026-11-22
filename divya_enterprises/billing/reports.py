@@ -1,4 +1,4 @@
-"""Management reports for Divya Enterprises.
+"""Management reports for StockBill.
 
 Report definitions (authoritative, tested):
 
@@ -1329,7 +1329,7 @@ def get_sales_gst_report_data(from_date, to_date):
 
     seller = BusinessProfile.objects.first()
     seller_info = {
-        "business_name": seller.business_name if seller else "DIVYA ENTERPRISES",
+        "business_name": seller.business_name if seller else "",
         "gstin": seller.gstin if seller else "",
     }
 
@@ -1416,7 +1416,7 @@ def build_sales_gst_report_xlsx(report_data):
     )
 
     seller = report_data.get("seller", {})
-    business_name = seller.get("business_name") or "DIVYA ENTERPRISES"
+    business_name = seller.get("business_name") or ""
     ws["A1"] = business_name
     ws["A1"].font = title_font
 

@@ -21,10 +21,9 @@ class BusinessProfile(models.Model):
     contact_details = models.CharField(max_length=255, blank=True)
     phone = models.CharField(max_length=50, blank=True)
     email = models.CharField(max_length=100, blank=True)
-    terms_and_conditions = models.TextField(
-        blank=True,
-        default="Goods once sold will not be taken back or exchanged.\nBills not paid due date will attract 24% interest.",
-    )
+    # Each shop's own policy; empty for new installations (no built-in
+    # interest clause). Existing profiles keep their text.
+    terms_and_conditions = models.TextField(blank=True, default="")
     # Round each invoice's final total to the nearest rupee (50 paise up).
     # Fixed per invoice when it is posted; later changes never touch issued invoices.
     round_off_invoice_total = models.BooleanField(default=True)

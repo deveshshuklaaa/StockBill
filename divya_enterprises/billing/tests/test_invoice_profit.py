@@ -19,7 +19,8 @@ class InvoiceProfitTests(APITestCase):
     def setUpTestData(cls):
         cls.admin = get_user_model().objects.create_user(username="invoice-profit-admin", role="admin")
         cls.staff = get_user_model().objects.create_user(username="invoice-profit-staff", role="staff")
-        BusinessProfile.objects.create(business_name="Test business", state_code="27")
+        BusinessProfile.objects.create(business_name="Test business", state_code="27", state="Maharashtra",
+                                       gstin="27AAAAA0000A1Z5", registered_address="Test address")
         cls.customer = Customer.objects.create(name="Test customer", state_code="27")
         cls.supplier = Supplier.objects.create(name="Test supplier", state_code="27")
         cls.tax, _ = TaxRate.objects.get_or_create(name="GST 5%", defaults={"rate": Decimal("5.00")})

@@ -903,10 +903,17 @@ class InvoicePdfFooterTests(APITestCase):
     def word(page, text):
         return next(w for w in page.get_text("words") if w[4] == text)
 
-    def test_default_three_terms_print_in_full(self):
-        text = self.flat(self.render(terms="")[0].get_text())
+    def test_three_terms_print_in_full(self):
+        text = self.flat(self.render(terms="\n".join(self.DEFAULT_TERMS))[0].get_text())
         for line in self.DEFAULT_TERMS:
             self.assertIn(line, text)  # previously cut at 50 characters ("excha...")
+
+    def test_empty_profile_terms_print_nothing(self):
+        # Release B3: no built-in terms; each shop sets its own.
+        text = self.flat(self.render(terms="")[0].get_text())
+        self.assertNotIn("Goods once sold", text)
+        self.assertNotIn("interest", text.lower())
+        self.assertIn("Terms & Conditions", text)
 
     def test_profile_terms_print_in_full(self):
         text = self.flat(self.render()[0].get_text())
