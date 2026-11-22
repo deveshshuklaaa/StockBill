@@ -28,6 +28,11 @@ class BusinessProfile(models.Model):
     # Round each invoice's final total to the nearest rupee (50 paise up).
     # Fixed per invoice when it is posted; later changes never touch issued invoices.
     round_off_invoice_total = models.BooleanField(default=True)
+    # The shop's own logo for invoices, stored in the database so pg_dump
+    # backups include it. Always a normalised PNG (billing.logo).
+    logo = models.BinaryField(null=True, blank=True)
+    logo_content_type = models.CharField(max_length=20, blank=True)
+    logo_updated_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.business_name

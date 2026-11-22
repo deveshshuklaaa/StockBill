@@ -5,5 +5,7 @@ weasyprint>=62.0,<64.0
 python-dotenv>=1.0,<2.0
 django-cors-headers>=4.0,<5.0
 reportlab>=5.0,<6.0
+# Shop logo validation/normalisation (billing/logo.py); also a ReportLab dependency.
+Pillow>=10.0,<13.0
 pymupdf>=1.24,<2.0
 openpyxl>=3.1,<4.0

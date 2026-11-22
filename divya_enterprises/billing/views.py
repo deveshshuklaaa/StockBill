@@ -11,6 +11,7 @@ from django.utils.text import slugify
 from django.db import IntegrityError, transaction
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -29,6 +30,7 @@ from .services import (
     round_off_enabled,
     update_draft_invoice,
 )
+from .logo import MAX_UPLOAD_BYTES, STORED_CONTENT_TYPE, LogoError, normalize_logo
 from .pdf import render_invoice_html
 from .pdf_engine import build_invoice_a5_pdf
 
@@ -57,16 +59,7 @@ class BusinessProfileView(generics.RetrieveUpdateAPIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
 
     def get_object(self):
-        profile = BusinessProfile.objects.first()
-        if profile is None:
-            profile = BusinessProfile.objects.create(
-                business_name="",
-                gstin="",
-                registered_address="",
-                state="",
-                state_code="",
-            )
-        return profile
+        return _get_or_create_profile()
 
     def perform_update(self, serializer):
         serializer.save()
@@ -76,6 +69,79 @@ class BusinessProfileView(generics.RetrieveUpdateAPIView):
             entity_type="BusinessProfile",
             entity_id=serializer.instance.pk,
         )
+
+
+def _get_or_create_profile():
+    profile = BusinessProfile.objects.first()
+    if profile is None:
+        profile = BusinessProfile.objects.create(
+            business_name="",
+            gstin="",
+            registered_address="",
+            state="",
+            state_code="",
+        )
+    return profile
+
+
+class BusinessProfileLogoView(APIView):
+    """The shop logo printed on invoices, stored in the database.
+
+    GET: the image (any signed-in user, so staff screens can show it).
+    POST (multipart field "logo") and DELETE: admins only, audit-logged.
+    Uploads are validated and re-encoded by billing.logo.normalize_logo.
+    """
+
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsAdminUser()]
+
+    def get(self, request):
+        profile = BusinessProfile.objects.only("logo", "logo_content_type").first()
+        if profile is None or not profile.logo:
+            return Response({"detail": "No logo has been uploaded."}, status=status.HTTP_404_NOT_FOUND)
+        response = HttpResponse(bytes(profile.logo), content_type=profile.logo_content_type or STORED_CONTENT_TYPE)
+        response["Cache-Control"] = "private, no-cache"
+        return response
+
+    def post(self, request):
+        upload = request.FILES.get("logo")
+        if upload is None:
+            raise ValidationError({"logo": ["Choose a PNG or JPEG file to upload."]})
+        if upload.size > MAX_UPLOAD_BYTES:
+            raise ValidationError({"logo": ["The logo must be 2 MB or smaller."]})
+        try:
+            png = normalize_logo(upload.read())
+        except LogoError as error:
+            raise ValidationError({"logo": [str(error)]}) from None
+        with transaction.atomic():
+            profile = _get_or_create_profile()
+            profile.logo = png
+            profile.logo_content_type = STORED_CONTENT_TYPE
+            profile.logo_updated_at = timezone.now()
+            profile.save(update_fields=["logo", "logo_content_type", "logo_updated_at"])
+            AuditLog.objects.create(
+                user=request.user, action="business_logo_uploaded", entity_type="BusinessProfile",
+                entity_id=profile.pk, metadata={"bytes_stored": len(png)},
+            )
+        return Response({"has_logo": True, "logo_updated_at": profile.logo_updated_at}, status=status.HTTP_201_CREATED)
+
+    def delete(self, request):
+        profile = BusinessProfile.objects.first()
+        if profile is None or not profile.logo:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        with transaction.atomic():
+            profile.logo = None
+            profile.logo_content_type = ""
+            profile.logo_updated_at = timezone.now()
+            profile.save(update_fields=["logo", "logo_content_type", "logo_updated_at"])
+            AuditLog.objects.create(
+                user=request.user, action="business_logo_removed", entity_type="BusinessProfile", entity_id=profile.pk,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AuditLogListView(generics.ListAPIView):

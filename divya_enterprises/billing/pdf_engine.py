@@ -14,13 +14,12 @@ import io
 import logging
 import os
 import re
-from pathlib import Path
 
-from django.conf import settings
 from reportlab.lib.colors import HexColor, black, white, Color
 from reportlab.lib.pagesizes import A4, A5, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from .models import BusinessProfile, Invoice
@@ -136,17 +135,20 @@ def amount_to_words(amount) -> str:
     return res
 
 
-def _resolve_logo_path() -> str | None:
-    """Find the Divya Enterprises logo file on disk reliably."""
-    candidate_paths = [
-        Path(__file__).resolve().parent / "static" / "billing" / "images" / "logo.jpg",
-        Path(settings.BASE_DIR) / "billing" / "static" / "billing" / "images" / "logo.jpg",
-        Path(settings.BASE_DIR) / "static" / "billing" / "images" / "logo.jpg",
-    ]
-    for p in candidate_paths:
-        if p.exists() and p.is_file():
-            return str(p)
-    return None
+def profile_logo_reader(profile):
+    """The shop's uploaded logo (Business Profile) for drawImage, or None.
+
+    Reprints of old invoices use the current logo on purpose; the logo is
+    branding, not an invoice particular, so it is not snapshotted.
+    """
+    logo = getattr(profile, "logo", None) if profile else None
+    if not logo:
+        return None
+    try:
+        return ImageReader(io.BytesIO(bytes(logo)))
+    except Exception:  # a damaged stored image must never break invoicing
+        logger.warning("Business Profile logo could not be read; printing without it.", exc_info=True)
+        return None
 
 
 # Item row styling constants
@@ -596,7 +598,7 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
     c = NumberedCanvas(buffer, pagesize=A4)
     c.setViewerPreference("PrintScaling", "None")
-    logo_path = _resolve_logo_path()
+    logo_reader = profile_logo_reader(profile)
 
     cumulative_amount = Decimal("0.00")
     running_sr = 1
@@ -684,11 +686,12 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
 
         # Left side: Logo + Seller identity
         text_start_x = left_x + 4
-        if logo_path:
+        if logo_reader is not None:
             try:
                 logo_size = 46
                 logo_y = top_y - logo_size - 5
-                c.drawImage(logo_path, left_x + 4, logo_y, width=logo_size, height=logo_size, preserveAspectRatio=True)
+                c.drawImage(logo_reader, left_x + 4, logo_y, width=logo_size, height=logo_size,
+                            preserveAspectRatio=True, anchor="c", mask="auto")
                 text_start_x = left_x + 4 + logo_size + 6
             except Exception:
                 text_start_x = left_x + 4
