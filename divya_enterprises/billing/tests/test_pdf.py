@@ -883,6 +883,9 @@ class InvoicePdfFooterTests(APITestCase):
     def render(self, *, terms=None, seller_name=None, lines=None):
         if terms is not None:
             BusinessProfile.objects.filter(pk=self.profile.pk).update(terms_and_conditions=terms)
+        # Posted invoices print the terms snapshotted at posting (Release B4);
+        # this fixture is posted, so give it the snapshot posting would set.
+        self.invoice.terms_snapshot = BusinessProfile.objects.get(pk=self.profile.pk).terms_and_conditions
         if seller_name is not None:
             self.invoice.seller_business_name_snapshot = seller_name  # in memory only
         return pymupdf.open("pdf", build_invoice_a5_pdf(self.invoice, lines=lines))

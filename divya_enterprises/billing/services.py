@@ -65,6 +65,25 @@ def _require_complete_profile(seller=None):
     return profile
 
 
+SELLER_SNAPSHOT_FIELDS = (
+    "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
+    "seller_state_snapshot", "seller_state_code_snapshot", "terms_snapshot",
+)
+
+
+def _stamp_seller_details(invoice, profile):
+    """Copy the Business Profile in force at issue onto the invoice: seller
+    details and terms. Called at posting, so a draft created before a
+    profile change carries the details of the day it was issued."""
+    invoice.seller_business_name_snapshot = profile.business_name if profile else ""
+    invoice.seller_gstin_snapshot = profile.gstin if profile else ""
+    invoice.seller_address_snapshot = profile.registered_address if profile else ""
+    invoice.seller_state_snapshot = profile.state if profile else ""
+    invoice.seller_state_code_snapshot = profile.state_code if profile else ""
+    invoice.terms_snapshot = (profile.terms_and_conditions or "") if profile else ""
+    return invoice
+
+
 def _issue_invoice_number(invoice):
     """Stamp the tax-invoice number and issue date at the move into POSTED.
 
@@ -353,6 +372,9 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
     numbered = Invoice(state=state)
     if state == Invoice.STATE_POSTED:
         _issue_invoice_number(numbered)
+    # Terms are fixed only when the invoice is issued; drafts print the
+    # current profile terms.
+    terms_snapshot = (seller.terms_and_conditions or "") if (seller and state == Invoice.STATE_POSTED) else ""
 
     invoice = Invoice.objects.create(
         customer=customer,
@@ -377,6 +399,7 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
         seller_address_snapshot=seller.registered_address if seller else "",
         seller_state_snapshot=seller.state if seller else "",
         seller_state_code_snapshot=seller.state_code if seller else "",
+        terms_snapshot=terms_snapshot,
         place_of_supply=calc_result["place_of_supply"],
         tax_mode=calc_result["tax_mode"],
         source_warehouse=source_warehouse,
@@ -447,7 +470,7 @@ def post_invoice(*, invoice_id, posted_by):
         return invoice
     if invoice.state != Invoice.STATE_DRAFT:
         raise serializers.ValidationError({"state": "Only draft invoices can be posted."})
-    _require_complete_profile()
+    profile = _require_complete_profile()
     line_items = list(invoice.line_items.select_related("product"))
     # Re-checked at posting: the draft's warehouse may have been deactivated.
     warehouse = _effective_warehouse(_check_source_warehouse(invoice.source_warehouse))
@@ -491,9 +514,12 @@ def post_invoice(*, invoice_id, posted_by):
         line.save(update_fields=["cost_price_snapshot", "cogs_amount", "product_name_snapshot", "base_unit_snapshot", "mrp_snapshot"])
         adjust_inventory(product=product, quantity_delta=-line.base_quantity, movement_type=StockLedger.SALE, created_by=posted_by, reference_type="invoice", reference_id=invoice.pk, unit_cost=line.cost_price_snapshot, warehouse=warehouse)
     _issue_invoice_number(invoice)
+    _stamp_seller_details(invoice, profile)
     invoice.state = Invoice.STATE_POSTED
     invoice._allow_lifecycle_transition = True
-    invoice.save(update_fields=["state", "invoice_number", "invoice_date", "total_amount", "round_off", "updated_at"])
+    invoice.save(update_fields=[
+        "state", "invoice_number", "invoice_date", "total_amount", "round_off", *SELLER_SNAPSHOT_FIELDS, "updated_at",
+    ])
     if invoice.payment_type == Invoice.PAYMENT_TYPE_CASH:
         create_payment(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount, actor=posted_by)
     AuditLog.objects.create(user=posted_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)

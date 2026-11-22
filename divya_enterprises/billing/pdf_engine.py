@@ -571,7 +571,9 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
     co_state_code = seller_value("seller_state_code_snapshot", "state_code")
     co_phone = profile_value("phone") or profile_value("contact_details")
     co_email = profile_value("email")
-    terms_text = profile_value("terms_and_conditions")
+    # Terms are contractual: issued invoices print the terms snapshotted when
+    # they were posted; drafts print the current profile terms.
+    terms_text = (invoice.terms_snapshot or "") if is_issued else profile_value("terms_and_conditions")
 
     cust_name = invoice.customer_name_snapshot or (invoice.customer.name if invoice.customer else "Walk-in Customer")
     cust_address = invoice.billing_address_snapshot or (invoice.customer.billing_address if invoice.customer else "")
