@@ -26,10 +26,24 @@ from .services import (
     delete_draft_invoice,
     post_invoice,
     reverse_payment,
+    round_off_enabled,
     update_draft_invoice,
 )
 from .pdf import render_invoice_html
 from .pdf_engine import build_invoice_a5_pdf
+
+
+class BillingSettingsView(APIView):
+    """GET /api/billing-settings/: the profile settings staff need to bill.
+
+    The business profile itself is admin-only; this exposes just the
+    round-off switch so the New Invoice screen can preview the rounded total.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response({"round_off_invoice_total": round_off_enabled()})
 
 
 class BusinessProfileView(generics.RetrieveUpdateAPIView):

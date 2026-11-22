@@ -118,6 +118,12 @@ export async function exportInvoiceItemSummaryXlsx(invoiceIds) {
   return blob
 }
 
+// Staff-readable billing switches (the business profile itself is admin-only).
+export async function fetchBillingSettings() {
+  const { data } = await api.get('/billing-settings/')
+  return data
+}
+
 export async function deleteDraftInvoice(id) {
   const { data } = await api.delete(`/invoices/${id}/draft/`)
   return data

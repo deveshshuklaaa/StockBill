@@ -458,6 +458,12 @@ class NumberingMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
         executor.migrate(self.after)
+        # Read through the models as of self.after: later migrations add
+        # columns (e.g. billing 0020 round_off) the current models expect.
+        after_apps = executor.loader.project_state(self.after).apps
+        Invoice = after_apps.get_model("billing", "Invoice")  # noqa: N806
+        CreditNote = after_apps.get_model("billing", "CreditNote")  # noqa: N806
+        CreditNoteNumberCounter = after_apps.get_model("billing", "CreditNoteNumberCounter")  # noqa: N806
 
         self.assertEqual(Invoice.objects.get(pk=legacy.pk).invoice_number, "INV-20261115165912")
         self.assertEqual(Invoice.objects.get(pk=legacy.pk).invoice_date, legacy_date)

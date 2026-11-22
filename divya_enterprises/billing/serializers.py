@@ -21,6 +21,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "phone",
             "email",
             "terms_and_conditions",
+            "round_off_invoice_total",
         ]
         read_only_fields = ["id"]
 
@@ -97,7 +98,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "billing_address_snapshot", "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
             "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
             "seller_state_snapshot", "seller_state_code_snapshot",
-            "total_amount", "notes", "created_by", "line_items", "created_at", "updated_at",
+            "total_amount", "round_off", "notes", "created_by", "line_items", "created_at", "updated_at",
             "replacement_invoice", "replacement_invoice_number",
             "amended_from_invoice", "amended_from_invoice_number",
         ]
@@ -106,7 +107,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "invoice_number", "customer_name", "invoice_date", "created_at", "updated_at",
             "payment_status", "state", "cancellation_reason", "cancelled_at",
-            "created_by", "total_amount", "customer_name_snapshot",
+            "created_by", "total_amount", "round_off", "customer_name_snapshot",
             "customer_gstin_snapshot", "customer_registration_type_snapshot",
             "customer_state_code_snapshot", "billing_address_snapshot",
             "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
@@ -199,11 +200,12 @@ class CreditNoteSerializer(serializers.ModelSerializer):
             "reason",
             "note_date",
             "total_amount",
+            "round_off",
             "created_by",
             "line_items",
             "created_at",
         ]
-        read_only_fields = ["id", "credit_note_number", "original_invoice_number", "note_date", "created_at", "total_amount", "created_by"]
+        read_only_fields = ["id", "credit_note_number", "original_invoice_number", "note_date", "created_at", "total_amount", "round_off", "created_by"]
 
     def validate(self, attrs):
         if not attrs.get("line_items"):
@@ -254,3 +256,12 @@ class PaymentSerializer(serializers.ModelSerializer):
 
         validated_data.setdefault("invoice", None)
         return create_payment(actor=self.context["request"].user, **validated_data)
+
+
+class BillingSettingsSerializer(serializers.ModelSerializer):
+    """The one Business Profile setting staff need while billing."""
+
+    class Meta:
+        model = BusinessProfile
+        fields = ["round_off_invoice_total"]
+        read_only_fields = fields

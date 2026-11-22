@@ -12,7 +12,7 @@ from inventory.models import InventoryBalance, Product, ProductAttributeValue, S
 from inventory.services import adjust_inventory, ensure_inventory_balance, get_default_warehouse
 from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment, PaymentReversal, refresh_invoice_payment_status
 from .numbering import next_credit_note_number, next_invoice_number
-from .tax_engine import calculate_gst, round_paise
+from .tax_engine import calculate_gst, round_inr, round_paise
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -30,6 +30,26 @@ def _money(value):
 
 def _quantity(value):
     return Decimal(value).quantize(QUANTITY_QUANTUM)
+
+
+def round_off_enabled(seller=None):
+    """The Business Profile's round-off setting (off when no profile exists)."""
+    profile = seller if seller is not None else BusinessProfile.objects.first()
+    return bool(profile and profile.round_off_invoice_total)
+
+
+def _apply_round_off(exact_total, enabled):
+    """Whole-bill rounding to the nearest rupee, 50 paise up (ROUND_HALF_UP).
+
+    Returns (round_off, final_total) with final_total = exact_total + round_off
+    and |round_off| <= 0.50. Only the invoice total is rounded: line totals,
+    taxable value and GST stay exact, and round_off is not taxable value.
+    """
+    exact_total = _money(exact_total)
+    if not enabled:
+        return Decimal("0.00"), exact_total
+    final_total = round_inr(exact_total).quantize(MONEY_QUANTUM)
+    return final_total - exact_total, final_total
 
 
 def _issue_invoice_number(invoice):
@@ -258,7 +278,8 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
         rounding=round_paise,
     )
 
-    total_amount = calc_result["totals"]["grand_total"]
+    # Drafts store a preview with today's setting; posting recomputes it.
+    round_off, total_amount = _apply_round_off(calc_result["totals"]["grand_total"], round_off_enabled(seller))
 
     if payment_type == "credit" and customer is not None and customer.credit_limit:
         if customer.outstanding_balance + _money(total_amount) > customer.credit_limit:
@@ -280,6 +301,7 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
         notes=notes,
         created_by=created_by,
         total_amount=total_amount,
+        round_off=round_off,
         state=state,
         customer_name_snapshot=customer.name if customer else "Walk-in customer",
         customer_gstin_snapshot=customer.gstin or "" if customer else "",
@@ -378,6 +400,10 @@ def post_invoice(*, invoice_id, posted_by):
         ],
         customer=invoice.customer,
     )
+    # Round-off is fixed now, with the setting in force at posting, from the
+    # draft's exact total (the sum of its line totals).
+    exact_total = sum((line.line_total for line in line_items), Decimal("0.00"))
+    invoice.round_off, invoice.total_amount = _apply_round_off(exact_total, round_off_enabled())
     if (
         invoice.payment_type == Invoice.PAYMENT_TYPE_CREDIT
         and invoice.customer is not None
@@ -400,7 +426,7 @@ def post_invoice(*, invoice_id, posted_by):
     _issue_invoice_number(invoice)
     invoice.state = Invoice.STATE_POSTED
     invoice._allow_lifecycle_transition = True
-    invoice.save(update_fields=["state", "invoice_number", "invoice_date", "updated_at"])
+    invoice.save(update_fields=["state", "invoice_number", "invoice_date", "total_amount", "round_off", "updated_at"])
     if invoice.payment_type == Invoice.PAYMENT_TYPE_CASH:
         create_payment(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount, actor=posted_by)
     AuditLog.objects.create(user=posted_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)
@@ -462,13 +488,23 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
         calculated_lines.append((original_line, product, quantity, discount_amount, tax_amount, cgst_amount, sgst_amount, igst_amount, line_total, per_base_rate))
         total_amount += line_total
 
+    # The note that completes the full reversal of the invoice (every line's
+    # base quantity reversed once this note is counted) also reverses the
+    # invoice's round-off, so a fully credited invoice nets to exactly 0.
+    reversed_after = defaultdict(lambda: Decimal("0"), already_reversed)
+    for original_line, _product, quantity, *_rest in calculated_lines:
+        reversed_after[original_line.pk] += quantity
+    completes_reversal = all(reversed_after[pk] >= line.base_quantity for pk, line in original_lines.items())
+    round_off = invoice.round_off if completes_reversal else Decimal("0.00")
+
     # Numbered inside this transaction (CGST Rule 53); the model forbids any
     # later update, so the number must be set on create.
     credit_note = CreditNote.objects.create(
         credit_note_number=next_credit_note_number(timezone.localdate()),
         original_invoice=invoice,
         reason=reason,
-        total_amount=_money(total_amount),
+        total_amount=_money(total_amount) + round_off,
+        round_off=round_off,
         created_by=created_by,
     )
     for original_line, product, quantity, discount_amount, tax_amount, cgst_amount, sgst_amount, igst_amount, line_total, per_base_rate in calculated_lines:
@@ -607,7 +643,8 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
         rounding=round_paise,
     )
 
-    total_amount = calc_result["totals"]["grand_total"]
+    # Preview only: post_invoice recomputes the round-off at posting.
+    round_off, total_amount = _apply_round_off(calc_result["totals"]["grand_total"], round_off_enabled(seller))
 
     # Delete existing lines (permitted for DRAFT by model)
     invoice.line_items.all().delete()
@@ -618,6 +655,7 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
     invoice.payment_type = payment_type
     invoice.notes = notes
     invoice.total_amount = total_amount
+    invoice.round_off = round_off
     invoice.place_of_supply = calc_result["place_of_supply"]
     invoice.tax_mode = calc_result["tax_mode"]
     invoice.customer_name_snapshot = customer.name if customer else "Walk-in customer"
@@ -634,7 +672,7 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
     invoice.seller_state_snapshot = seller.state if seller else ""
     invoice.seller_state_code_snapshot = seller.state_code if seller else ""
     invoice.save(update_fields=[
-        "customer", "payment_type", "notes", "total_amount",
+        "customer", "payment_type", "notes", "total_amount", "round_off",
         "place_of_supply", "tax_mode",
         "customer_name_snapshot", "customer_gstin_snapshot", "customer_registration_type_snapshot",
         "customer_state_code_snapshot", "billing_address_snapshot", "shipping_address_snapshot",

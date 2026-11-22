@@ -108,7 +108,6 @@ from inventory.models import (
 from .xlsx_export import MONEY, QUANTITY, Column, export_filename, xlsx_response
 from .models import BusinessProfile, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 from .profit import profit_percent_on_cost
-from .tax_engine import round_inr
 
 MONEY_FIELD = DecimalField(max_digits=18, decimal_places=2)
 QUANTITY_FIELD = DecimalField(max_digits=18, decimal_places=3)
@@ -251,6 +250,7 @@ class SalesSummaryReportView(APIView):
         invoice_counts = invoices.aggregate(
             posted=Count("id"),
             cancelled=Count("id", filter=Q(state=Invoice.STATE_CANCELLED)),
+            round_off=Coalesce(Sum("round_off"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         )
         cancelled_in_period = Invoice.objects.filter(
             state=Invoice.STATE_CANCELLED,
@@ -265,7 +265,11 @@ class SalesSummaryReportView(APIView):
         )["total"]
 
         gst = (totals["cgst"] or ZERO_MONEY) + (totals["sgst"] or ZERO_MONEY) + (totals["igst"] or ZERO_MONEY)
-        net_sales = totals["net_sales"] or ZERO_MONEY
+        # Net sales = amounts billed: line totals plus each invoice's
+        # whole-bill round-off, so it agrees with invoice totals and customer
+        # balances. Taxable value, GST, COGS and profit stay exact.
+        round_off = invoice_counts["round_off"] or ZERO_MONEY
+        net_sales = (totals["net_sales"] or ZERO_MONEY) + round_off
         taxable_sales = totals["taxable_sales"] or ZERO_MONEY
         cogs = totals["cogs"] or ZERO_MONEY
         gross_profit = taxable_sales - cogs
@@ -286,6 +290,7 @@ class SalesSummaryReportView(APIView):
                 "cgst": totals["cgst"],
                 "sgst": totals["sgst"],
                 "igst": totals["igst"],
+                "round_off": round_off,
                 "net_sales": net_sales,
                 "cogs": cogs,
                 "taxable_cogs": cogs,
@@ -1115,6 +1120,12 @@ class DashboardReportView(APIView):
             invoice_count=Count("invoice", distinct=True),
             net_sales=Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         )
+        # Billed amount, as in the sales report: add the invoices' round-off.
+        sales["net_sales"] += Invoice.objects.filter(
+            state=Invoice.STATE_POSTED, invoice_date=today
+        ).aggregate(
+            total=Coalesce(Sum("round_off"), Value(ZERO_MONEY), output_field=MONEY_FIELD)
+        )["total"]
         purchase_today = PurchaseInvoice.objects.filter(
             state=PurchaseInvoice.STATE_POSTED, invoice_date=today
         ).aggregate(
@@ -1268,7 +1279,11 @@ def get_sales_gst_report_data(from_date, to_date):
                 hsn_map[inv_id].append(cleaned)
 
     for inv in invoices:
-        display_bill_amt = round_inr(inv.total_amount).quantize(Decimal("0.01"))
+        # Stored values, exactly as billed: BILL AMT. is the invoice's
+        # total_amount (rounded only if round-off applied at posting) and
+        # R.OFF its stored round_off. taxable + tax + R.OFF = BILL AMT.,
+        # because total_amount = sum(line totals) + round_off.
+        display_bill_amt = inv.total_amount.quantize(Decimal("0.01"))
         taxable = (inv.taxable_sum or ZERO).quantize(Decimal("0.01"))
         tax = (inv.tax_sum or ZERO).quantize(Decimal("0.01"))
         sgst = (inv.sgst_sum or ZERO).quantize(Decimal("0.01"))
@@ -1278,7 +1293,7 @@ def get_sales_gst_report_data(from_date, to_date):
         sur = ZERO
         tax_free = ZERO
         exempted = ZERO
-        r_off = (display_bill_amt - (taxable + tax)).quantize(Decimal("0.01"))
+        r_off = inv.round_off.quantize(Decimal("0.01"))
 
         tot_bill_amt += display_bill_amt
         tot_taxable += taxable

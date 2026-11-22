@@ -1,0 +1,39 @@
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import * as settingsApi from '../api/settings'
+import BusinessProfilePage from '../pages/BusinessProfilePage'
+
+const useAuth = vi.hoisted(() => vi.fn(() => ({ user: { id: 1, username: 'owner', role: 'admin' }, token: 'tok', loading: false })))
+vi.mock('../context/AuthContext', () => ({ useAuth }))
+
+const PROFILE = {
+  business_name: 'Divya Enterprises', trade_name: '', gstin: '27ECNPS6389P1Z5', registered_address: 'Malad East',
+  state: 'Maharashtra', state_code: '27', contact_details: '', round_off_invoice_total: true,
+}
+
+describe('BusinessProfilePage round-off setting', () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it('shows the toggle with its note and saves the new value', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(settingsApi, 'fetchBusinessProfile').mockResolvedValue(PROFILE)
+    const save = vi.spyOn(settingsApi, 'updateBusinessProfile').mockResolvedValue({ ...PROFILE, round_off_invoice_total: false })
+    render(<MemoryRouter><BusinessProfilePage /></MemoryRouter>)
+
+    const toggle = await screen.findByLabelText('Round off invoice total to the nearest rupee')
+    expect(toggle).toBeChecked()
+    expect(screen.getByText(/Applies to invoices posted after you save/)).toBeInTheDocument()
+    await user.click(toggle)
+    expect(toggle).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ round_off_invoice_total: false })))
+  })
+
+  it('reflects a profile with round-off switched off', async () => {
+    vi.spyOn(settingsApi, 'fetchBusinessProfile').mockResolvedValue({ ...PROFILE, round_off_invoice_total: false })
+    render(<MemoryRouter><BusinessProfilePage /></MemoryRouter>)
+    expect(await screen.findByLabelText('Round off invoice total to the nearest rupee')).not.toBeChecked()
+  })
+})

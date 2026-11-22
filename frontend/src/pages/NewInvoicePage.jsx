@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
 import { fetchCustomerMRPPricing } from '../api/customers'
-import { amendInvoice, fetchInvoice, postInvoice, updateDraftInvoice } from '../api/invoices'
+import { amendInvoice, fetchBillingSettings, fetchInvoice, postInvoice, updateDraftInvoice } from '../api/invoices'
 import StatusMessage from '../components/StatusMessage'
 import UnsavedChangesDialog from '../components/UnsavedChangesDialog'
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges'
 import { formatNetWeight, formatQuantityWithUnit, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 import { sortProductsByMrpForSameName } from '../utils/productSearch'
+import { formatRoundOff, roundOffInvoiceTotal } from '../utils/roundOff'
 
 const WALK_IN = { id: null, name: 'Walk-in (no account)', customer_type: 'B2C' }
 
@@ -102,10 +103,21 @@ export default function NewInvoicePage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [posting, setPosting] = useState(false)
+  // Business Profile round-off switch, for the preview only (the server
+  // fixes the real round-off when the invoice is posted).
+  const [roundOffEnabled, setRoundOffEnabled] = useState(false)
 
   // Amendment-only
   const [amendReason, setAmendReason] = useState('')
   const [originalInvoice, setOriginalInvoice] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    fetchBillingSettings()
+      .then((settings) => { if (active) setRoundOffEnabled(Boolean(settings?.round_off_invoice_total)) })
+      .catch(() => { if (active) setRoundOffEnabled(false) })
+    return () => { active = false }
+  }, [])
 
   // Load initial customer list
   useEffect(() => {
@@ -329,6 +341,9 @@ export default function NewInvoicePage() {
     result.taxBySlab[line.tax_rate] = (result.taxBySlab[line.tax_rate] || 0) + calculated.tax
     return result
   }, { subtotal: 0, discount: 0, taxable: 0, tax: 0, total: 0, taxBySlab: {} }), [lines, taxMode])
+  const rounded = roundOffInvoiceTotal(totals.total, roundOffEnabled)
+  // Setting off: the estimate is shown exactly as before.
+  const grandTotal = roundOffEnabled ? rounded.total : totals.total
 
   function chooseCustomer(value) {
     setCustomer(value)
@@ -1058,8 +1073,11 @@ export default function NewInvoicePage() {
               <div key={slab}><span>{slab}% GST</span><strong>{money(value)}</strong></div>
             ))}
             <div className="summary-tax"><span>Total tax preview</span><strong>{money(totals.tax)}</strong></div>
+            {roundOffEnabled && (
+              <div data-testid="round-off-row"><span>Round off</span><strong>{formatRoundOff(rounded.roundOff)}</strong></div>
+            )}
           </div>
-          <div className="grand-total"><span>Grand total (Est.)</span><strong>{money(totals.total)}</strong></div>
+          <div className="grand-total"><span>Grand total (Est.)</span><strong data-testid="grand-total">{money(grandTotal)}</strong></div>
           {isEditMode ? (
             <>
               <button

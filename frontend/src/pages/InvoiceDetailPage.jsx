@@ -5,6 +5,7 @@ import { cancelInvoice, deleteDraftInvoice, fetchCorrectionEligibility, fetchInv
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 import { formatQuantity, formatQuantityWithUnit, invoiceLabel } from '../utils/format'
+import { formatRoundOff } from '../utils/roundOff'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 function percent(value) { return value == null ? '—' : `${Number(value).toFixed(1)}%` }
@@ -271,6 +272,7 @@ export default function InvoiceDetailPage() {
           {totalCgst > 0 ? ` · CGST ${money(totalCgst)}` : ''}
           {totalSgst > 0 ? ` · SGST ${money(totalSgst)}` : ''}
           {totalIgst > 0 ? ` · IGST ${money(totalIgst)}` : ''}
+          {Number(invoice.round_off || 0) !== 0 ? ` · Round off ${formatRoundOff(invoice.round_off)}` : ''}
         </span>
         <strong>{money(invoice.total_amount)}</strong>
       </div>
