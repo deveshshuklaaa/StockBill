@@ -2,8 +2,15 @@ from rest_framework import serializers
 
 from decimal import Decimal
 
+from inventory.models import Warehouse
+
 from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 from .profit import get_invoice_profit_data
+
+
+def _sale_source_warehouses():
+    """Warehouses a sale may be billed from (null on the invoice = Main)."""
+    return Warehouse.objects.filter(is_active=True)
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
@@ -86,12 +93,19 @@ class InvoiceSerializer(serializers.ModelSerializer):
     payment_type = serializers.ChoiceField(choices=["cash", "credit"], default="credit")
     replacement_invoice_number = serializers.SerializerMethodField()
     amended_from_invoice_number = serializers.SerializerMethodField()
+    # Optional; omitted or null means the default Main warehouse.
+    source_warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=_sale_source_warehouses(), required=False, allow_null=True
+    )
+    source_warehouse_code = serializers.CharField(source="source_warehouse.code", read_only=True, default=None)
+    source_warehouse_name = serializers.CharField(source="source_warehouse.name", read_only=True, default=None)
 
     class Meta:
         model = Invoice
         fields = [
             "id", "invoice_number", "customer", "customer_name", "invoice_date",
             "payment_type", "payment_status", "state", "place_of_supply", "tax_mode",
+            "source_warehouse", "source_warehouse_code", "source_warehouse_name",
             "cancellation_reason", "cancelled_at",
             "customer_name_snapshot", "customer_gstin_snapshot",
             "customer_registration_type_snapshot", "customer_state_code_snapshot",

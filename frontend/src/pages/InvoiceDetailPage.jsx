@@ -225,7 +225,12 @@ export default function InvoiceDetailPage() {
           <span className={STATE_BADGE[invoice.state] || 'type-chip'}>{invoice.state}</span>
           <strong>{invoice.payment_type} sale ({invoice.tax_mode})</strong><br />
           <span>Payment: {invoice.payment_status}</span><br />
-          <span>Supply: {invoice.place_of_supply || '—'}</span>
+          <span>Supply: {invoice.place_of_supply || '—'}</span><br />
+          <span>
+            Stock from: {invoice.source_warehouse
+              ? `${invoice.source_warehouse_name || 'Warehouse'}${invoice.source_warehouse_code ? ` (${invoice.source_warehouse_code})` : ''}`
+              : 'Main (default)'}
+          </span>
         </div>
       </div>
       <div className="detail-parties">

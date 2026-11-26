@@ -93,6 +93,16 @@ class Invoice(models.Model):
     # round-off feature keep 0.00.
     round_off = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0.00"))
     notes = models.TextField(blank=True)
+    # Warehouse the sale deducts stock from. Null means the default "Main"
+    # warehouse (the behaviour before this field existed); historical rows
+    # are never backfilled. Fixed at posting: cancellation returns stock here.
+    source_warehouse = models.ForeignKey(
+        "inventory.Warehouse",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sourced_invoices",
+    )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_invoices")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -143,7 +153,8 @@ class Invoice(models.Model):
     def save(self, *args, **kwargs):
         if self.pk is not None:
             stored = type(self).objects.only(
-                "payment_type", "customer_id", "total_amount", "round_off", "state", "invoice_number", "invoice_date"
+                "payment_type", "customer_id", "total_amount", "round_off", "state", "invoice_number", "invoice_date",
+                "source_warehouse_id",
             ).get(pk=self.pk)
             if self.state != stored.state and not getattr(self, "_allow_lifecycle_transition", False):
                 raise ValueError("Invoice lifecycle transitions must use domain services.")
@@ -156,6 +167,9 @@ class Invoice(models.Model):
                     "seller_state_snapshot", "seller_state_code_snapshot",
                     "customer_state_code_snapshot", "customer_registration_type_snapshot",
                     "place_of_supply", "tax_mode",
+                    # Stock left this warehouse at posting; a cancellation
+                    # must return it to the same place.
+                    "source_warehouse_id",
                 ]
                 if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
                     raise ValueError("Posted and cancelled invoice financial fields are immutable.")
