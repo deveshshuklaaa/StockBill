@@ -223,6 +223,10 @@ class Warehouse(models.Model):
     state = models.CharField(max_length=100, blank=True)
     state_code = models.CharField(max_length=10, blank=True)
     is_active = models.BooleanField(default=True)
+    # False for holding locations such as Damaged / Quarantine: their stock
+    # stays tracked and visible but is never billed from and is left out of
+    # sellable figures (Product.current_stock, dashboard stock).
+    is_sellable = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1132,3 +1136,80 @@ class WarehouseTransferIdempotencyKey(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("Warehouse transfer idempotency keys cannot be deleted.")
+
+
+class SupplierReturn(models.Model):
+    """Goods sent back to a supplier for 1:1 replacement (append-only).
+
+    The minimal exit leg for damaged stock: base units leave a warehouse
+    (by default Damaged / Quarantine) with a PURCHASE_RETURN movement. Its
+    value (quantity x unit_cost) is a debit on the supplier ledger until
+    the replacement arrives (SupplierReplacementReceipt). Not a GST debit
+    note and not a write-off.
+    """
+
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name="returns")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="supplier_returns")
+    warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="supplier_returns")
+    quantity = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    value = models.DecimalField(max_digits=14, decimal_places=2)
+    return_date = models.DateField()
+    reference = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="supplier_returns")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-return_date", "-id"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(quantity__gt=0), name="supplier_return_quantity_positive"),
+        ]
+
+    def __str__(self):
+        return f"{self.display_number}: {self.quantity} x {self.product.name} to {self.supplier.name}"
+
+    @property
+    def display_number(self):
+        return f"SR-{self.pk}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Supplier returns are append-only and cannot be edited.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Supplier returns cannot be deleted.")
+
+
+class SupplierReplacementReceipt(models.Model):
+    """Replacement goods received against a SupplierReturn (append-only).
+
+    Valued at the return's unit cost, so a full 1:1 replacement nets the
+    supplier ledger back to zero. Stock enters a warehouse (by default
+    Main) with a PURCHASE movement referencing "supplier_replacement".
+    """
+
+    supplier_return = models.ForeignKey(SupplierReturn, on_delete=models.PROTECT, related_name="replacements")
+    warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="supplier_replacements")
+    quantity = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
+    value = models.DecimalField(max_digits=14, decimal_places=2)
+    receipt_date = models.DateField()
+    reference = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="supplier_replacements")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["receipt_date", "id"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(quantity__gt=0), name="supplier_replacement_quantity_positive"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Replacement receipts are append-only and cannot be edited.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Replacement receipts cannot be deleted.")

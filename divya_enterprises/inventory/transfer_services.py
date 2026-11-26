@@ -17,7 +17,7 @@ Strict rules:
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import connection, models, transaction
+from django.db import connection, transaction
 from rest_framework import serializers
 
 from billing.models import AuditLog
@@ -31,7 +31,7 @@ from .models import (
     WarehouseTransferIdempotencyKey,
 )
 from .purchase_services import _master_box_size
-from .services import ensure_inventory_balance
+from .services import ensure_inventory_balance, sellable_stock_total
 from .transfer_numbering import next_transfer_number
 
 
@@ -261,12 +261,7 @@ def post_warehouse_transfer(
     dest_balance.save(update_fields=["quantity_on_hand", "average_cost", "updated_at"])
 
     # 8. Product cached stock
-    total_stock = (
-        InventoryBalance.objects.filter(product=locked_product).aggregate(
-            total=models.Sum("quantity_on_hand")
-        )["total"]
-        or Decimal("0.000")
-    )
+    total_stock = sellable_stock_total(locked_product)
     locked_product._allow_stock_cache_update = True
     locked_product.current_stock = total_stock
     locked_product.save(update_fields=["current_stock", "updated_at"])

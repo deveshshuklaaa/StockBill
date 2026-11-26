@@ -7,6 +7,10 @@ from .models import InventoryBalance, Product, StockLedger, Warehouse
 
 
 DEFAULT_WAREHOUSE_CODE = "MAIN"
+# Holding location for damaged returns awaiting 1:1 supplier replacement.
+# Created by migration inventory 0018; never sellable.
+DAMAGED_WAREHOUSE_CODE = "DAMAGED"
+DAMAGED_WAREHOUSE_NAME = "Damaged / Quarantine"
 
 
 def get_default_warehouse():
@@ -15,6 +19,27 @@ def get_default_warehouse():
         defaults={"name": "Main Warehouse", "address": ""},
     )
     return warehouse
+
+
+def get_damaged_warehouse():
+    warehouse, _ = Warehouse.objects.get_or_create(
+        code=DAMAGED_WAREHOUSE_CODE,
+        defaults={"name": DAMAGED_WAREHOUSE_NAME, "address": "", "is_sellable": False},
+    )
+    return warehouse
+
+
+def sellable_stock_total(product):
+    """Σ quantity on hand in sellable warehouses: the Product.current_stock cache.
+
+    Non-sellable warehouses (Damaged / Quarantine) keep their balances and
+    ledger but are left out, so product lists, the invoice "available" hint
+    and low-stock alerts only count stock that can actually be sold. With no
+    non-sellable stock this equals the all-warehouse sum, as before.
+    """
+    return InventoryBalance.objects.filter(
+        product=product, warehouse__is_sellable=True
+    ).aggregate(total=models.Sum("quantity_on_hand"))["total"] or Decimal("0.000")
 
 
 def ensure_inventory_balance(*, product, warehouse=None, created_by=None):
@@ -86,7 +111,7 @@ def adjust_inventory(*, product, quantity_delta, movement_type, created_by=None,
     )
 
     # Keep the legacy global cache synchronized until all consumers migrate to balances.
-    total_stock = InventoryBalance.objects.filter(product=product).aggregate(total=models.Sum("quantity_on_hand"))["total"] or Decimal("0.000")
+    total_stock = sellable_stock_total(product)
     product._allow_stock_cache_update = True
     product.current_stock = total_stock
     product.save(update_fields=["current_stock", "updated_at"])

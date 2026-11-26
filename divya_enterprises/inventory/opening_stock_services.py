@@ -17,7 +17,7 @@ Strict rules:
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import connection, models, transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -34,6 +34,7 @@ from .models import (
 )
 from .opening_stock_numbering import next_opening_stock_number
 from .purchase_services import MASTER_BOX_ATTRIBUTE_CODE, _master_box_size
+from .services import sellable_stock_total
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -317,12 +318,7 @@ def create_opening_stock(
     balance.save(update_fields=["quantity_on_hand", "average_cost", "updated_at"])
 
     # Synchronize product-level current_stock cache and cost_price fallback
-    total_stock = (
-        InventoryBalance.objects.filter(product=product).aggregate(
-            total=models.Sum("quantity_on_hand")
-        )["total"]
-        or Decimal("0.000")
-    )
+    total_stock = sellable_stock_total(product)
     product._allow_stock_cache_update = True
     product.current_stock = total_stock
     if product.cost_price == Decimal("0.00"):

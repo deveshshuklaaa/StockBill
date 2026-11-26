@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { cancelInvoice, deleteDraftInvoice, fetchCorrectionEligibility, fetchInvoice, postInvoice, printInvoicePdf } from '../api/invoices'
+import CreditNotePanel from '../components/CreditNotePanel'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 import { formatQuantity, formatQuantityWithUnit, invoiceLabel } from '../utils/format'
@@ -29,6 +30,8 @@ export default function InvoiceDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
+  const [showCreditNote, setShowCreditNote] = useState(false)
+  const [creditNoteMessage, setCreditNoteMessage] = useState('')
   // Correction eligibility (for POSTED invoices)
   const [eligibility, setEligibility] = useState(null) // null=loading, { eligible, reason }
 
@@ -160,12 +163,28 @@ export default function InvoiceDetailPage() {
           )}
         </>}
         {/* POSTED: Post action available only for admin and before correction */}
+        {isPosted && (
+          <button type="button" className="quiet-button" onClick={() => { setCreditNoteMessage(''); setShowCreditNote(true) }} disabled={busy}>Issue credit note</button>
+        )}
         {isAdmin && isPosted && !invoice.replacement_invoice && (
           <button className="quiet-button" style={{ color: 'var(--red)' }} onClick={() => setShowCancel(true)} disabled={busy}>Cancel invoice</button>
         )}
       </div>
     </header>
     <StatusMessage>{error}</StatusMessage>
+    {creditNoteMessage && <p className="field-help" role="status" style={{ fontSize: 12, color: 'var(--green)' }}>{creditNoteMessage}</p>}
+
+    {showCreditNote && isPosted && (
+      <CreditNotePanel
+        invoice={invoice}
+        onClose={() => setShowCreditNote(false)}
+        onCreated={async (note) => {
+          setShowCreditNote(false)
+          setCreditNoteMessage(`Credit note ${note.credit_note_number} created${note.destination_warehouse_name ? `; stock returned to ${note.destination_warehouse_name}` : '; stock returned to Main'}.`)
+          try { setInvoice(await fetchInvoice(id)) } catch { /* keep the current view */ }
+        }}
+      />
+    )}
 
     {showCancel && <div className="record-form">
       <div className="form-heading"><div><p className="eyebrow">Cancellation</p><h2>Cancel invoice {invoiceLabel(invoice)}</h2></div></div>

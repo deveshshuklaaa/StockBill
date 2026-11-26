@@ -260,10 +260,14 @@ class WarehouseSerializer(serializers.ModelSerializer):
             "state",
             "state_code",
             "is_active",
+            "is_sellable",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        # is_sellable is fixed by migration (False only for Damaged /
+        # Quarantine): flipping it on a stocked warehouse would leave every
+        # Product.current_stock cache stale.
+        read_only_fields = ["id", "is_sellable", "created_at", "updated_at"]
 
     def validate_name(self, value):
         if not value or not str(value).strip():

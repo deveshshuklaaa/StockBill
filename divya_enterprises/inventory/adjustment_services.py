@@ -13,7 +13,7 @@ Strict rules:
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import connection, models, transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -30,7 +30,7 @@ from .models import (
     Warehouse,
 )
 from .purchase_services import MASTER_BOX_ATTRIBUTE_CODE, _master_box_size
-from .services import ensure_inventory_balance, get_default_warehouse
+from .services import ensure_inventory_balance, get_default_warehouse, sellable_stock_total
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -266,12 +266,7 @@ def post_stock_adjustment(
     balance.save(update_fields=["quantity_on_hand", "average_cost", "updated_at"])
 
     # 3. Resync Product.current_stock cache
-    total_stock = (
-        InventoryBalance.objects.filter(product=locked_product).aggregate(
-            total=models.Sum("quantity_on_hand")
-        )["total"]
-        or Decimal("0.000")
-    )
+    total_stock = sellable_stock_total(locked_product)
     locked_product._allow_stock_cache_update = True
     locked_product.current_stock = total_stock
     locked_product.save(update_fields=["current_stock", "updated_at"])

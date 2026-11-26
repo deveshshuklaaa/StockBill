@@ -97,6 +97,26 @@ def _check_source_warehouse(warehouse):
         raise serializers.ValidationError(
             {"source_warehouse": f"Warehouse {warehouse.code} is inactive and cannot supply sales."}
         )
+    if not warehouse.is_sellable:
+        raise serializers.ValidationError(
+            {"source_warehouse": f"Warehouse {warehouse.code} holds non-sellable stock and cannot supply sales."}
+        )
+    return warehouse
+
+
+def _check_return_destination(warehouse):
+    """Validate a credit note's destination warehouse (None = Main).
+
+    Non-sellable warehouses are allowed on purpose: damaged returns go to
+    the Damaged / Quarantine warehouse. Inactive ones are refused.
+    """
+    if warehouse is None:
+        return None
+    warehouse = Warehouse.objects.get(pk=warehouse.pk)
+    if not warehouse.is_active:
+        raise serializers.ValidationError(
+            {"destination_warehouse": f"Warehouse {warehouse.code} is inactive and cannot receive returns."}
+        )
     return warehouse
 
 
@@ -465,7 +485,10 @@ def post_invoice(*, invoice_id, posted_by):
 
 
 @transaction.atomic
-def create_credit_note(*, original_invoice, reason="", created_by, line_items):
+def create_credit_note(*, original_invoice, reason="", created_by, line_items, destination_warehouse=None):
+    # Stored as given (null = Main); stock returns to the effective warehouse.
+    destination_warehouse = _check_return_destination(destination_warehouse)
+    return_warehouse = _effective_warehouse(destination_warehouse)
     invoice = Invoice.objects.select_for_update().get(pk=original_invoice.pk)
     if invoice.state != Invoice.STATE_POSTED:
         raise serializers.ValidationError({"original_invoice": "Credit notes require a posted invoice."})
@@ -536,6 +559,7 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
         reason=reason,
         total_amount=_money(total_amount) + round_off,
         round_off=round_off,
+        destination_warehouse=destination_warehouse,
         created_by=created_by,
     )
     for original_line, product, quantity, discount_amount, tax_amount, cgst_amount, sgst_amount, igst_amount, line_total, per_base_rate in calculated_lines:
@@ -564,6 +588,7 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
             reference_type="credit_note",
             reference_id=credit_note.pk,
             unit_cost=original_line.cost_price_snapshot,
+            warehouse=return_warehouse,
         )
 
     return credit_note

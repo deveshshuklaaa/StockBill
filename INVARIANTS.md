@@ -1,6 +1,9 @@
 # StockBill business invariants
 
-- Inventory balances are stored per product and warehouse in base units. `Product.current_stock` remains a compatibility cache equal to the sum of warehouse balances.
+- Inventory balances are stored per product and warehouse in base units. `Product.current_stock` remains a compatibility cache equal to the sum of balances in **sellable** warehouses (`Warehouse.is_sellable`). Non-sellable warehouses (only `DAMAGED`, "Damaged / Quarantine", created by migration `inventory/0018`) keep full balances and ledger rows but are left out of that cache and of the dashboard stock figures; the inventory report keeps them in its totals and splits them out as `held_*`. With no non-sellable stock the cache equals the all-warehouse sum, as before.
+- An invoice's stock source is `Invoice.source_warehouse`; null means `MAIN` (every invoice before the field existed). It is fixed at posting, cancellation returns stock to it, an amendment's replacement inherits it, and it can never be a non-sellable or inactive warehouse.
+- A credit note's stock destination is `CreditNote.destination_warehouse`; null means `MAIN` (every earlier credit note). Damaged returns go to `DAMAGED`: held for 1:1 supplier replacement, never written off.
+- Damaged goods leave for the supplier as an append-only `SupplierReturn` (`PURCHASE_RETURN` movement, default out of `DAMAGED`) and come back as `SupplierReplacementReceipt`s (`PURCHASE` movement, reference type `supplier_replacement`, default into `MAIN`) capped at the returned quantity. Neither leg changes WAC. Both tables are append-only in the model and through the `stockbill_protect_supplier_ledger()` trigger.
 - Every balance-changing operation runs inside `transaction.atomic()`, locks the relevant balance with `select_for_update()`, and creates a `StockLedger` event.
 - Product conversion factors must be positive. Invoice lines now capture entered unit (piece/master box), conversion factor, and base quantity; stock deduction uses base quantity.
 - Sale lines snapshot `cost_price_snapshot` and `cogs_amount`; changing a product's current cost does not change historical gross profit.

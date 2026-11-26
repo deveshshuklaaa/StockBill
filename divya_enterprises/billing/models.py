@@ -278,6 +278,16 @@ class CreditNote(models.Model):
     # invoice carries the invoice's round_off; partial notes carry 0.00.
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
     round_off = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0.00"))
+    # Warehouse the returned goods went back into, set at creation (credit
+    # notes are immutable). Null means the default "Main" warehouse, which is
+    # where every credit note created before this field returned stock.
+    destination_warehouse = models.ForeignKey(
+        "inventory.Warehouse",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="credit_note_returns",
+    )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_credit_notes")
     created_at = models.DateTimeField(auto_now_add=True)
 

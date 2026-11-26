@@ -1,5 +1,7 @@
 from django.urls import path
 
+from .supplier_views import SupplierReplacementCreateView, SupplierReturnDetailView, SupplierReturnListCreateView
+
 from .views import (
     AttributeChoiceDetailView,
     AttributeChoiceListCreateView,
@@ -259,4 +261,7 @@ urlpatterns = [
         WarehouseTransferDetailView.as_view(),
         name="transfer-detail-alias",
     ),
+    path("supplier-returns/", SupplierReturnListCreateView.as_view(), name="supplier-return-list-create"),
+    path("supplier-returns/<int:pk>/", SupplierReturnDetailView.as_view(), name="supplier-return-detail"),
+    path("supplier-returns/<int:pk>/replacements/", SupplierReplacementCreateView.as_view(), name="supplier-return-replacement"),
 ]

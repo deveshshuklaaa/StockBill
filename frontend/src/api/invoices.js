@@ -129,3 +129,10 @@ export async function deleteDraftInvoice(id) {
   return data
 }
 
+// Sales return against a POSTED invoice. destination_warehouse is optional;
+// leaving it out returns the goods to Main, as before.
+export async function createCreditNote(payload) {
+  const { data } = await api.post('/credit-notes/', payload)
+  return data
+}
+

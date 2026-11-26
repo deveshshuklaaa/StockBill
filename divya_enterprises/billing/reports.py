@@ -537,8 +537,17 @@ class InventoryValuationReportView(APIView):
         legacy_quantity = sum((product.current_stock for product in legacy_rows), ZERO_QTY)
         legacy_value = sum((product.current_stock * product.cost_price for product in legacy_rows), ZERO_MONEY)
 
+        # Non-sellable (Damaged / Quarantine) stock stays in the totals above
+        # but is split out so it is never read as sellable.
+        held = balances.filter(warehouse__is_sellable=False).aggregate(
+            quantity=Coalesce(Sum("quantity_on_hand"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
+            value=Coalesce(Sum(value_expr), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+        )
+        total_quantity = (totals["quantity"] or ZERO_QTY) + legacy_quantity
+        total_value = (totals["value"] or ZERO_MONEY) + legacy_value
+
         by_warehouse = list(
-            balances.values("warehouse_id", "warehouse__name", "warehouse__code")
+            balances.values("warehouse_id", "warehouse__name", "warehouse__code", "warehouse__is_sellable")
             .annotate(
                 product_count=Count("product", distinct=True),
                 quantity=Coalesce(Sum("quantity_on_hand"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
@@ -551,13 +560,18 @@ class InventoryValuationReportView(APIView):
             {
                 "rules": "Value = InventoryBalance.quantity_on_hand × average_cost (WAC). Legacy products without balances fall back to current_stock × cost_price.",
                 "product_count": (totals["product_count"] or 0) + len(legacy_rows),
-                "quantity_on_hand": (totals["quantity"] or ZERO_QTY) + legacy_quantity,
-                "total_value": (totals["value"] or ZERO_MONEY) + legacy_value,
+                "quantity_on_hand": total_quantity,
+                "total_value": total_value,
+                "sellable_quantity_on_hand": total_quantity - held["quantity"],
+                "sellable_value": total_value - held["value"],
+                "held_quantity_on_hand": held["quantity"],
+                "held_value": held["value"],
                 "by_warehouse": [
                     {
                         "warehouse_id": row["warehouse_id"],
                         "warehouse_name": row["warehouse__name"],
                         "warehouse_code": row["warehouse__code"],
+                        "is_sellable": row["warehouse__is_sellable"],
                         "product_count": row["product_count"],
                         "quantity": row["quantity"],
                         "value": row["value"],
@@ -1136,8 +1150,16 @@ class DashboardReportView(APIView):
         value_expr = ExpressionWrapper(
             F("quantity_on_hand") * F("average_cost"), output_field=MONEY_FIELD
         )
-        inventory = InventoryBalance.objects.filter(quantity_on_hand__gt=0).aggregate(
+        # Headline stock is sellable stock only; goods held in non-sellable
+        # warehouses (Damaged / Quarantine) are reported apart as held_stock.
+        in_stock = InventoryBalance.objects.filter(quantity_on_hand__gt=0)
+        inventory = in_stock.filter(warehouse__is_sellable=True).aggregate(
             product_count=Count("product", distinct=True),
+            total_value=Coalesce(Sum(value_expr), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+        )
+        held_stock = in_stock.filter(warehouse__is_sellable=False).aggregate(
+            product_count=Count("product", distinct=True),
+            quantity=Coalesce(Sum("quantity_on_hand"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
             total_value=Coalesce(Sum(value_expr), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         )
 
@@ -1194,6 +1216,11 @@ class DashboardReportView(APIView):
                 "inventory": {
                     "product_count": inventory["product_count"],
                     "total_value": inventory["total_value"],
+                },
+                "held_stock": {
+                    "product_count": held_stock["product_count"],
+                    "quantity": held_stock["quantity"],
+                    "total_value": held_stock["total_value"],
                 },
                 "customer_outstanding_total": outstanding_total,
                 "active_customers": active_customers,

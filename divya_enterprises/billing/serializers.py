@@ -9,7 +9,18 @@ from .profit import get_invoice_profit_data
 
 
 def _sale_source_warehouses():
-    """Warehouses a sale may be billed from (null on the invoice = Main)."""
+    """Warehouses a sale may be billed from (null on the invoice = Main).
+
+    Non-sellable holding warehouses (Damaged / Quarantine) are excluded.
+    """
+    return Warehouse.objects.filter(is_active=True, is_sellable=True)
+
+
+def _return_destination_warehouses():
+    """Warehouses returned goods may go to (null on the note = Main).
+
+    Non-sellable ones are included: damaged returns are held there.
+    """
     return Warehouse.objects.filter(is_active=True)
 
 
@@ -203,6 +214,12 @@ class CreditNoteLineItemSerializer(serializers.ModelSerializer):
 class CreditNoteSerializer(serializers.ModelSerializer):
     original_invoice_number = serializers.CharField(source="original_invoice.invoice_number", read_only=True)
     line_items = CreditNoteLineItemSerializer(many=True, required=True)
+    # Optional; omitted or null returns the goods to Main, as before.
+    destination_warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=_return_destination_warehouses(), required=False, allow_null=True
+    )
+    destination_warehouse_code = serializers.CharField(source="destination_warehouse.code", read_only=True, default=None)
+    destination_warehouse_name = serializers.CharField(source="destination_warehouse.name", read_only=True, default=None)
 
     class Meta:
         model = CreditNote
@@ -211,6 +228,9 @@ class CreditNoteSerializer(serializers.ModelSerializer):
             "credit_note_number",
             "original_invoice",
             "original_invoice_number",
+            "destination_warehouse",
+            "destination_warehouse_code",
+            "destination_warehouse_name",
             "reason",
             "note_date",
             "total_amount",

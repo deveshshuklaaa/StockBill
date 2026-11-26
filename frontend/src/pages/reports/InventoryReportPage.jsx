@@ -56,12 +56,16 @@ export default function InventoryReportPage() {
       {report && <div className="metric-grid">
         <div className="metric-card"><div className="metric-label">Quantity on hand</div><div className="metric-value">{formatQuantity(report.quantity_on_hand, 'piece')}</div></div>
         <div className="metric-card"><div className="metric-label">Total inventory value</div><div className="metric-value">{money(report.total_value)}</div><div className="metric-hint">At weighted-average cost</div></div>
+        {Number(report.held_quantity_on_hand || 0) > 0 && <>
+          <div className="metric-card"><div className="metric-label">Sellable stock</div><div className="metric-value">{formatQuantity(report.sellable_quantity_on_hand, 'piece')}</div><div className="metric-hint">{money(report.sellable_value)}</div></div>
+          <div className="metric-card"><div className="metric-label">Held, not sellable</div><div className="metric-value">{formatQuantity(report.held_quantity_on_hand, 'piece')}</div><div className="metric-hint">Damaged / Quarantine, awaiting supplier replacement</div></div>
+        </>}
       </div>}
 
       {report && report.by_warehouse.length > 0 && <div className="table-scroll"><table>
         <thead><tr><th>Warehouse</th><th style={{ textAlign: 'right' }}>Products</th><th style={{ textAlign: 'right' }}>Quantity</th><th style={{ textAlign: 'right' }}>Value (WAC)</th></tr></thead>
         <tbody>{report.by_warehouse.map((row) => <tr key={row.warehouse_id}>
-          <td><strong>{row.warehouse_name}</strong><small>{row.warehouse_code}</small></td>
+          <td><strong>{row.warehouse_name}</strong><small>{row.warehouse_code}{row.is_sellable === false ? ' · not sellable' : ''}</small></td>
           <td style={{ textAlign: 'right' }}>{row.product_count}</td>
           <td style={{ textAlign: 'right' }}>{formatQuantity(row.quantity, 'piece')}</td>
           <td style={{ textAlign: 'right' }}><strong>{money(row.value)}</strong></td>

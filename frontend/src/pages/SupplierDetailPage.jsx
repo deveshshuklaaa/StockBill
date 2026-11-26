@@ -12,6 +12,7 @@ import {
   updateSupplier,
 } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
+import SupplierReturnsPanel from '../components/SupplierReturnsPanel'
 import { useAuth } from '../context/AuthContext'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
@@ -572,5 +573,6 @@ export default function SupplierDetailPage() {
         <span>Purchase history is immutable — supplier master edits never change posted documents.</span>
       </div>
     </div>
+    <SupplierReturnsPanel supplierId={id} canEdit={isAdmin} />
   </section>
 }

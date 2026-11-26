@@ -14,7 +14,7 @@ transaction-level inputs, never assumed from the catalogue or supplier.
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import connection, models, transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -33,7 +33,7 @@ from .models import (
     Warehouse,
 )
 from .purchase_numbering import next_purchase_number
-from .services import ensure_inventory_balance, get_default_warehouse
+from .services import ensure_inventory_balance, get_default_warehouse, sellable_stock_total
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -388,9 +388,7 @@ def _save_balance(*, balance, update_quantity, update_cost):
 
 
 def _resync_product_cache(*, product):
-    total_stock = InventoryBalance.objects.filter(product=product).aggregate(
-        total=models.Sum("quantity_on_hand")
-    )["total"] or Decimal("0.000")
+    total_stock = sellable_stock_total(product)
     product._allow_stock_cache_update = True
     product.current_stock = total_stock
     product.save(update_fields=["current_stock", "updated_at"])

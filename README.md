@@ -59,7 +59,7 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 - **Weighted Average Cost (WAC):** Perpetual WAC recalculation upon every purchase receipt based on landed pre-tax, post-discount purchase cost.
 - **Stock Adjustments (`StockAdjustment`):** Controlled manual stock corrections (In/Out) with mandatory reason classification, reference tracking, and ledger impact.
 - **Opening Stock (`OpeningStock`):** Dedicated opening stock entry mechanism with automated balance and ledger seeding.
-- **Warehouse Management (`Warehouse`):** Multi-warehouse support with primary default warehouse (`MAIN`).
+- **Warehouse Management (`Warehouse`):** Multi-warehouse support with primary default warehouse (`MAIN`). The non-sellable `DAMAGED` ("Damaged / Quarantine") warehouse holds damaged returns awaiting supplier replacement; its stock is excluded from sellable figures (product stock, low-stock alerts, dashboard) but stays visible in stock reports.
 - **Warehouse Transfers (`WarehouseTransfer`):** Multi-step transfer workflow between source and destination warehouses with live stock validation.
 - **Stock Thresholds & Alerts:** Low-stock threshold tracking per product to highlight inventory replenishment needs.
 
@@ -89,6 +89,16 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 - **Invoice Amendment Workflow:** Supervised correction workflow allowing cancellation and re-issuance with explicit amendment lineage.
 - **Historical Invoice Snapshots:** Immutable capture of customer billing address, product name, SKU, HSN, rate, discount, and tax at the moment of posting.
 - **PDF Invoice Generation:** Server-rendered GST-compliant tax invoices generated via WeasyPrint.
+- **Source warehouse (optional):** An invoice can draw its stock from a chosen sellable warehouse (e.g. a van). Left empty, it uses Main exactly as before.
+- **Return destination (optional):** A credit note can send the returned goods to a chosen warehouse. Left empty, they go back to Main.
+
+#### Van / route sales and damaged returns (operator setup)
+No code change is needed per route; this is a one-time setup on the existing screens.
+
+1. **Route customer:** on *Customers*, create one B2C customer per route, e.g. `Van Sales – Route 1`, unregistered (no GSTIN). Route sales are consolidated B2C retail billed to that account.
+2. **Route stock (optional):** if the van carries its own stock, create a warehouse for it on *Warehouses* and move stock with *Warehouse Transfers*; then pick it as the invoice's *Source warehouse*. Otherwise leave it on Main.
+3. **Damaged pile from the route:** open the route invoice, choose *Issue credit note*, enter the damaged quantities and set *Returned stock goes to* = **Damaged / Quarantine**. The goods are held there (visible in stock reports, not sellable, not written off; no ITC reversal).
+4. **Back to the supplier:** on the supplier's page, *Returns for 1:1 replacement* → *Send back to supplier* (out of Damaged). When the replacement arrives, *Receive replacement* (into Main). The two entries cancel out on the supplier ledger.
 
 ### Customers
 - Full CRUD operations with soft-archival (`is_active`).

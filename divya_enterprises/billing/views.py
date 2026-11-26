@@ -246,13 +246,13 @@ class PaymentDetailView(generics.RetrieveAPIView):
 
 
 class CreditNoteListCreateView(generics.ListCreateAPIView):
-    queryset = CreditNote.objects.select_related("original_invoice", "created_by").prefetch_related("line_items").all().order_by("-created_at")
+    queryset = CreditNote.objects.select_related("original_invoice", "created_by", "destination_warehouse").prefetch_related("line_items").all().order_by("-created_at")
     serializer_class = CreditNoteSerializer
     permission_classes = [permissions.IsAuthenticated]
 
 
 class CreditNoteDetailView(generics.RetrieveAPIView):
-    queryset = CreditNote.objects.select_related("original_invoice", "created_by").prefetch_related("line_items").all()
+    queryset = CreditNote.objects.select_related("original_invoice", "created_by", "destination_warehouse").prefetch_related("line_items").all()
     serializer_class = CreditNoteSerializer
     permission_classes = [permissions.IsAuthenticated]
 

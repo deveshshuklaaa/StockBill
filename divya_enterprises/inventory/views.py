@@ -240,6 +240,7 @@ class WarehouseSummaryView(APIView):
                     "state": warehouse.state,
                     "state_code": warehouse.state_code,
                     "is_active": warehouse.is_active,
+                    "is_sellable": warehouse.is_sellable,
                     "product_count": row["product_count"] if row else 0,
                     "total_quantity": row["total_quantity"] if row else Decimal("0.000"),
                     "total_value": (
