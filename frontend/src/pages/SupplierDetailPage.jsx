@@ -217,6 +217,7 @@ export default function SupplierDetailPage() {
     <header className="detail-toolbar">
       <Link className="quiet-button" to="/suppliers">← Suppliers</Link>
       <div className="detail-actions">
+        <Link className="quiet-button" to={`/suppliers/${id}/ledger`}>Ledger &amp; payments</Link>
         {isAdmin && supplier.is_active && !showForm && (
           <button className="secondary-button" onClick={openEditForm} disabled={busy}>Edit supplier</button>
         )}

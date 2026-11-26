@@ -1,5 +1,12 @@
 from django.urls import path
 
+from .supplier_ledger_views import (
+    SupplierLedgerExportView,
+    SupplierLedgerView,
+    SupplierPaymentDetailView,
+    SupplierPaymentListCreateView,
+    SupplierPaymentReverseView,
+)
 from .supplier_views import SupplierReplacementCreateView, SupplierReturnDetailView, SupplierReturnListCreateView
 
 from .views import (
@@ -264,4 +271,9 @@ urlpatterns = [
     path("supplier-returns/", SupplierReturnListCreateView.as_view(), name="supplier-return-list-create"),
     path("supplier-returns/<int:pk>/", SupplierReturnDetailView.as_view(), name="supplier-return-detail"),
     path("supplier-returns/<int:pk>/replacements/", SupplierReplacementCreateView.as_view(), name="supplier-return-replacement"),
+    path("supplier-payments/", SupplierPaymentListCreateView.as_view(), name="supplier-payment-list-create"),
+    path("supplier-payments/<int:pk>/", SupplierPaymentDetailView.as_view(), name="supplier-payment-detail"),
+    path("supplier-payments/<int:pk>/reverse/", SupplierPaymentReverseView.as_view(), name="supplier-payment-reverse"),
+    path("suppliers/<int:pk>/ledger/", SupplierLedgerView.as_view(), name="supplier-ledger"),
+    path("suppliers/<int:pk>/ledger/export/", SupplierLedgerExportView.as_view(), name="supplier-ledger-export"),
 ]

@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 
 class Category(models.Model):
@@ -1213,3 +1214,67 @@ class SupplierReplacementReceipt(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("Replacement receipts cannot be deleted.")
+
+
+class SupplierPayment(models.Model):
+    """Money paid to a supplier: append-only, exactly like billing.Payment.
+
+    Not tied to a particular purchase: round-figure advances and part
+    payments are drawn down by posted purchases on the supplier ledger
+    (inventory.supplier_ledger). There is no opening-balance field.
+    """
+
+    MODE_BANK_TRANSFER = "BANK_TRANSFER"
+    MODE_CASH = "CASH"
+    MODE_UPI = "UPI"
+    MODE_CHOICES = [
+        (MODE_BANK_TRANSFER, "Bank transfer"),
+        (MODE_CASH, "Cash"),
+        (MODE_UPI, "UPI"),
+    ]
+
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name="payments")
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    payment_date = models.DateField(default=timezone.localdate)
+    mode = models.CharField(max_length=20, choices=MODE_CHOICES, default=MODE_BANK_TRANSFER)
+    reference = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="supplier_payments")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-payment_date", "-id"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="supplier_payment_amount_positive"),
+        ]
+
+    def __str__(self):
+        return f"{self.supplier.name} - {self.amount}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            stored = type(self).objects.only("supplier_id", "amount", "payment_date", "mode").get(pk=self.pk)
+            if any(getattr(self, field) != getattr(stored, field) for field in ["supplier_id", "amount", "payment_date", "mode"]):
+                raise ValueError("Supplier payments are append-only and cannot be edited.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Supplier payments are append-only and cannot be deleted.")
+
+
+class SupplierPaymentReversal(models.Model):
+    """Undoes all or part of a SupplierPayment; mirrors billing.PaymentReversal."""
+
+    payment = models.ForeignKey(SupplierPayment, on_delete=models.PROTECT, related_name="reversals")
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    reason = models.TextField()
+    reversed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="supplier_payment_reversals")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("Supplier payment reversals are immutable after creation.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Supplier payment reversals cannot be deleted.")

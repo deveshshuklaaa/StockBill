@@ -112,6 +112,7 @@ No code change is needed per route; this is a one-time setup on the existing scr
 - State-code tracking for GST place-of-supply logic.
 - Historical purchase invoices and payment audit trail.
 - Supplier-specific MRP purchase rate rules.
+- **Supplier ledger (accounts payable):** record payments to a supplier (Bank transfer by default, Cash or UPI), including round-figure advances that later purchases draw down. The per-supplier ledger page lists purchases, payments, reversals, damaged-goods returns and replacements in date order with a running balance, and closes with the **Payable** (positive, you owe) or **Advance** (negative, paid ahead) figure. It can be printed or exported as an Excel statement. Example: a ₹1,00,000 advance against a ₹97,368 purchase leaves a ₹2,632 advance. Admins can reverse a payment; nothing is edited or deleted.
 
 ### Reports
 - **Daily Sales Report:** Segregated view of cash sales, credit sales, and actual collections for any chosen date.

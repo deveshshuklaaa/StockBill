@@ -31,6 +31,7 @@ const NewPurchasePage = lazy(() => import('./pages/NewPurchasePage'))
 const PurchaseDetailPage = lazy(() => import('./pages/PurchaseDetailPage'))
 const SuppliersPage = lazy(() => import('./pages/SuppliersPage'))
 const SupplierDetailPage = lazy(() => import('./pages/SupplierDetailPage'))
+const SupplierLedgerPage = lazy(() => import('./pages/SupplierLedgerPage'))
 const WarehousesPage = lazy(() => import('./pages/WarehousesPage'))
 const BusinessProfilePage = lazy(() => import('./pages/BusinessProfilePage'))
 const TaxConfigurationPage = lazy(() => import('./pages/TaxConfigurationPage'))
@@ -101,6 +102,7 @@ function App() {
               <Route path="/purchases/:id" element={<PurchaseDetailPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+              <Route path="/suppliers/:id/ledger" element={<SupplierLedgerPage />} />
               <Route path="/warehouses" element={<WarehousesPage />} />
               <Route path="/settings/business" element={<BusinessProfilePage />} />
               <Route path="/settings/taxes" element={<TaxConfigurationPage />} />
