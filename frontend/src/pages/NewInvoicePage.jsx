@@ -3,8 +3,9 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
 import { fetchCustomerMRPPricing } from '../api/customers'
 import { amendInvoice, fetchBillingSettings, fetchInvoice, postInvoice, updateDraftInvoice } from '../api/invoices'
+import { fetchProductInventory } from '../api/inventory'
 import { fetchWarehouses } from '../api/warehouses'
-import { saleSourceOptions } from '../utils/warehouses'
+import { availableInWarehouse, isMainWarehouse, saleSourceOptions } from '../utils/warehouses'
 import StatusMessage from '../components/StatusMessage'
 import UnsavedChangesDialog from '../components/UnsavedChangesDialog'
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges'
@@ -103,6 +104,9 @@ export default function NewInvoicePage() {
   const [initialSourceWarehouse, setInitialSourceWarehouse] = useState('')
   const [loadedSourceName, setLoadedSourceName] = useState('')
   const [warehouses, setWarehouses] = useState([])
+  // Per-product warehouse balances for the "available" hint, keyed by product id.
+  const [balancesByProduct, setBalancesByProduct] = useState({})
+  const requestedBalancesRef = useRef(new Set())
 
   const [balance, setBalance] = useState(null)
   const [customerPricingMap, setCustomerPricingMap] = useState({})
@@ -136,6 +140,24 @@ export default function NewInvoicePage() {
       .catch(() => { if (active) setWarehouses([]) })
     return () => { active = false }
   }, [])
+
+  // Each line's product: load its per-warehouse balances once, so the
+  // "available" hint can show the chosen source warehouse's stock. Until they
+  // arrive (or if the call fails) the hint falls back to current_stock.
+  useEffect(() => {
+    lines.forEach((line) => {
+      const productId = line.product
+      if (productId == null || requestedBalancesRef.current.has(productId)) return
+      requestedBalancesRef.current.add(productId)
+      Promise.resolve()
+        .then(() => fetchProductInventory(productId))
+        .then((list) => {
+          if (!Array.isArray(list)) return
+          setBalancesByProduct((current) => ({ ...current, [productId]: list }))
+        })
+        .catch(() => { requestedBalancesRef.current.delete(productId) })
+    })
+  }, [lines])
 
   // Load initial customer list
   useEffect(() => {
@@ -730,6 +752,12 @@ export default function NewInvoicePage() {
   }
 
   const sourceOptions = saleSourceOptions(warehouses)
+  const mainWarehouse = warehouses.find(isMainWarehouse)
+  const sourceAvailability = {
+    warehouseId: sourceWarehouse || mainWarehouse?.id || null,
+    isMain: !sourceWarehouse || String(sourceWarehouse) === String(mainWarehouse?.id),
+  }
+  const sourceLabel = sourceOptions.find((w) => String(w.id) === sourceWarehouse)?.name || loadedSourceName || 'the chosen warehouse'
   const pageTitle    = isEditMode ? 'Edit draft invoice' : isAmendMode ? 'Correct invoice' : 'New invoice'
   const pageEyebrow  = isEditMode ? 'Billing / edit draft' : isAmendMode ? `Billing / correct ${originalInvoice?.invoice_number || ''}` : 'Billing / new transaction'
   const submitLabel  = isEditMode ? 'Save changes' : isAmendMode ? 'Create correction' : 'Create invoice'
@@ -887,7 +915,8 @@ export default function NewInvoicePage() {
                   const calculated = calculateLine(line, taxMode)
                   const box = masterBoxSize(line.productData)
                   const baseQty = Number(line.quantity || 0) * Number(line.conversionFactor || 1)
-                  const overStock = baseQty > Number(line.productData.current_stock)
+                  const available = availableInWarehouse(line.productData, balancesByProduct[line.product], sourceAvailability)
+                  const overStock = baseQty > Number(available)
                   const fixedUnit = Number(line.productData.unit_conversion_factor) <= 1
                   return (
                     <div className="invoice-line new-invoice-line" key={line.key}>
@@ -898,7 +927,7 @@ export default function NewInvoicePage() {
                       <div className="line-product">
                         <span className="line-field-title">Product</span>
                         <strong className="line-product-name">{line.productData.name}</strong>
-                        <span className="line-product-stock">{formatStockWithBoxes(line.productData.current_stock, line.productData)} available</span>
+                        <span className="line-product-stock">{formatStockWithBoxes(available, line.productData)} available{sourceWarehouse ? ` in ${sourceLabel}` : ''}</span>
                         {line.salesUnit === 'master box' && box ? (
                           <span className="variant-line">
                             {line.quantity || 0} Box × {box} = {formatQuantityWithUnit(baseQty, line.productData.base_unit || 'piece')}
