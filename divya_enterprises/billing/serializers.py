@@ -2,8 +2,26 @@ from rest_framework import serializers
 
 from decimal import Decimal
 
+from inventory.models import Warehouse
+
 from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 from .profit import get_invoice_profit_data
+
+
+def _sale_source_warehouses():
+    """Warehouses a sale may be billed from (null on the invoice = Main).
+
+    Non-sellable holding warehouses (Damaged / Quarantine) are excluded.
+    """
+    return Warehouse.objects.filter(is_active=True, is_sellable=True)
+
+
+def _return_destination_warehouses():
+    """Warehouses returned goods may go to (null on the note = Main).
+
+    Non-sellable ones are included: damaged returns are held there.
+    """
+    return Warehouse.objects.filter(is_active=True)
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
@@ -21,6 +39,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "phone",
             "email",
             "terms_and_conditions",
+            "round_off_invoice_total",
         ]
         read_only_fields = ["id"]
 
@@ -85,19 +104,26 @@ class InvoiceSerializer(serializers.ModelSerializer):
     payment_type = serializers.ChoiceField(choices=["cash", "credit"], default="credit")
     replacement_invoice_number = serializers.SerializerMethodField()
     amended_from_invoice_number = serializers.SerializerMethodField()
+    # Optional; omitted or null means the default Main warehouse.
+    source_warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=_sale_source_warehouses(), required=False, allow_null=True
+    )
+    source_warehouse_code = serializers.CharField(source="source_warehouse.code", read_only=True, default=None)
+    source_warehouse_name = serializers.CharField(source="source_warehouse.name", read_only=True, default=None)
 
     class Meta:
         model = Invoice
         fields = [
             "id", "invoice_number", "customer", "customer_name", "invoice_date",
             "payment_type", "payment_status", "state", "place_of_supply", "tax_mode",
+            "source_warehouse", "source_warehouse_code", "source_warehouse_name",
             "cancellation_reason", "cancelled_at",
             "customer_name_snapshot", "customer_gstin_snapshot",
             "customer_registration_type_snapshot", "customer_state_code_snapshot",
             "billing_address_snapshot", "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
             "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
             "seller_state_snapshot", "seller_state_code_snapshot",
-            "total_amount", "notes", "created_by", "line_items", "created_at", "updated_at",
+            "total_amount", "round_off", "notes", "created_by", "line_items", "created_at", "updated_at",
             "replacement_invoice", "replacement_invoice_number",
             "amended_from_invoice", "amended_from_invoice_number",
         ]
@@ -106,7 +132,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "invoice_number", "customer_name", "invoice_date", "created_at", "updated_at",
             "payment_status", "state", "cancellation_reason", "cancelled_at",
-            "created_by", "total_amount", "customer_name_snapshot",
+            "created_by", "total_amount", "round_off", "customer_name_snapshot",
             "customer_gstin_snapshot", "customer_registration_type_snapshot",
             "customer_state_code_snapshot", "billing_address_snapshot",
             "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
@@ -188,6 +214,12 @@ class CreditNoteLineItemSerializer(serializers.ModelSerializer):
 class CreditNoteSerializer(serializers.ModelSerializer):
     original_invoice_number = serializers.CharField(source="original_invoice.invoice_number", read_only=True)
     line_items = CreditNoteLineItemSerializer(many=True, required=True)
+    # Optional; omitted or null returns the goods to Main, as before.
+    destination_warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=_return_destination_warehouses(), required=False, allow_null=True
+    )
+    destination_warehouse_code = serializers.CharField(source="destination_warehouse.code", read_only=True, default=None)
+    destination_warehouse_name = serializers.CharField(source="destination_warehouse.name", read_only=True, default=None)
 
     class Meta:
         model = CreditNote
@@ -196,14 +228,18 @@ class CreditNoteSerializer(serializers.ModelSerializer):
             "credit_note_number",
             "original_invoice",
             "original_invoice_number",
+            "destination_warehouse",
+            "destination_warehouse_code",
+            "destination_warehouse_name",
             "reason",
             "note_date",
             "total_amount",
+            "round_off",
             "created_by",
             "line_items",
             "created_at",
         ]
-        read_only_fields = ["id", "credit_note_number", "original_invoice_number", "note_date", "created_at", "total_amount", "created_by"]
+        read_only_fields = ["id", "credit_note_number", "original_invoice_number", "note_date", "created_at", "total_amount", "round_off", "created_by"]
 
     def validate(self, attrs):
         if not attrs.get("line_items"):
@@ -254,3 +290,12 @@ class PaymentSerializer(serializers.ModelSerializer):
 
         validated_data.setdefault("invoice", None)
         return create_payment(actor=self.context["request"].user, **validated_data)
+
+
+class BillingSettingsSerializer(serializers.ModelSerializer):
+    """The one Business Profile setting staff need while billing."""
+
+    class Meta:
+        model = BusinessProfile
+        fields = ["round_off_invoice_total"]
+        read_only_fields = fields

@@ -28,6 +28,8 @@ class GstAuditReproductionTests(TestCase):
             state="Maharashtra",
             state_code="27",
             contact_details="9876543210",
+            # Exact-paise totals are what these tests check; round-off has its own tests.
+            round_off_invoice_total=False,
         )
         cls.customer_intra = Customer.objects.create(
             name="Sant Nirankari Traders",

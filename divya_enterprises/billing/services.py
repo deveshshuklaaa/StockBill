@@ -8,11 +8,11 @@ from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from customers.models import Customer
-from inventory.models import InventoryBalance, Product, ProductAttributeValue, StockLedger
+from inventory.models import InventoryBalance, Product, ProductAttributeValue, StockLedger, Warehouse
 from inventory.services import adjust_inventory, ensure_inventory_balance, get_default_warehouse
 from .models import AuditLog, BusinessProfile, CreditNote, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment, PaymentReversal, refresh_invoice_payment_status
 from .numbering import next_credit_note_number, next_invoice_number
-from .tax_engine import calculate_gst, round_paise
+from .tax_engine import calculate_gst, round_inr, round_paise
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -30,6 +30,26 @@ def _money(value):
 
 def _quantity(value):
     return Decimal(value).quantize(QUANTITY_QUANTUM)
+
+
+def round_off_enabled(seller=None):
+    """The Business Profile's round-off setting (off when no profile exists)."""
+    profile = seller if seller is not None else BusinessProfile.objects.first()
+    return bool(profile and profile.round_off_invoice_total)
+
+
+def _apply_round_off(exact_total, enabled):
+    """Whole-bill rounding to the nearest rupee, 50 paise up (ROUND_HALF_UP).
+
+    Returns (round_off, final_total) with final_total = exact_total + round_off
+    and |round_off| <= 0.50. Only the invoice total is rounded: line totals,
+    taxable value and GST stay exact, and round_off is not taxable value.
+    """
+    exact_total = _money(exact_total)
+    if not enabled:
+        return Decimal("0.00"), exact_total
+    final_total = round_inr(exact_total).quantize(MONEY_QUANTUM)
+    return final_total - exact_total, final_total
 
 
 def _issue_invoice_number(invoice):
@@ -61,18 +81,62 @@ def _master_box_size(product):
     return value
 
 
-def _validate_invoice_lines(line_items, customer=None):
+_UNCHANGED = object()
+
+
+def _check_source_warehouse(warehouse):
+    """Validate an explicitly chosen sale source warehouse (None = Main).
+
+    Returns the warehouse unchanged; None stays None so the invoice keeps
+    storing null for the default, exactly as before the field existed.
+    """
+    if warehouse is None:
+        return None
+    warehouse = Warehouse.objects.get(pk=warehouse.pk)
+    if not warehouse.is_active:
+        raise serializers.ValidationError(
+            {"source_warehouse": f"Warehouse {warehouse.code} is inactive and cannot supply sales."}
+        )
+    if not warehouse.is_sellable:
+        raise serializers.ValidationError(
+            {"source_warehouse": f"Warehouse {warehouse.code} holds non-sellable stock and cannot supply sales."}
+        )
+    return warehouse
+
+
+def _check_return_destination(warehouse):
+    """Validate a credit note's destination warehouse (None = Main).
+
+    Non-sellable warehouses are allowed on purpose: damaged returns go to
+    the Damaged / Quarantine warehouse. Inactive ones are refused.
+    """
+    if warehouse is None:
+        return None
+    warehouse = Warehouse.objects.get(pk=warehouse.pk)
+    if not warehouse.is_active:
+        raise serializers.ValidationError(
+            {"destination_warehouse": f"Warehouse {warehouse.code} is inactive and cannot receive returns."}
+        )
+    return warehouse
+
+
+def _effective_warehouse(warehouse):
+    """The warehouse stock actually moves in: the chosen one, else Main."""
+    return warehouse or get_default_warehouse()
+
+
+def _validate_invoice_lines(line_items, customer=None, warehouse=None):
     """Resolve each line's entered unit into an authoritative base quantity.
 
     Mirrors the purchase workflow exactly: the entered unit must be one of
     piece / master box; master box requires the product's
     units_per_master_box attribute and the submitted conversion factor must
     match it. Stock availability is checked against the converted base
-    quantity, never the entered quantity.
+    quantity, never the entered quantity, in ``warehouse`` (default Main).
     """
     product_ids = {item["product"].pk for item in line_items}
     products = Product.objects.select_for_update().in_bulk(product_ids)
-    warehouse = get_default_warehouse()
+    warehouse = _effective_warehouse(warehouse)
     balances = {}
     for product_id in product_ids:
         balance = ensure_inventory_balance(product=products[product_id], warehouse=warehouse)
@@ -167,18 +231,20 @@ def _validate_invoice_lines(line_items, customer=None):
 
 
 @transaction.atomic
-def create_invoice(*, customer, notes="", created_by, payment_type, line_items, state=Invoice.STATE_POSTED, place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE):
+def create_invoice(*, customer, notes="", created_by, payment_type, line_items, state=Invoice.STATE_POSTED, place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE, source_warehouse=None):
     if payment_type == "credit" and customer is None:
         raise serializers.ValidationError({"customer": "A registered customer is required for credit invoices."})
     if customer is not None:
         customer = Customer.objects.select_for_update().get(pk=customer.pk)
 
     seller = BusinessProfile.objects.first()
+    # Stored as given (null = Main); stock moves in the effective warehouse.
+    source_warehouse = _check_source_warehouse(source_warehouse)
+    warehouse = _effective_warehouse(source_warehouse)
 
     if state == Invoice.STATE_DRAFT:
         product_ids = {item["product"].pk for item in line_items}
         products = Product.objects.select_related('tax').in_bulk(product_ids)
-        warehouse = get_default_warehouse()
         # Draft COGS pre-fill reads the authoritative WAC where a balance
         # exists; posting recomputes every snapshot from the live balance.
         draft_balances = {
@@ -231,7 +297,7 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
                 else:
                     item["rate_charged"] = Decimal("0.00")
     else:
-        products, balances = _validate_invoice_lines(line_items, customer=customer)
+        products, balances = _validate_invoice_lines(line_items, customer=customer, warehouse=warehouse)
 
     calculated_lines_input = []
     for item in line_items:
@@ -258,7 +324,8 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
         rounding=round_paise,
     )
 
-    total_amount = calc_result["totals"]["grand_total"]
+    # Drafts store a preview with today's setting; posting recomputes it.
+    round_off, total_amount = _apply_round_off(calc_result["totals"]["grand_total"], round_off_enabled(seller))
 
     if payment_type == "credit" and customer is not None and customer.credit_limit:
         if customer.outstanding_balance + _money(total_amount) > customer.credit_limit:
@@ -280,6 +347,7 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
         notes=notes,
         created_by=created_by,
         total_amount=total_amount,
+        round_off=round_off,
         state=state,
         customer_name_snapshot=customer.name if customer else "Walk-in customer",
         customer_gstin_snapshot=customer.gstin or "" if customer else "",
@@ -296,6 +364,7 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
         seller_state_code_snapshot=seller.state_code if seller else "",
         place_of_supply=calc_result["place_of_supply"],
         tax_mode=calc_result["tax_mode"],
+        source_warehouse=source_warehouse,
     )
 
     for idx, line_result in enumerate(calc_result["lines"]):
@@ -342,6 +411,7 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
             reference_type="invoice",
             reference_id=invoice.pk,
             unit_cost=cost_price,
+            warehouse=warehouse,
         )
 
     if state == Invoice.STATE_DRAFT:
@@ -363,6 +433,8 @@ def post_invoice(*, invoice_id, posted_by):
     if invoice.state != Invoice.STATE_DRAFT:
         raise serializers.ValidationError({"state": "Only draft invoices can be posted."})
     line_items = list(invoice.line_items.select_related("product"))
+    # Re-checked at posting: the draft's warehouse may have been deactivated.
+    warehouse = _effective_warehouse(_check_source_warehouse(invoice.source_warehouse))
     products, balances = _validate_invoice_lines(
         [
             {
@@ -377,7 +449,12 @@ def post_invoice(*, invoice_id, posted_by):
             for line in line_items
         ],
         customer=invoice.customer,
+        warehouse=warehouse,
     )
+    # Round-off is fixed now, with the setting in force at posting, from the
+    # draft's exact total (the sum of its line totals).
+    exact_total = sum((line.line_total for line in line_items), Decimal("0.00"))
+    invoice.round_off, invoice.total_amount = _apply_round_off(exact_total, round_off_enabled())
     if (
         invoice.payment_type == Invoice.PAYMENT_TYPE_CREDIT
         and invoice.customer is not None
@@ -396,11 +473,11 @@ def post_invoice(*, invoice_id, posted_by):
         line.base_unit_snapshot = product.base_unit
         line.mrp_snapshot = product.mrp or Decimal("0.00")
         line.save(update_fields=["cost_price_snapshot", "cogs_amount", "product_name_snapshot", "base_unit_snapshot", "mrp_snapshot"])
-        adjust_inventory(product=product, quantity_delta=-line.base_quantity, movement_type=StockLedger.SALE, created_by=posted_by, reference_type="invoice", reference_id=invoice.pk, unit_cost=line.cost_price_snapshot)
+        adjust_inventory(product=product, quantity_delta=-line.base_quantity, movement_type=StockLedger.SALE, created_by=posted_by, reference_type="invoice", reference_id=invoice.pk, unit_cost=line.cost_price_snapshot, warehouse=warehouse)
     _issue_invoice_number(invoice)
     invoice.state = Invoice.STATE_POSTED
     invoice._allow_lifecycle_transition = True
-    invoice.save(update_fields=["state", "invoice_number", "invoice_date", "updated_at"])
+    invoice.save(update_fields=["state", "invoice_number", "invoice_date", "total_amount", "round_off", "updated_at"])
     if invoice.payment_type == Invoice.PAYMENT_TYPE_CASH:
         create_payment(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount, actor=posted_by)
     AuditLog.objects.create(user=posted_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)
@@ -408,7 +485,10 @@ def post_invoice(*, invoice_id, posted_by):
 
 
 @transaction.atomic
-def create_credit_note(*, original_invoice, reason="", created_by, line_items):
+def create_credit_note(*, original_invoice, reason="", created_by, line_items, destination_warehouse=None):
+    # Stored as given (null = Main); stock returns to the effective warehouse.
+    destination_warehouse = _check_return_destination(destination_warehouse)
+    return_warehouse = _effective_warehouse(destination_warehouse)
     invoice = Invoice.objects.select_for_update().get(pk=original_invoice.pk)
     if invoice.state != Invoice.STATE_POSTED:
         raise serializers.ValidationError({"original_invoice": "Credit notes require a posted invoice."})
@@ -462,13 +542,24 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
         calculated_lines.append((original_line, product, quantity, discount_amount, tax_amount, cgst_amount, sgst_amount, igst_amount, line_total, per_base_rate))
         total_amount += line_total
 
+    # The note that completes the full reversal of the invoice (every line's
+    # base quantity reversed once this note is counted) also reverses the
+    # invoice's round-off, so a fully credited invoice nets to exactly 0.
+    reversed_after = defaultdict(lambda: Decimal("0"), already_reversed)
+    for original_line, _product, quantity, *_rest in calculated_lines:
+        reversed_after[original_line.pk] += quantity
+    completes_reversal = all(reversed_after[pk] >= line.base_quantity for pk, line in original_lines.items())
+    round_off = invoice.round_off if completes_reversal else Decimal("0.00")
+
     # Numbered inside this transaction (CGST Rule 53); the model forbids any
     # later update, so the number must be set on create.
     credit_note = CreditNote.objects.create(
         credit_note_number=next_credit_note_number(timezone.localdate()),
         original_invoice=invoice,
         reason=reason,
-        total_amount=_money(total_amount),
+        total_amount=_money(total_amount) + round_off,
+        round_off=round_off,
+        destination_warehouse=destination_warehouse,
         created_by=created_by,
     )
     for original_line, product, quantity, discount_amount, tax_amount, cgst_amount, sgst_amount, igst_amount, line_total, per_base_rate in calculated_lines:
@@ -497,6 +588,7 @@ def create_credit_note(*, original_invoice, reason="", created_by, line_items):
             reference_type="credit_note",
             reference_id=credit_note.pk,
             unit_cost=original_line.cost_price_snapshot,
+            warehouse=return_warehouse,
         )
 
     return credit_note
@@ -519,6 +611,9 @@ def cancel_invoice(*, invoice_id, cancelled_by, reason):
             reference_id=invoice.pk,
             unit_cost=line.cost_price_snapshot,
             reason=reason,
+            # Back to where the sale took it from (null = Main). Deliberately
+            # not re-validated: an inactive warehouse still takes its stock back.
+            warehouse=invoice.source_warehouse,
         )
     invoice.state = Invoice.STATE_CANCELLED
     invoice._allow_lifecycle_transition = True
@@ -531,11 +626,12 @@ def cancel_invoice(*, invoice_id, cancelled_by, reason):
 
 
 @transaction.atomic
-def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, notes="", updated_by, place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE):
+def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, notes="", updated_by, place_of_supply="", tax_mode=Invoice.TAX_MODE_EXCLUSIVE, source_warehouse=_UNCHANGED):
     """Replace all fields and lines of a DRAFT invoice.
 
     No stock, payment, ledger, or WAC changes — the draft is still uncommitted.
-    Validation mirrors the draft-creation path exactly.
+    Validation mirrors the draft-creation path exactly. ``source_warehouse``
+    left out keeps the draft's current one; None resets it to Main.
     """
     invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
     if invoice.state != Invoice.STATE_DRAFT:
@@ -547,11 +643,14 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
         customer = Customer.objects.select_for_update().get(pk=customer.pk)
 
     seller = BusinessProfile.objects.first()
+    if source_warehouse is _UNCHANGED:
+        source_warehouse = invoice.source_warehouse
+    source_warehouse = _check_source_warehouse(source_warehouse)
 
     # Validate lines (draft path: no stock check, just metadata validation)
     product_ids = {item["product"].pk for item in line_items}
     products = Product.objects.select_related("tax").in_bulk(product_ids)
-    warehouse = get_default_warehouse()
+    warehouse = _effective_warehouse(source_warehouse)
     draft_balances = {
         balance.product_id: balance
         for balance in InventoryBalance.objects.filter(product_id__in=product_ids, warehouse=warehouse)
@@ -607,7 +706,8 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
         rounding=round_paise,
     )
 
-    total_amount = calc_result["totals"]["grand_total"]
+    # Preview only: post_invoice recomputes the round-off at posting.
+    round_off, total_amount = _apply_round_off(calc_result["totals"]["grand_total"], round_off_enabled(seller))
 
     # Delete existing lines (permitted for DRAFT by model)
     invoice.line_items.all().delete()
@@ -618,8 +718,10 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
     invoice.payment_type = payment_type
     invoice.notes = notes
     invoice.total_amount = total_amount
+    invoice.round_off = round_off
     invoice.place_of_supply = calc_result["place_of_supply"]
     invoice.tax_mode = calc_result["tax_mode"]
+    invoice.source_warehouse = source_warehouse
     invoice.customer_name_snapshot = customer.name if customer else "Walk-in customer"
     invoice.customer_gstin_snapshot = customer.gstin or "" if customer else ""
     invoice.customer_registration_type_snapshot = customer.gst_registration_type if customer else ""
@@ -634,8 +736,8 @@ def update_draft_invoice(*, invoice_id, customer, payment_type, line_items, note
     invoice.seller_state_snapshot = seller.state if seller else ""
     invoice.seller_state_code_snapshot = seller.state_code if seller else ""
     invoice.save(update_fields=[
-        "customer", "payment_type", "notes", "total_amount",
-        "place_of_supply", "tax_mode",
+        "customer", "payment_type", "notes", "total_amount", "round_off",
+        "place_of_supply", "tax_mode", "source_warehouse",
         "customer_name_snapshot", "customer_gstin_snapshot", "customer_registration_type_snapshot",
         "customer_state_code_snapshot", "billing_address_snapshot", "shipping_address_snapshot",
         "state_snapshot", "pincode_snapshot",
@@ -803,10 +905,11 @@ def amend_invoice(*, invoice_id, corrected_line_items, customer, payment_type, n
     if invoice.payments.exists():
         raise serializers.ValidationError({"invoice": "Correction blocked: a payment has been recorded against this invoice."})
 
-    # Step 1: Cancel original (stock reversal)
+    # Step 1: Cancel original (stock reversal, back to its source warehouse)
     cancel_invoice(invoice_id=invoice_id, cancelled_by=amended_by, reason=f"[AMENDMENT] {reason}")
 
-    # Step 2: Create replacement invoice (full posted workflow with stock deduction)
+    # Step 2: Create replacement invoice (full posted workflow with stock
+    # deduction), drawing from the same warehouse as the original.
     replacement = create_invoice(
         customer=customer,
         notes=notes,
@@ -816,6 +919,7 @@ def amend_invoice(*, invoice_id, corrected_line_items, customer, payment_type, n
         state=Invoice.STATE_POSTED,
         place_of_supply=place_of_supply,
         tax_mode=tax_mode,
+        source_warehouse=invoice.source_warehouse,
     )
 
     # Step 3: Link the two invoices

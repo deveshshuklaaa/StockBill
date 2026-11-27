@@ -3,8 +3,9 @@
 Validates all 33 required audit scenarios:
 - Exact 10 target columns
 - POSTED-only invoice inclusion (DRAFT and CANCELLED excluded)
-- Whole-rupee BILL AMT. display rounding via round_inr (Decimal ROUND_HALF_UP)
-- Exact R.OFF math: display_bill_amt - (taxable + tax + sur + tax_free + exempted)
+- BILL AMT. is the invoice's stored total_amount and R.OFF its stored round_off
+  (Release A: whole-bill round-off fixed at posting; legacy invoices show their
+  exact billed amount with R.OFF 0.00)
 - Invariant: TOTAL BILL AMT. = TOTAL TAXABLE + TOTAL TAX + TOTAL SUR. + TOTAL TAX FREE + TOTAL EXEMPTED + TOTAL R.OFF
 - Positive, negative, and zero round-off cases
 - Immutable customer snapshots (survives customer master edits and walk-in)
@@ -102,8 +103,11 @@ class SalesGstReportTests(APITestCase):
             current_stock=1000,
         )
 
-    def _create_direct_invoice(self, *, number, date_str, customer, state, total_amt, lines, customer_snapshot=None, customer_gstin_snapshot=None):
-        """Helper to create an invoice directly with exact line snapshots for deterministic testing."""
+    def _create_direct_invoice(self, *, number, date_str, customer, state, total_amt, lines, customer_snapshot=None, customer_gstin_snapshot=None, round_off="0.00"):
+        """Helper to create an invoice directly with exact line snapshots for deterministic testing.
+
+        total_amt is the stored invoice total (already rounded when round_off != 0).
+        """
         inv_date = datetime.date.fromisoformat(date_str)
         # invoice_date is set on create: posted rows are immutable afterwards.
         inv = Invoice.objects.create(
@@ -114,6 +118,7 @@ class SalesGstReportTests(APITestCase):
             customer_gstin_snapshot=customer_gstin_snapshot if customer_gstin_snapshot is not None else ((customer.gstin or "") if customer else ""),
             state=state,
             total_amount=Decimal(str(total_amt)),
+            round_off=Decimal(str(round_off)),
             seller_business_name_snapshot=self.seller.business_name,
             seller_gstin_snapshot=self.seller.gstin,
         )
@@ -144,14 +149,15 @@ class SalesGstReportTests(APITestCase):
         return inv
 
     def test_01_one_posted_invoice(self):
-        """1. One posted invoice renders with exact line totals and whole-rupee display amount."""
-        # Invoice: Taxable 2203.80, Tax 396.70 -> sum = 2600.50 -> rounded bill_amt = 2601.00, r_off = +0.50
+        """1. One posted invoice renders with exact line totals and its stored rounded total."""
+        # Invoice: Taxable 2203.80, Tax 396.70 -> lines 2600.50 -> posted total 2601.00, round_off +0.50
         self._create_direct_invoice(
             number="A000001",
             date_str="2026-08-10",
             customer=self.customer_alpha,
             state=Invoice.STATE_POSTED,
-            total_amt="2600.50",
+            total_amt="2601.00",
+            round_off="0.50",
             lines=[
                 {
                     "product": self.product_chips,
@@ -315,13 +321,14 @@ class SalesGstReportTests(APITestCase):
         self.assertEqual(row["exempted"], "0.00")
 
     def test_15_positive_round_off(self):
-        """15. Positive R.OFF: total_amount 2600.50 -> rounded 2601.00 -> R.OFF = +0.50."""
+        """15. Positive R.OFF: lines 2600.50, posted total 2601.00 with stored round_off +0.50."""
         self._create_direct_invoice(
             number="POS-ROFF",
             date_str="2026-08-10",
             customer=self.customer_alpha,
             state=Invoice.STATE_POSTED,
-            total_amt="2600.50",
+            total_amt="2601.00",
+            round_off="0.50",
             lines=[{"product": self.product_chips, "taxable": "2203.80", "tax": "396.70", "line_total": "2600.50"}],
         )
 
@@ -331,13 +338,14 @@ class SalesGstReportTests(APITestCase):
         self.assertEqual(row["r_off"], "0.50")
 
     def test_16_negative_round_off(self):
-        """16. Negative R.OFF: total_amount 625.12 -> rounded 625.00 -> R.OFF = -0.12."""
+        """16. Negative R.OFF: lines 625.12, posted total 625.00 with stored round_off -0.12."""
         self._create_direct_invoice(
             number="NEG-ROFF",
             date_str="2026-08-16",
             customer=self.customer_beta,
             state=Invoice.STATE_POSTED,
-            total_amt="625.12",
+            total_amt="625.00",
+            round_off="-0.12",
             lines=[{"product": self.product_chips, "taxable": "583.00", "tax": "42.12", "line_total": "625.12"}],
         )
 
@@ -362,8 +370,8 @@ class SalesGstReportTests(APITestCase):
         self.assertEqual(row["bill_amt"], "864.00")
         self.assertEqual(row["r_off"], "0.00")
 
-    def test_18_whole_rupee_bill_amt(self):
-        """18. Every bill amount in rows has whole-rupee format ending in .00."""
+    def test_18_legacy_invoice_shows_exact_billed_amount(self):
+        """18. An invoice posted without round-off shows its exact total and R.OFF 0.00 (no display rounding)."""
         self._create_direct_invoice(
             number="INTRUPEE-01",
             date_str="2026-08-18",
@@ -375,27 +383,30 @@ class SalesGstReportTests(APITestCase):
 
         data = get_sales_gst_report_data(datetime.date(2026, 8, 18), datetime.date(2026, 8, 18))
         row = data["rows"][0]
-        self.assertEqual(row["bill_amt"], "919.00")
-        self.assertTrue(row["bill_amt"].endswith(".00"))
+        self.assertEqual(row["bill_amt"], "918.80")
+        self.assertEqual(row["r_off"], "0.00")
+        self.assertEqual(Decimal(row["bill_amt"]), Decimal(row["taxable"]) + Decimal(row["tax"]))
 
     def test_19_totals_reconciliation_invariant(self):
         """19. Mathematical invariant: TOTAL BILL AMT = TOTAL TAXABLE + TOTAL TAX + TOTAL R.OFF."""
-        # 1. Positive R.OFF: 2600.50 -> 2601.00 (+0.50)
+        # 1. Positive R.OFF: lines 2600.50 -> posted 2601.00 (+0.50)
         self._create_direct_invoice(
             number="INV-A",
             date_str="2026-08-20",
             customer=self.customer_alpha,
             state=Invoice.STATE_POSTED,
-            total_amt="2600.50",
+            total_amt="2601.00",
+            round_off="0.50",
             lines=[{"product": self.product_chips, "taxable": "2203.80", "tax": "396.70", "line_total": "2600.50"}],
         )
-        # 2. Negative R.OFF: 625.12 -> 625.00 (-0.12)
+        # 2. Negative R.OFF: lines 625.12 -> posted 625.00 (-0.12)
         self._create_direct_invoice(
             number="INV-B",
             date_str="2026-08-21",
             customer=self.customer_beta,
             state=Invoice.STATE_POSTED,
-            total_amt="625.12",
+            total_amt="625.00",
+            round_off="-0.12",
             lines=[{"product": self.product_chips, "taxable": "583.00", "tax": "42.12", "line_total": "625.12"}],
         )
         # 3. Zero R.OFF: 864.00 -> 864.00 (0.00)
@@ -547,7 +558,8 @@ class SalesGstReportTests(APITestCase):
             date_str="2026-08-10",
             customer=self.customer_alpha,
             state=Invoice.STATE_POSTED,
-            total_amt="2600.50",
+            total_amt="2601.00",
+            round_off="0.50",
             lines=[{"product": self.product_chips, "taxable": "2203.80", "tax": "396.70", "line_total": "2600.50"}],
         )
 

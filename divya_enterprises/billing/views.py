@@ -26,10 +26,24 @@ from .services import (
     delete_draft_invoice,
     post_invoice,
     reverse_payment,
+    round_off_enabled,
     update_draft_invoice,
 )
 from .pdf import render_invoice_html
 from .pdf_engine import build_invoice_a5_pdf
+
+
+class BillingSettingsView(APIView):
+    """GET /api/billing-settings/: the profile settings staff need to bill.
+
+    The business profile itself is admin-only; this exposes just the
+    round-off switch so the New Invoice screen can preview the rounded total.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response({"round_off_invoice_total": round_off_enabled()})
 
 
 class BusinessProfileView(generics.RetrieveUpdateAPIView):
@@ -106,7 +120,7 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
     # created in one transaction share a value and need a stable ordering.
     queryset = (
         Invoice.objects
-        .select_related("customer", "created_by", "replacement_invoice", "amended_from_invoice")
+        .select_related("customer", "created_by", "replacement_invoice", "amended_from_invoice", "source_warehouse")
         .prefetch_related("line_items__product")
         .all()
         .order_by("-created_at", "-id")
@@ -180,7 +194,7 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
 class InvoiceDetailView(generics.RetrieveAPIView):
     queryset = (
         Invoice.objects
-        .select_related("customer", "created_by", "replacement_invoice", "amended_from_invoice")
+        .select_related("customer", "created_by", "replacement_invoice", "amended_from_invoice", "source_warehouse")
         .prefetch_related("line_items")
         .all()
     )
@@ -232,13 +246,13 @@ class PaymentDetailView(generics.RetrieveAPIView):
 
 
 class CreditNoteListCreateView(generics.ListCreateAPIView):
-    queryset = CreditNote.objects.select_related("original_invoice", "created_by").prefetch_related("line_items").all().order_by("-created_at")
+    queryset = CreditNote.objects.select_related("original_invoice", "created_by", "destination_warehouse").prefetch_related("line_items").all().order_by("-created_at")
     serializer_class = CreditNoteSerializer
     permission_classes = [permissions.IsAuthenticated]
 
 
 class CreditNoteDetailView(generics.RetrieveAPIView):
-    queryset = CreditNote.objects.select_related("original_invoice", "created_by").prefetch_related("line_items").all()
+    queryset = CreditNote.objects.select_related("original_invoice", "created_by", "destination_warehouse").prefetch_related("line_items").all()
     serializer_class = CreditNoteSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -362,6 +376,15 @@ class InvoiceDraftUpdateView(APIView):
         place_of_supply = request.data.get("place_of_supply", "")
         notes = request.data.get("notes", "")
 
+        # Optional: absent keeps the draft's warehouse; null resets it to Main.
+        extra = {}
+        if "source_warehouse" in request.data:
+            field = InvoiceSerializer().fields["source_warehouse"]
+            try:
+                extra["source_warehouse"] = field.run_validation(request.data.get("source_warehouse"))
+            except ValidationError as exc:
+                return Response({"source_warehouse": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             updated = update_draft_invoice(
                 invoice_id=pk,
@@ -372,6 +395,7 @@ class InvoiceDraftUpdateView(APIView):
                 updated_by=request.user,
                 place_of_supply=place_of_supply,
                 tax_mode=tax_mode,
+                **extra,
             )
         except Exception as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

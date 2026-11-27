@@ -522,6 +522,9 @@ export default function WarehousesPage() {
                     >
                       <td>
                         <strong>{warehouse.name}</strong>
+                        {warehouse.is_sellable === false && (
+                          <div style={{ fontSize: '0.8rem', color: '#9a581a' }}>Not sellable · held stock</div>
+                        )}
                       </td>
                       <td>
                         <code>{warehouse.code}</code>

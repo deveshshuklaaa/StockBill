@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiErrorMessage, apiForbiddenMessage } from '../api/client'
 import { cancelInvoice, deleteDraftInvoice, fetchCorrectionEligibility, fetchInvoice, postInvoice, printInvoicePdf } from '../api/invoices'
+import CreditNotePanel from '../components/CreditNotePanel'
 import StatusMessage from '../components/StatusMessage'
 import { useAuth } from '../context/AuthContext'
 import { formatQuantity, formatQuantityWithUnit, invoiceLabel } from '../utils/format'
+import { formatRoundOff } from '../utils/roundOff'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
 function percent(value) { return value == null ? '—' : `${Number(value).toFixed(1)}%` }
@@ -28,6 +30,8 @@ export default function InvoiceDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
+  const [showCreditNote, setShowCreditNote] = useState(false)
+  const [creditNoteMessage, setCreditNoteMessage] = useState('')
   // Correction eligibility (for POSTED invoices)
   const [eligibility, setEligibility] = useState(null) // null=loading, { eligible, reason }
 
@@ -159,12 +163,28 @@ export default function InvoiceDetailPage() {
           )}
         </>}
         {/* POSTED: Post action available only for admin and before correction */}
+        {isPosted && (
+          <button type="button" className="quiet-button" onClick={() => { setCreditNoteMessage(''); setShowCreditNote(true) }} disabled={busy}>Issue credit note</button>
+        )}
         {isAdmin && isPosted && !invoice.replacement_invoice && (
           <button className="quiet-button" style={{ color: 'var(--red)' }} onClick={() => setShowCancel(true)} disabled={busy}>Cancel invoice</button>
         )}
       </div>
     </header>
     <StatusMessage>{error}</StatusMessage>
+    {creditNoteMessage && <p className="field-help" role="status" style={{ fontSize: 12, color: 'var(--green)' }}>{creditNoteMessage}</p>}
+
+    {showCreditNote && isPosted && (
+      <CreditNotePanel
+        invoice={invoice}
+        onClose={() => setShowCreditNote(false)}
+        onCreated={async (note) => {
+          setShowCreditNote(false)
+          setCreditNoteMessage(`Credit note ${note.credit_note_number} created${note.destination_warehouse_name ? `; stock returned to ${note.destination_warehouse_name}` : '; stock returned to Main'}.`)
+          try { setInvoice(await fetchInvoice(id)) } catch { /* keep the current view */ }
+        }}
+      />
+    )}
 
     {showCancel && <div className="record-form">
       <div className="form-heading"><div><p className="eyebrow">Cancellation</p><h2>Cancel invoice {invoiceLabel(invoice)}</h2></div></div>
@@ -224,7 +244,12 @@ export default function InvoiceDetailPage() {
           <span className={STATE_BADGE[invoice.state] || 'type-chip'}>{invoice.state}</span>
           <strong>{invoice.payment_type} sale ({invoice.tax_mode})</strong><br />
           <span>Payment: {invoice.payment_status}</span><br />
-          <span>Supply: {invoice.place_of_supply || '—'}</span>
+          <span>Supply: {invoice.place_of_supply || '—'}</span><br />
+          <span>
+            Stock from: {invoice.source_warehouse
+              ? `${invoice.source_warehouse_name || 'Warehouse'}${invoice.source_warehouse_code ? ` (${invoice.source_warehouse_code})` : ''}`
+              : 'Main (default)'}
+          </span>
         </div>
       </div>
       <div className="detail-parties">
@@ -271,6 +296,7 @@ export default function InvoiceDetailPage() {
           {totalCgst > 0 ? ` · CGST ${money(totalCgst)}` : ''}
           {totalSgst > 0 ? ` · SGST ${money(totalSgst)}` : ''}
           {totalIgst > 0 ? ` · IGST ${money(totalIgst)}` : ''}
+          {Number(invoice.round_off || 0) !== 0 ? ` · Round off ${formatRoundOff(invoice.round_off)}` : ''}
         </span>
         <strong>{money(invoice.total_amount)}</strong>
       </div>

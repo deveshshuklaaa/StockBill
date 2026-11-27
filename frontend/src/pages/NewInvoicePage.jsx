@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { apiErrorMessage } from '../api/client'
 import { fetchCustomerMRPPricing } from '../api/customers'
-import { amendInvoice, fetchInvoice, postInvoice, updateDraftInvoice } from '../api/invoices'
+import { amendInvoice, fetchBillingSettings, fetchInvoice, postInvoice, updateDraftInvoice } from '../api/invoices'
+import { fetchWarehouses } from '../api/warehouses'
+import { saleSourceOptions } from '../utils/warehouses'
 import StatusMessage from '../components/StatusMessage'
 import UnsavedChangesDialog from '../components/UnsavedChangesDialog'
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges'
 import { formatNetWeight, formatQuantityWithUnit, formatStockWithBoxes, masterBoxSize } from '../utils/format'
 import { sortProductsByMrpForSameName } from '../utils/productSearch'
+import { formatRoundOff, roundOffInvoiceTotal } from '../utils/roundOff'
 
 const WALK_IN = { id: null, name: 'Walk-in (no account)', customer_type: 'B2C' }
 
@@ -48,9 +51,10 @@ function calculateLine(line, taxMode) {
   return { subtotal: gross, discount, taxable, tax, total: taxable + tax, baseQty }
 }
 
-function makeInvoiceSnapshot({ customer, paymentType, taxMode, placeOfSupply, notes, lines, amendReason }) {
+function makeInvoiceSnapshot({ customer, paymentType, taxMode, placeOfSupply, notes, lines, amendReason, sourceWarehouse }) {
   return JSON.stringify({
     customerId: customer?.id ?? null,
+    sourceWarehouse: sourceWarehouse || '',
     paymentType,
     taxMode,
     placeOfSupply: placeOfSupply || '',
@@ -94,6 +98,11 @@ export default function NewInvoicePage() {
   const [taxMode, setTaxMode] = useState('exclusive')
   const [placeOfSupply, setPlaceOfSupply] = useState('')
   const [notes, setNotes] = useState('')
+  // '' = default Main warehouse; otherwise a warehouse id (string).
+  const [sourceWarehouse, setSourceWarehouse] = useState('')
+  const [initialSourceWarehouse, setInitialSourceWarehouse] = useState('')
+  const [loadedSourceName, setLoadedSourceName] = useState('')
+  const [warehouses, setWarehouses] = useState([])
 
   const [balance, setBalance] = useState(null)
   const [customerPricingMap, setCustomerPricingMap] = useState({})
@@ -102,10 +111,31 @@ export default function NewInvoicePage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [posting, setPosting] = useState(false)
+  // Business Profile round-off switch, for the preview only (the server
+  // fixes the real round-off when the invoice is posted).
+  const [roundOffEnabled, setRoundOffEnabled] = useState(false)
 
   // Amendment-only
   const [amendReason, setAmendReason] = useState('')
   const [originalInvoice, setOriginalInvoice] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    fetchBillingSettings()
+      .then((settings) => { if (active) setRoundOffEnabled(Boolean(settings?.round_off_invoice_total)) })
+      .catch(() => { if (active) setRoundOffEnabled(false) })
+    return () => { active = false }
+  }, [])
+
+  // Optional stock source; a failure just leaves the default (Main).
+  useEffect(() => {
+    let active = true
+    Promise.resolve()
+      .then(() => fetchWarehouses({ is_active: 'true' }))
+      .then((list) => { if (active) setWarehouses(Array.isArray(list) ? list : []) })
+      .catch(() => { if (active) setWarehouses([]) })
+    return () => { active = false }
+  }, [])
 
   // Load initial customer list
   useEffect(() => {
@@ -150,6 +180,10 @@ export default function NewInvoicePage() {
         setTaxMode(inv.tax_mode || 'exclusive')
         setPlaceOfSupply((prev) => prev || inv.place_of_supply || '')
         setNotes(inv.notes || '')
+        const loadedSource = inv.source_warehouse ? String(inv.source_warehouse) : ''
+        setSourceWarehouse(loadedSource)
+        setInitialSourceWarehouse(loadedSource)
+        setLoadedSourceName(inv.source_warehouse_name || '')
 
         const lineDetails = await Promise.all(
           (inv.line_items || []).map(async (line) => {
@@ -201,6 +235,7 @@ export default function NewInvoicePage() {
           notes: inv.notes || '',
           lines: loadedLines,
           amendReason: '',
+          sourceWarehouse: loadedSource,
         }))
       })
       .catch((err) => setError(apiErrorMessage(err)))
@@ -329,6 +364,9 @@ export default function NewInvoicePage() {
     result.taxBySlab[line.tax_rate] = (result.taxBySlab[line.tax_rate] || 0) + calculated.tax
     return result
   }, { subtotal: 0, discount: 0, taxable: 0, tax: 0, total: 0, taxBySlab: {} }), [lines, taxMode])
+  const rounded = roundOffInvoiceTotal(totals.total, roundOffEnabled)
+  // Setting off: the estimate is shown exactly as before.
+  const grandTotal = roundOffEnabled ? rounded.total : totals.total
 
   function chooseCustomer(value) {
     setCustomer(value)
@@ -440,6 +478,7 @@ export default function NewInvoicePage() {
         notes,
         lines,
         amendReason,
+        sourceWarehouse,
       })
       return currentSnapshot !== initialSnapshot
     }
@@ -450,7 +489,9 @@ export default function NewInvoicePage() {
     const hasNonDefaultPayment = paymentType !== 'cash'
     const hasNonDefaultTax = taxMode !== 'exclusive'
     const hasPlaceOfSupply = placeOfSupply.trim() !== ''
+    const hasSourceWarehouse = sourceWarehouse !== ''
     return Boolean(
+      hasSourceWarehouse ||
       hasCustomer ||
       hasCustomerSearch ||
       hasLines ||
@@ -472,7 +513,17 @@ export default function NewInvoicePage() {
     taxMode,
     placeOfSupply,
     amendReason,
+    sourceWarehouse,
   ])
+
+  // Sent only when it differs from the default, so an ordinary counter sale
+  // posts exactly the payload it always did. An edited draft that had a
+  // warehouse sends null to move back to Main.
+  function sourceWarehousePayload() {
+    if (sourceWarehouse) return { source_warehouse: Number(sourceWarehouse) }
+    if (isEditMode && initialSourceWarehouse) return { source_warehouse: null }
+    return {}
+  }
 
   async function saveDraftInternal() {
     if (!lines.length) {
@@ -501,6 +552,7 @@ export default function NewInvoicePage() {
           place_of_supply: placeOfSupply,
           notes,
           line_items: lineItems,
+          ...sourceWarehousePayload(),
         }
         await updateDraftInvoice(editDraftId, payload)
         isSubmittedRef.current = true
@@ -531,6 +583,7 @@ export default function NewInvoicePage() {
         place_of_supply: placeOfSupply,
         notes,
         line_items: lineItems,
+        ...sourceWarehousePayload(),
       }
       const idempotencyKey = `invoice-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       await api.post('/invoices/drafts/', payload, {
@@ -588,6 +641,7 @@ export default function NewInvoicePage() {
           place_of_supply: placeOfSupply,
           notes,
           line_items: lineItems,
+          ...sourceWarehousePayload(),
         }
         const data = await updateDraftInvoice(editDraftId, payload)
         if (postDirectly) {
@@ -628,6 +682,7 @@ export default function NewInvoicePage() {
         place_of_supply: placeOfSupply,
         notes,
         line_items: lineItems,
+        ...sourceWarehousePayload(),
       }
       const idempotencyKey = `invoice-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const url = asDraft ? '/invoices/drafts/' : '/invoices/'
@@ -674,6 +729,7 @@ export default function NewInvoicePage() {
     )
   }
 
+  const sourceOptions = saleSourceOptions(warehouses)
   const pageTitle    = isEditMode ? 'Edit draft invoice' : isAmendMode ? 'Correct invoice' : 'New invoice'
   const pageEyebrow  = isEditMode ? 'Billing / edit draft' : isAmendMode ? `Billing / correct ${originalInvoice?.invoice_number || ''}` : 'Billing / new transaction'
   const submitLabel  = isEditMode ? 'Save changes' : isAmendMode ? 'Create correction' : 'Create invoice'
@@ -784,6 +840,28 @@ export default function NewInvoicePage() {
                 </select>
               </label>
             </div>
+            {(sourceOptions.length > 0 || sourceWarehouse) && (
+              <label className="invoice-inline-field" style={{ marginTop: '10px' }}>
+                <span>Source warehouse</span>
+                <select
+                  value={sourceWarehouse}
+                  onChange={(e) => setSourceWarehouse(e.target.value)}
+                  disabled={isAmendMode}
+                  aria-label="Source warehouse"
+                >
+                  <option value="">Main (default)</option>
+                  {sourceOptions.map((w) => (
+                    <option key={w.id} value={String(w.id)}>{w.name} ({w.code})</option>
+                  ))}
+                  {sourceWarehouse && !sourceOptions.some((w) => String(w.id) === sourceWarehouse) && (
+                    <option value={sourceWarehouse}>{loadedSourceName || `Warehouse #${sourceWarehouse}`}</option>
+                  )}
+                </select>
+              </label>
+            )}
+            {isAmendMode && sourceWarehouse && (
+              <p className="inline-note">The correction draws stock from the original invoice&apos;s warehouse.</p>
+            )}
             <label className="invoice-inline-field" style={{ marginTop: '10px' }}>
               <span>Notes</span>
               <input
@@ -1058,8 +1136,11 @@ export default function NewInvoicePage() {
               <div key={slab}><span>{slab}% GST</span><strong>{money(value)}</strong></div>
             ))}
             <div className="summary-tax"><span>Total tax preview</span><strong>{money(totals.tax)}</strong></div>
+            {roundOffEnabled && (
+              <div data-testid="round-off-row"><span>Round off</span><strong>{formatRoundOff(rounded.roundOff)}</strong></div>
+            )}
           </div>
-          <div className="grand-total"><span>Grand total (Est.)</span><strong>{money(totals.total)}</strong></div>
+          <div className="grand-total"><span>Grand total (Est.)</span><strong data-testid="grand-total">{money(grandTotal)}</strong></div>
           {isEditMode ? (
             <>
               <button

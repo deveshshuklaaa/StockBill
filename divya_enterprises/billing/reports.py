@@ -108,7 +108,6 @@ from inventory.models import (
 from .xlsx_export import MONEY, QUANTITY, Column, export_filename, xlsx_response
 from .models import BusinessProfile, CreditNoteLineItem, Invoice, InvoiceLineItem, Payment
 from .profit import profit_percent_on_cost
-from .tax_engine import round_inr
 
 MONEY_FIELD = DecimalField(max_digits=18, decimal_places=2)
 QUANTITY_FIELD = DecimalField(max_digits=18, decimal_places=3)
@@ -251,6 +250,7 @@ class SalesSummaryReportView(APIView):
         invoice_counts = invoices.aggregate(
             posted=Count("id"),
             cancelled=Count("id", filter=Q(state=Invoice.STATE_CANCELLED)),
+            round_off=Coalesce(Sum("round_off"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         )
         cancelled_in_period = Invoice.objects.filter(
             state=Invoice.STATE_CANCELLED,
@@ -265,7 +265,11 @@ class SalesSummaryReportView(APIView):
         )["total"]
 
         gst = (totals["cgst"] or ZERO_MONEY) + (totals["sgst"] or ZERO_MONEY) + (totals["igst"] or ZERO_MONEY)
-        net_sales = totals["net_sales"] or ZERO_MONEY
+        # Net sales = amounts billed: line totals plus each invoice's
+        # whole-bill round-off, so it agrees with invoice totals and customer
+        # balances. Taxable value, GST, COGS and profit stay exact.
+        round_off = invoice_counts["round_off"] or ZERO_MONEY
+        net_sales = (totals["net_sales"] or ZERO_MONEY) + round_off
         taxable_sales = totals["taxable_sales"] or ZERO_MONEY
         cogs = totals["cogs"] or ZERO_MONEY
         gross_profit = taxable_sales - cogs
@@ -286,6 +290,7 @@ class SalesSummaryReportView(APIView):
                 "cgst": totals["cgst"],
                 "sgst": totals["sgst"],
                 "igst": totals["igst"],
+                "round_off": round_off,
                 "net_sales": net_sales,
                 "cogs": cogs,
                 "taxable_cogs": cogs,
@@ -532,8 +537,17 @@ class InventoryValuationReportView(APIView):
         legacy_quantity = sum((product.current_stock for product in legacy_rows), ZERO_QTY)
         legacy_value = sum((product.current_stock * product.cost_price for product in legacy_rows), ZERO_MONEY)
 
+        # Non-sellable (Damaged / Quarantine) stock stays in the totals above
+        # but is split out so it is never read as sellable.
+        held = balances.filter(warehouse__is_sellable=False).aggregate(
+            quantity=Coalesce(Sum("quantity_on_hand"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
+            value=Coalesce(Sum(value_expr), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+        )
+        total_quantity = (totals["quantity"] or ZERO_QTY) + legacy_quantity
+        total_value = (totals["value"] or ZERO_MONEY) + legacy_value
+
         by_warehouse = list(
-            balances.values("warehouse_id", "warehouse__name", "warehouse__code")
+            balances.values("warehouse_id", "warehouse__name", "warehouse__code", "warehouse__is_sellable")
             .annotate(
                 product_count=Count("product", distinct=True),
                 quantity=Coalesce(Sum("quantity_on_hand"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
@@ -546,13 +560,18 @@ class InventoryValuationReportView(APIView):
             {
                 "rules": "Value = InventoryBalance.quantity_on_hand × average_cost (WAC). Legacy products without balances fall back to current_stock × cost_price.",
                 "product_count": (totals["product_count"] or 0) + len(legacy_rows),
-                "quantity_on_hand": (totals["quantity"] or ZERO_QTY) + legacy_quantity,
-                "total_value": (totals["value"] or ZERO_MONEY) + legacy_value,
+                "quantity_on_hand": total_quantity,
+                "total_value": total_value,
+                "sellable_quantity_on_hand": total_quantity - held["quantity"],
+                "sellable_value": total_value - held["value"],
+                "held_quantity_on_hand": held["quantity"],
+                "held_value": held["value"],
                 "by_warehouse": [
                     {
                         "warehouse_id": row["warehouse_id"],
                         "warehouse_name": row["warehouse__name"],
                         "warehouse_code": row["warehouse__code"],
+                        "is_sellable": row["warehouse__is_sellable"],
                         "product_count": row["product_count"],
                         "quantity": row["quantity"],
                         "value": row["value"],
@@ -1115,6 +1134,12 @@ class DashboardReportView(APIView):
             invoice_count=Count("invoice", distinct=True),
             net_sales=Coalesce(Sum("line_total"), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         )
+        # Billed amount, as in the sales report: add the invoices' round-off.
+        sales["net_sales"] += Invoice.objects.filter(
+            state=Invoice.STATE_POSTED, invoice_date=today
+        ).aggregate(
+            total=Coalesce(Sum("round_off"), Value(ZERO_MONEY), output_field=MONEY_FIELD)
+        )["total"]
         purchase_today = PurchaseInvoice.objects.filter(
             state=PurchaseInvoice.STATE_POSTED, invoice_date=today
         ).aggregate(
@@ -1125,8 +1150,16 @@ class DashboardReportView(APIView):
         value_expr = ExpressionWrapper(
             F("quantity_on_hand") * F("average_cost"), output_field=MONEY_FIELD
         )
-        inventory = InventoryBalance.objects.filter(quantity_on_hand__gt=0).aggregate(
+        # Headline stock is sellable stock only; goods held in non-sellable
+        # warehouses (Damaged / Quarantine) are reported apart as held_stock.
+        in_stock = InventoryBalance.objects.filter(quantity_on_hand__gt=0)
+        inventory = in_stock.filter(warehouse__is_sellable=True).aggregate(
             product_count=Count("product", distinct=True),
+            total_value=Coalesce(Sum(value_expr), Value(ZERO_MONEY), output_field=MONEY_FIELD),
+        )
+        held_stock = in_stock.filter(warehouse__is_sellable=False).aggregate(
+            product_count=Count("product", distinct=True),
+            quantity=Coalesce(Sum("quantity_on_hand"), Value(ZERO_QTY), output_field=QUANTITY_FIELD),
             total_value=Coalesce(Sum(value_expr), Value(ZERO_MONEY), output_field=MONEY_FIELD),
         )
 
@@ -1183,6 +1216,11 @@ class DashboardReportView(APIView):
                 "inventory": {
                     "product_count": inventory["product_count"],
                     "total_value": inventory["total_value"],
+                },
+                "held_stock": {
+                    "product_count": held_stock["product_count"],
+                    "quantity": held_stock["quantity"],
+                    "total_value": held_stock["total_value"],
                 },
                 "customer_outstanding_total": outstanding_total,
                 "active_customers": active_customers,
@@ -1268,7 +1306,11 @@ def get_sales_gst_report_data(from_date, to_date):
                 hsn_map[inv_id].append(cleaned)
 
     for inv in invoices:
-        display_bill_amt = round_inr(inv.total_amount).quantize(Decimal("0.01"))
+        # Stored values, exactly as billed: BILL AMT. is the invoice's
+        # total_amount (rounded only if round-off applied at posting) and
+        # R.OFF its stored round_off. taxable + tax + R.OFF = BILL AMT.,
+        # because total_amount = sum(line totals) + round_off.
+        display_bill_amt = inv.total_amount.quantize(Decimal("0.01"))
         taxable = (inv.taxable_sum or ZERO).quantize(Decimal("0.01"))
         tax = (inv.tax_sum or ZERO).quantize(Decimal("0.01"))
         sgst = (inv.sgst_sum or ZERO).quantize(Decimal("0.01"))
@@ -1278,7 +1320,7 @@ def get_sales_gst_report_data(from_date, to_date):
         sur = ZERO
         tax_free = ZERO
         exempted = ZERO
-        r_off = (display_bill_amt - (taxable + tax)).quantize(Decimal("0.01"))
+        r_off = inv.round_off.quantize(Decimal("0.01"))
 
         tot_bill_amt += display_bill_amt
         tot_taxable += taxable

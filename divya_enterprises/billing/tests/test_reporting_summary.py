@@ -31,6 +31,8 @@ class ReportingEndpointTests(APITestCase):
             registered_address="Test Addr, 560001",
             state="Karnataka",
             state_code="29",
+            # Exact-paise totals are what these tests check; round-off has its own tests.
+            round_off_invoice_total=False,
         )
         self.customer = Customer.objects.create(name="Report Customer", is_regular=True, state_code="29")
         self.product = self.create_product("Report Product", stock=20, cost=60, price=100)

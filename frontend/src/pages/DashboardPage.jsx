@@ -60,6 +60,9 @@ export default function DashboardPage() {
         <div className="metric-label">Inventory value</div>
         <div className="metric-value">{money(inventory.total_value)}</div>
         <div className="metric-hint">{inventory.product_count} product(s) in stock</div>
+        {Number(data.held_stock?.quantity || 0) > 0 && (
+          <div className="metric-hint">Not sellable: {Number(data.held_stock.quantity).toLocaleString('en-IN')} pcs held (Damaged / Quarantine)</div>
+        )}
       </Link>
       <Link className="metric-card linked" to="/reports/customers">
         <div className="metric-label">Customer outstanding</div>

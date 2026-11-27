@@ -12,6 +12,7 @@ import {
   updateSupplier,
 } from '../api/suppliers'
 import StatusMessage from '../components/StatusMessage'
+import SupplierReturnsPanel from '../components/SupplierReturnsPanel'
 import { useAuth } from '../context/AuthContext'
 
 function money(value) { return `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }
@@ -216,6 +217,7 @@ export default function SupplierDetailPage() {
     <header className="detail-toolbar">
       <Link className="quiet-button" to="/suppliers">← Suppliers</Link>
       <div className="detail-actions">
+        <Link className="quiet-button" to={`/suppliers/${id}/ledger`}>Ledger &amp; payments</Link>
         {isAdmin && supplier.is_active && !showForm && (
           <button className="secondary-button" onClick={openEditForm} disabled={busy}>Edit supplier</button>
         )}
@@ -572,5 +574,6 @@ export default function SupplierDetailPage() {
         <span>Purchase history is immutable — supplier master edits never change posted documents.</span>
       </div>
     </div>
+    <SupplierReturnsPanel supplierId={id} canEdit={isAdmin} />
   </section>
 }

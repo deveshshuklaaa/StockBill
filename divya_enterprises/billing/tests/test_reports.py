@@ -77,6 +77,8 @@ def make_report_context(cls):
         registered_address="Shop 1, Main Road, Mumbai",
         state="Maharashtra",
         state_code="27",
+        # Exact-paise totals are what these tests check; round-off has its own tests.
+        round_off_invoice_total=False,
     )
     cls.tax, _ = TaxRate.objects.get_or_create(
         name="GST 18%", defaults={"rate": Decimal("18.00")}

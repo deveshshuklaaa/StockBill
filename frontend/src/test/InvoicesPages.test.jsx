@@ -276,6 +276,19 @@ describe('InvoicesPage', () => {
 })
 
 describe('InvoiceDetailPage', () => {
+  it('shows the stored round-off in the totals when it is not zero', async () => {
+    vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue({ ...DETAIL, total_amount: '1102.00', round_off: '-0.40' })
+    mountPage('detail', { route: '/invoices/11' })
+    expect(await screen.findByText(/Round off −0\.40/)).toBeInTheDocument()
+  })
+
+  it('shows no round-off when it is zero', async () => {
+    vi.spyOn(invoicesApi, 'fetchInvoice').mockResolvedValue({ ...DETAIL, round_off: '0.00' })
+    mountPage('detail', { route: '/invoices/11' })
+    await screen.findAllByText('₹1,102.00')
+    expect(screen.queryByText(/Round off/)).not.toBeInTheDocument()
+  })
+
   const PROFIT_SUMMARY = {
     taxable_sales_revenue: '1000.00', taxable_cogs: '600.00', gross_profit: '400.00', margin_percent: '66.7',
     products: [{ product_id: 1, product_name: 'Margin product', base_unit: 'piece', base_quantity: '20.000', taxable_sales_revenue: '1000.00', taxable_cogs: '600.00', gross_profit: '400.00', margin_percent: '66.7' }],

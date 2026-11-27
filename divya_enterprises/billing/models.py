@@ -25,6 +25,9 @@ class BusinessProfile(models.Model):
         blank=True,
         default="Goods once sold will not be taken back or exchanged.\nBills not paid due date will attract 24% interest.",
     )
+    # Round each invoice's final total to the nearest rupee (50 paise up).
+    # Fixed per invoice when it is posted; later changes never touch issued invoices.
+    round_off_invoice_total = models.BooleanField(default=True)
 
     def __str__(self):
         return self.business_name
@@ -85,7 +88,21 @@ class Invoice(models.Model):
     tax_mode = models.CharField(max_length=10, choices=TAX_MODE_CHOICES, default=TAX_MODE_EXCLUSIVE)
     payment_status = models.CharField(max_length=25, choices=PAYMENT_STATUS_CHOICES, default=PAYMENT_STATUS_CREDIT)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    # Whole-bill rounding: total_amount = (sum of line totals) + round_off.
+    # |round_off| <= 0.50; not taxable value. Invoices issued before the
+    # round-off feature keep 0.00.
+    round_off = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0.00"))
     notes = models.TextField(blank=True)
+    # Warehouse the sale deducts stock from. Null means the default "Main"
+    # warehouse (the behaviour before this field existed); historical rows
+    # are never backfilled. Fixed at posting: cancellation returns stock here.
+    source_warehouse = models.ForeignKey(
+        "inventory.Warehouse",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sourced_invoices",
+    )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_invoices")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -136,19 +153,23 @@ class Invoice(models.Model):
     def save(self, *args, **kwargs):
         if self.pk is not None:
             stored = type(self).objects.only(
-                "payment_type", "customer_id", "total_amount", "state", "invoice_number", "invoice_date"
+                "payment_type", "customer_id", "total_amount", "round_off", "state", "invoice_number", "invoice_date",
+                "source_warehouse_id",
             ).get(pk=self.pk)
             if self.state != stored.state and not getattr(self, "_allow_lifecycle_transition", False):
                 raise ValueError("Invoice lifecycle transitions must use domain services.")
             if stored.state in {self.STATE_POSTED, self.STATE_CANCELLED}:
                 immutable_fields = [
-                    "payment_type", "customer_id", "total_amount", "invoice_number", "invoice_date",
+                    "payment_type", "customer_id", "total_amount", "round_off", "invoice_number", "invoice_date",
                     "customer_name_snapshot", "customer_gstin_snapshot", "billing_address_snapshot",
                     "shipping_address_snapshot", "state_snapshot", "pincode_snapshot",
                     "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
                     "seller_state_snapshot", "seller_state_code_snapshot",
                     "customer_state_code_snapshot", "customer_registration_type_snapshot",
                     "place_of_supply", "tax_mode",
+                    # Stock left this warehouse at posting; a cancellation
+                    # must return it to the same place.
+                    "source_warehouse_id",
                 ]
                 if any(getattr(self, field) != getattr(stored, field) for field in immutable_fields):
                     raise ValueError("Posted and cancelled invoice financial fields are immutable.")
@@ -253,7 +274,20 @@ class CreditNote(models.Model):
     credit_note_number = models.CharField(max_length=16, unique=True)
     reason = models.CharField(max_length=255, blank=True)
     note_date = models.DateField(auto_now_add=True)
+    # Includes round_off. A note that completes the full reversal of its
+    # invoice carries the invoice's round_off; partial notes carry 0.00.
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    round_off = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0.00"))
+    # Warehouse the returned goods went back into, set at creation (credit
+    # notes are immutable). Null means the default "Main" warehouse, which is
+    # where every credit note created before this field returned stock.
+    destination_warehouse = models.ForeignKey(
+        "inventory.Warehouse",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="credit_note_returns",
+    )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_credit_notes")
     created_at = models.DateTimeField(auto_now_add=True)
 

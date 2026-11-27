@@ -15,6 +15,7 @@ export default function BusinessProfilePage() {
     state: '',
     state_code: '',
     contact_details: '',
+    round_off_invoice_total: true,
   })
   const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -33,6 +34,7 @@ export default function BusinessProfilePage() {
           state: data.state || '',
           state_code: data.state_code || '',
           contact_details: data.contact_details || '',
+          round_off_invoice_total: data.round_off_invoice_total !== false,
         })
       })
       .catch((err) => setError(apiErrorMessage(err)))
@@ -40,8 +42,8 @@ export default function BusinessProfilePage() {
   }, [])
 
   function handleChange(e) {
-    const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
+    const { name, value, type, checked } = e.target
+    setFormData((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
   }
 
   async function handleSubmit(e) {
@@ -93,6 +95,22 @@ export default function BusinessProfilePage() {
         <label>State Code<input name="state_code" value={formData.state_code} onChange={handleChange} required aria-required="true" placeholder="e.g. 27" /></label>
         <label className="full-width">Registered Address<textarea name="registered_address" value={formData.registered_address} onChange={handleChange} required rows={3} /></label>
         <label className="full-width">Contact Details<input name="contact_details" value={formData.contact_details} onChange={handleChange} placeholder="Phone, email, or other contact information" /></label>
+        <div className="full-width">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexDirection: 'row' }}>
+            <input
+              type="checkbox"
+              name="round_off_invoice_total"
+              checked={formData.round_off_invoice_total}
+              onChange={handleChange}
+              style={{ width: 'auto' }}
+            />
+            Round off invoice total to the nearest rupee
+          </label>
+          <p className="field-help">
+            Rounds only the final bill amount (50 paise and above round up). Applies to invoices posted after you save;
+            invoices already issued keep their amounts.
+          </p>
+        </div>
       </div>
 
       <div className="form-actions">

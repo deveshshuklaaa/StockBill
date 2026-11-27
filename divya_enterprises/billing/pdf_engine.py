@@ -11,6 +11,7 @@ Target specifications:
 
 from decimal import Decimal
 import io
+import logging
 import os
 import re
 from pathlib import Path
@@ -23,6 +24,8 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from .models import BusinessProfile, Invoice
+
+logger = logging.getLogger(__name__)
 
 
 # --- COLOR PALETTE (matching visual reference) ---
@@ -327,6 +330,100 @@ def layout_customer_block(cust_name, cust_address) -> dict:
         "addr_label_w": label_w,
         "box_h": box_h,
     }
+
+
+ELLIPSIS = "…"
+TERMS_FONT_SIZES = (6.0, 5.5, 5.0)          # step down to fit; 5 pt minimum
+SIGNATURE_NAME_FONT_SIZES = (7.0, 6.5, 6.0)  # "For <business name>"; 6 pt minimum
+SIGNATURE_NAME_MAX_LINES = 2
+
+
+def _with_ellipsis(text, max_w, font_name, font_size):
+    """``text`` shortened as needed so that text + "…" fits ``max_w``."""
+    text = text.rstrip()
+    while text and stringWidth(text + ELLIPSIS, font_name, font_size) > max_w:
+        text = text[:-1].rstrip()
+    return text + ELLIPSIS
+
+
+def layout_terms(terms_text, max_w, first_baseline, min_baseline):
+    """Wrap terms to the box width, stepping the font down until they fit.
+
+    Each terms line is wrapped (never cut) to ``max_w``. Line i sits at
+    first_baseline - i * font_size; nothing goes below ``min_baseline``.
+    If even 5 pt does not fit, as many lines as fit are kept and the last
+    ends with "…" (truncated=True: the terms are too long for the box).
+    """
+    paragraphs = [part.strip() for part in str(terms_text or "").splitlines() if part.strip()]
+    lines = []
+    for size in TERMS_FONT_SIZES:
+        lines = [line for part in paragraphs for line in wrap_product_description(part, max_w, "Helvetica", size)]
+        capacity = int((first_baseline - min_baseline) // size) + 1
+        if len(lines) <= capacity:
+            return {"lines": lines, "font_size": size, "truncated": False}
+    kept = lines[:capacity]
+    if kept:
+        kept[-1] = _with_ellipsis(kept[-1], max_w, "Helvetica", size)
+    return {"lines": kept, "font_size": size, "truncated": True}
+
+
+def layout_signature_name(co_name, max_w):
+    """"For <business name>": shrink to fit (down to 6 pt), then wrap to 2
+    lines; a name that still does not fit ends with a visible "…"."""
+    text = f"For {' '.join(str(co_name or '').split())}".rstrip()
+    for size in SIGNATURE_NAME_FONT_SIZES:
+        if stringWidth(text, "Helvetica-Bold", size) <= max_w:
+            return {"lines": [text], "font_size": size, "truncated": False}
+    size = SIGNATURE_NAME_FONT_SIZES[-1]
+    lines = wrap_product_description(text, max_w, "Helvetica-Bold", size)
+    if len(lines) <= SIGNATURE_NAME_MAX_LINES:
+        return {"lines": lines, "font_size": size, "truncated": False}
+    kept = lines[:SIGNATURE_NAME_MAX_LINES]
+    kept[-1] = _with_ellipsis(" ".join([kept[-1]] + lines[SIGNATURE_NAME_MAX_LINES:]), max_w, "Helvetica-Bold", size)
+    return {"lines": kept, "font_size": size, "truncated": True}
+
+
+def draw_footer_boxes(c, *, left_x, right_x, bottom_y, words_bot, usable_w, terms_text, co_name):
+    """Bottom row of every page: Terms & Conditions | Receiver's | For <name>.
+
+    Shared by the continuation-page and last-page footers. Terms wrap inside
+    their own column and never reach the signature columns; returns the
+    terms layout so callers/tests can see when terms had to be shortened.
+    """
+    b_w1 = usable_w * 0.45
+    b_w2 = usable_w * 0.25
+    b_w3 = usable_w - b_w1 - b_w2
+
+    c.line(left_x + b_w1, words_bot, left_x + b_w1, bottom_y)
+    c.line(left_x + b_w1 + b_w2, words_bot, left_x + b_w1 + b_w2, bottom_y)
+
+    c.setFont("Helvetica-Bold", 7)
+    c.drawString(left_x + 4, words_bot - 8, "Terms & Conditions")
+    # First line sits just under the title (whose baseline is words_bot - 8);
+    # the last may go down to 2 pt above the bottom border. That is 5 lines
+    # at 6 pt and 6 lines at 5 pt.
+    first_baseline = words_bot - 14.5
+    terms = layout_terms(terms_text, b_w1 - 8, first_baseline=first_baseline, min_baseline=bottom_y + 2)
+    c.setFont("Helvetica", terms["font_size"])
+    ty = first_baseline
+    for line in terms["lines"]:
+        c.drawString(left_x + 4, ty, line)
+        ty -= terms["font_size"]
+    if terms["truncated"]:
+        logger.warning("Invoice terms are too long for the terms box; shown up to an ellipsis.")
+
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawCentredString(left_x + b_w1 + (b_w2 / 2), bottom_y + 6, "Receiver's Signature")
+
+    name = layout_signature_name(co_name, b_w3 - 12)
+    c.setFont("Helvetica-Bold", name["font_size"])
+    ny = words_bot - 8
+    for line in name["lines"]:
+        c.drawString(left_x + b_w1 + b_w2 + 6, ny, line)
+        ny -= name["font_size"] + 1
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
+    return {"terms": terms, "signature_name": name}
 
 
 def rows_area_height(cust_box_h: float, is_first_page: bool, is_last_page: bool) -> float:
@@ -896,29 +993,8 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
             c.drawString(left_x + 6, words_bot + 4, f"(Continued on Page {page_num + 1})")
 
             # Bottom 3 boxes
-            b_w1 = usable_w * 0.45
-            b_w2 = usable_w * 0.25
-            b_w3 = usable_w - b_w1 - b_w2
-
-            c.line(left_x + b_w1, words_bot, left_x + b_w1, bottom_y)
-            c.line(left_x + b_w1 + b_w2, words_bot, left_x + b_w1 + b_w2, bottom_y)
-
-            c.setFont("Helvetica-Bold", 7)
-            c.drawString(left_x + 4, words_bot - 8, "Terms & Conditions")
-            c.setFont("Helvetica", 6)
-            t_lines = terms_text.splitlines()
-            ty = words_bot - 16
-            for tl in t_lines[:3]:
-                c.drawString(left_x + 4, ty, tl[:50])
-                ty -= 6
-
-            c.setFont("Helvetica-Bold", 7.5)
-            c.drawCentredString(left_x + b_w1 + (b_w2 / 2), bottom_y + 6, "Receiver's Signature")
-
-            c.setFont("Helvetica-Bold", 7)
-            c.drawString(left_x + b_w1 + b_w2 + 6, words_bot - 8, f"For {co_name[:28]}")
-            c.setFont("Helvetica-Bold", 7.5)
-            c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
+            draw_footer_boxes(c, left_x=left_x, right_x=right_x, bottom_y=bottom_y, words_bot=words_bot,
+                              usable_w=usable_w, terms_text=terms_text, co_name=co_name)
 
             c.restoreState()
             c.showPage()
@@ -1075,29 +1151,8 @@ def build_invoice_a5_pdf(invoice: Invoice, copy_type: str = "original", lines=No
         c.drawString(left_x + 6, words_bot + 4, f"Amount in Words: {words_str}")
 
         # Bottom 3 boxes
-        b_w1 = usable_w * 0.45
-        b_w2 = usable_w * 0.25
-        b_w3 = usable_w - b_w1 - b_w2
-
-        c.line(left_x + b_w1, words_bot, left_x + b_w1, bottom_y)
-        c.line(left_x + b_w1 + b_w2, words_bot, left_x + b_w1 + b_w2, bottom_y)
-
-        c.setFont("Helvetica-Bold", 7)
-        c.drawString(left_x + 4, words_bot - 8, "Terms & Conditions")
-        c.setFont("Helvetica", 6)
-        t_lines = terms_text.splitlines()
-        ty = words_bot - 16
-        for tl in t_lines[:3]:
-            c.drawString(left_x + 4, ty, tl[:50])
-            ty -= 6
-
-        c.setFont("Helvetica-Bold", 7.5)
-        c.drawCentredString(left_x + b_w1 + (b_w2 / 2), bottom_y + 6, "Receiver's Signature")
-
-        c.setFont("Helvetica-Bold", 7)
-        c.drawString(left_x + b_w1 + b_w2 + 6, words_bot - 8, f"For {co_name[:28]}")
-        c.setFont("Helvetica-Bold", 7.5)
-        c.drawCentredString(right_x - (b_w3 / 2), bottom_y + 6, "Authorised Signatory")
+        draw_footer_boxes(c, left_x=left_x, right_x=right_x, bottom_y=bottom_y, words_bot=words_bot,
+                          usable_w=usable_w, terms_text=terms_text, co_name=co_name)
 
         c.restoreState()
         c.showPage()

@@ -59,7 +59,7 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 - **Weighted Average Cost (WAC):** Perpetual WAC recalculation upon every purchase receipt based on landed pre-tax, post-discount purchase cost.
 - **Stock Adjustments (`StockAdjustment`):** Controlled manual stock corrections (In/Out) with mandatory reason classification, reference tracking, and ledger impact.
 - **Opening Stock (`OpeningStock`):** Dedicated opening stock entry mechanism with automated balance and ledger seeding.
-- **Warehouse Management (`Warehouse`):** Multi-warehouse support with primary default warehouse (`MAIN`).
+- **Warehouse Management (`Warehouse`):** Multi-warehouse support with primary default warehouse (`MAIN`). The non-sellable `DAMAGED` ("Damaged / Quarantine") warehouse holds damaged returns awaiting supplier replacement; its stock is excluded from sellable figures (product stock, low-stock alerts, dashboard) but stays visible in stock reports.
 - **Warehouse Transfers (`WarehouseTransfer`):** Multi-step transfer workflow between source and destination warehouses with live stock validation.
 - **Stock Thresholds & Alerts:** Low-stock threshold tracking per product to highlight inventory replenishment needs.
 
@@ -89,6 +89,16 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 - **Invoice Amendment Workflow:** Supervised correction workflow allowing cancellation and re-issuance with explicit amendment lineage.
 - **Historical Invoice Snapshots:** Immutable capture of customer billing address, product name, SKU, HSN, rate, discount, and tax at the moment of posting.
 - **PDF Invoice Generation:** Server-rendered GST-compliant tax invoices generated via WeasyPrint.
+- **Source warehouse (optional):** An invoice can draw its stock from a chosen sellable warehouse (e.g. a van). Left empty, it uses Main exactly as before.
+- **Return destination (optional):** A credit note can send the returned goods to a chosen warehouse. Left empty, they go back to Main.
+
+#### Van / route sales and damaged returns (operator setup)
+No code change is needed per route; this is a one-time setup on the existing screens.
+
+1. **Route customer:** on *Customers*, create one B2C customer per route, e.g. `Van Sales – Route 1`, unregistered (no GSTIN). Route sales are consolidated B2C retail billed to that account.
+2. **Route stock (optional):** if the van carries its own stock, create a warehouse for it on *Warehouses* and move stock with *Warehouse Transfers*; then pick it as the invoice's *Source warehouse*. Otherwise leave it on Main.
+3. **Damaged pile from the route:** open the route invoice, choose *Issue credit note*, enter the damaged quantities and set *Returned stock goes to* = **Damaged / Quarantine**. The goods are held there (visible in stock reports, not sellable, not written off; no ITC reversal).
+4. **Back to the supplier:** on the supplier's page, *Returns for 1:1 replacement* → *Send back to supplier* (out of Damaged). When the replacement arrives, *Receive replacement* (into Main). The two entries cancel out on the supplier ledger.
 
 ### Customers
 - Full CRUD operations with soft-archival (`is_active`).
@@ -102,6 +112,7 @@ StockBill is an FMCG distributor inventory, billing, purchasing, customer-financ
 - State-code tracking for GST place-of-supply logic.
 - Historical purchase invoices and payment audit trail.
 - Supplier-specific MRP purchase rate rules.
+- **Supplier ledger (accounts payable):** record payments to a supplier (Bank transfer by default, Cash or UPI), including round-figure advances that later purchases draw down. The per-supplier ledger page lists purchases, payments, reversals, damaged-goods returns and replacements in date order with a running balance, and closes with the **Payable** (positive, you owe) or **Advance** (negative, paid ahead) figure. It can be printed or exported as an Excel statement. Example: a ₹1,00,000 advance against a ₹97,368 purchase leaves a ₹2,632 advance. Admins can reverse a payment; nothing is edited or deleted.
 
 ### Reports
 - **Daily Sales Report:** Segregated view of cash sales, credit sales, and actual collections for any chosen date.
@@ -234,6 +245,9 @@ pip install -r requirements.txt
 ### 4. Configure Environment Variables
 Create a `.env` file in the repository root:
 ```ini
+# Development PC only: shows a red "DEVELOPMENT - test data" bar on every
+# screen. Leave it out on the shop PC (default is production: no bar).
+STOCKBILL_ENV=development
 DEBUG=True
 SECRET_KEY=<your-development-secret-key>
 ALLOWED_HOSTS=localhost,127.0.0.1
@@ -250,6 +264,12 @@ POSTGRES_PASSWORD=<your-postgresql-password>
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 ```
+
+`STOCKBILL_ENV` accepts `production` (default), `development` or `staging`;
+any other value stops Django from starting. Outside production,
+`GET /api/meta/` also reports the database (`NAME@HOST:PORT`) and the
+frontend shows it in a red bar at the top of every screen (hidden when
+printing; never part of generated PDFs).
 
 ### 5. Validate System & Migrations
 ```powershell
