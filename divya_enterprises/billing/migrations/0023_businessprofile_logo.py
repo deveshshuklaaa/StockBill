@@ -40,7 +40,7 @@ def load_legacy_logo(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("billing", "0020_invoice_round_off"),
+        ("billing", "0022_creditnote_destination_warehouse"),
     ]
 
     operations = [

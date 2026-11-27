@@ -22,7 +22,7 @@ from billing.models import AuditLog, BusinessProfile, Invoice
 from billing.pdf_engine import build_invoice_a5_pdf
 
 User = get_user_model()
-MIGRATION = importlib.import_module("billing.migrations.0021_businessprofile_logo")
+MIGRATION = importlib.import_module("billing.migrations.0023_businessprofile_logo")
 
 
 def image_bytes(fmt, size=(1200, 800), mode="RGB", color=(15, 94, 87), **save_kwargs):
@@ -235,10 +235,10 @@ class LegacyLogoMigrationFunctionTests(TestCase):
 
 
 class LogoMigrationTests(TransactionTestCase):
-    """Migration 0021 end to end, and its reversal."""
+    """Migration 0023 end to end, and its reversal."""
 
-    before = [("billing", "0020_invoice_round_off")]
-    after = [("billing", "0021_businessprofile_logo")]
+    before = [("billing", "0022_creditnote_destination_warehouse")]
+    after = [("billing", "0023_businessprofile_logo")]
 
     def tearDown(self):
         executor = MigrationExecutor(connection)

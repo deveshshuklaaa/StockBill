@@ -91,8 +91,8 @@ class TermsSnapshotTests(ShopFixture, APITestCase):
 
 
 class TermsBackfillMigrationTests(TransactionTestCase):
-    before = [("billing", "0022_businessprofile_terms_default_empty")]
-    after = [("billing", "0023_invoice_terms_snapshot")]
+    before = [("billing", "0024_businessprofile_terms_default_empty")]
+    after = [("billing", "0025_invoice_terms_snapshot")]
 
     def tearDown(self):
         executor = MigrationExecutor(connection)

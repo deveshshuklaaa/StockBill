@@ -269,7 +269,7 @@ def uninstall(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("billing", "0022_businessprofile_terms_default_empty"),
+        ("billing", "0024_businessprofile_terms_default_empty"),
     ]
 
     operations = [
