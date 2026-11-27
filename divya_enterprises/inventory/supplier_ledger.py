@@ -56,6 +56,8 @@ STATUS_PAYABLE = "PAYABLE"
 STATUS_ADVANCE = "ADVANCE"
 STATUS_SETTLED = "SETTLED"
 
+# Only a last-resort tiebreaker for entries with identical timestamps; within
+# a day, entries are listed in the order they were actually recorded.
 KIND_ORDER = {
     "purchase": 0,
     "supplier_return": 1,
@@ -151,7 +153,10 @@ def _ledger_entries(supplier):
             "debit": None, "credit": receipt.value, "sort_key": receipt.created_at,
         })
 
-    entries.sort(key=lambda e: (e["date"], KIND_ORDER[e["kind"]], e["sort_key"], e["id"]))
+    # Date first, then the real time it happened (purchase: posted_at;
+    # everything else: created_at), so a same-day advance paid before a
+    # purchase is listed before it and the running balance reads forwards.
+    entries.sort(key=lambda e: (e["date"], e["sort_key"], KIND_ORDER[e["kind"]], e["id"]))
     for entry in entries:
         entry.pop("sort_key")
     return entries

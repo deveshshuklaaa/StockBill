@@ -110,8 +110,12 @@ export default function NewPurchasePage() {
   useEffect(() => {
     fetchWarehouses({ is_active: 'true' })
       .then((warehouseRows) => {
-        setWarehouses(warehouseRows)
-        if (!isEditMode && warehouseRows.length === 1) setWarehouseId(String(warehouseRows[0].id))
+        // Purchases can't be received into non-sellable holding warehouses
+        // (Damaged / Quarantine); leaving them out also keeps a shop with
+        // only Main auto-selecting it.
+        const receivable = warehouseRows.filter((w) => w.is_sellable !== false)
+        setWarehouses(receivable)
+        if (!isEditMode && receivable.length === 1) setWarehouseId(String(receivable[0].id))
       })
       .catch((err) => setError(apiErrorMessage(err)))
       .finally(() => {

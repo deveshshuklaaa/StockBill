@@ -69,11 +69,11 @@ export default function DashboardPage() {
         <div className="metric-value">{money(data.customer_outstanding_total)}</div>
         <div className="metric-hint">{data.active_customers} active customer(s)</div>
       </Link>
-      <div className="metric-card">
+      <Link className="metric-card linked" to="/suppliers">
         <div className="metric-label">Active suppliers</div>
         <div className="metric-value">{data.active_suppliers}</div>
-        <div className="metric-hint">Supplier settlement is outside StockBill</div>
-      </div>
+        <div className="metric-hint">Payments and balances in each supplier's ledger</div>
+      </Link>
       <Link className="metric-card linked" to={`/reports/profit?from=${range.from}&to=${range.to}`}>
         <div className="metric-label">Gross profit (period)</div>
         <div className="metric-value">{money(period.gross_profit)}</div>

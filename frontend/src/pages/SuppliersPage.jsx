@@ -102,7 +102,7 @@ export default function SuppliersPage() {
 
   return <section className="page-section">
     <header className="page-header">
-      <div><p className="eyebrow">Purchasing / master data</p><h1>Suppliers</h1><p className="page-subtitle">Vendor master data feeding the purchase workflow. Supplier settlement happens outside StockBill.</p></div>
+      <div><p className="eyebrow">Purchasing / master data</p><h1>Suppliers</h1><p className="page-subtitle">Vendor master data feeding the purchase workflow. Open a supplier for its ledger: payments, advances and the balance payable.</p></div>
       {isAdmin && <button className="primary-button" onClick={beginCreate}>Add supplier</button>}
     </header>
     <StatusMessage>{error}</StatusMessage>

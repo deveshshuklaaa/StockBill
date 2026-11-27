@@ -266,7 +266,21 @@ def _validate_supplier(*, supplier):
 def _validate_warehouse(*, warehouse):
     if warehouse is None:
         return get_default_warehouse()
-    return Warehouse.objects.get(pk=warehouse.pk)
+    warehouse = Warehouse.objects.get(pk=warehouse.pk)
+    _ensure_receivable(warehouse)
+    return warehouse
+
+
+def _ensure_receivable(warehouse):
+    """Purchases never land in a non-sellable holding warehouse.
+
+    Damaged / Quarantine only fills through damaged sales returns (credit
+    notes) and empties through supplier returns; new goods go elsewhere.
+    """
+    if not warehouse.is_sellable:
+        raise serializers.ValidationError(
+            {"warehouse": f"{warehouse.name} holds non-sellable stock and cannot receive purchases."}
+        )
 
 
 def _persist_lines(*, purchase, calculated):
@@ -408,6 +422,8 @@ def post_purchase(*, purchase_id, posted_by):
     lines = list(purchase.line_items.select_related("product", "product__tax"))
     if not lines:
         raise serializers.ValidationError({"line_items": "Nothing to receive."})
+    # Re-checked at posting for drafts saved before this rule existed.
+    _ensure_receivable(purchase.warehouse)
 
     products = Product.objects.select_for_update().in_bulk(
         {line.product_id for line in lines}
