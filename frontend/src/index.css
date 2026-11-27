@@ -16,3 +16,28 @@ html.env-banner-on .login-page, html.env-banner-on .login-aside, html.env-banner
   .env-banner { display: none !important; }
   html.env-banner-on body { padding-top: 0 !important; }
 }
+
+/* StockBill product lockup (branding/BRAND.md). */
+:root { --sb-teal: #0F5E57; --sb-ink: #10231F; --sb-amber: #F2B84B; --sb-dark: #0E1B19; }
+.sb-lockup { display: inline-flex; align-items: center; gap: 10px; }
+.sb-icon { display: block; flex: none; }
+.sb-wordmark { font-family: 'Space Grotesk', 'DM Sans', sans-serif; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+.sb-lockup-light .sb-stock { color: var(--sb-ink); }
+.sb-lockup-light .sb-bill { color: var(--sb-teal); }
+.sb-lockup-dark .sb-stock { color: #fff; }
+.sb-lockup-dark .sb-bill { color: var(--sb-amber); }
+.sidebar-brand { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* The sidebar's older rule ".brand-lockup span { display: block; font-size: 11px; ... }" must not
+   reach inside the StockBill lockup: keep icon + wordmark on one line at the brand size. */
+.brand-lockup .sb-lockup { display: inline-flex; margin-top: 0; }
+.brand-lockup .sb-wordmark { display: inline; margin-top: 0; color: inherit; }
+.brand-lockup .sb-wordmark > span { display: inline; margin-top: 0; font-size: inherit; }
+.brand-lockup .sidebar-shop-name { margin-top: 0; font-size: 12px; color: #c9d8cd; }
+.sidebar-shop-name { color: #c9d8cd; font-size: 12px; line-height: 1.3; padding-left: 38px; overflow-wrap: anywhere; }
+
+/* Business Profile: shop logo panel. */
+.logo-settings { margin-top: 22px; }
+.logo-settings-body { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
+.logo-preview { width: 120px; height: 120px; display: grid; place-items: center; border: 1px dashed #c9d5cb; background: #fff; color: #8a978e; font-size: 12px; }
+.logo-preview img { max-width: 112px; max-height: 112px; object-fit: contain; }
+.logo-actions { display: flex; gap: 12px; align-items: center; margin-top: 10px; }

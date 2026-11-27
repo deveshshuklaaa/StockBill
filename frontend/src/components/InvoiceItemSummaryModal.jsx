@@ -390,6 +390,7 @@ export default function InvoiceItemSummaryModal({ isOpen, onClose, selectedIds =
           invoiceCount={invoiceCount}
           totalBaseQty={totalBaseQty}
           generatedAt={generatedAt}
+          businessName={data.business_name || ''}
         />
       )}
     </>

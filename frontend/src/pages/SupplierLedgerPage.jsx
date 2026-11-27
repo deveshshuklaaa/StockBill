@@ -179,7 +179,9 @@ export default function SupplierLedgerPage() {
           <span style={{ background: 'transparent', color: '#89958d' }}>{ledger.from || 'Start'} → {ledger.to || 'Today'}</span>
         </div>
       </div>
-      <table className="data-table detail-table">
+      {/* Scrolls inside the card on narrow screens so every column, Reverse included, stays reachable. */}
+      <div className="ledger-table-scroll" data-testid="ledger-table-scroll">
+      <table className="data-table detail-table ledger-table">
         <thead>
           <tr><th>Date</th><th>Type</th><th>Reference</th><th style={{ textAlign: 'right' }}>Debit (paid / returned)</th><th style={{ textAlign: 'right' }}>Credit (purchased)</th><th style={{ textAlign: 'right' }}>Balance</th><th className="no-print" /></tr>
         </thead>
@@ -205,6 +207,7 @@ export default function SupplierLedgerPage() {
           {!(ledger.entries || []).length && <tr><td colSpan={7} className="empty-state">No entries in this period.</td></tr>}
         </tbody>
       </table>
+      </div>
       <div className="detail-total">
         <span>Total purchased {money(ledger.total_credit)} · Total paid / returned {money(ledger.total_debit)}</span>
         <strong>Closing: <BalanceText balance={ledger.closing_balance} /></strong>

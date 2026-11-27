@@ -5,7 +5,8 @@ import subprocess
 import sys
 
 from django.conf import settings
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
+from rest_framework.authtoken.models import Token
 
 
 class MetaEndpointTests(SimpleTestCase):
@@ -70,3 +71,43 @@ class StockbillEnvSettingTests(SimpleTestCase):
         result = load_settings("prod")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("STOCKBILL_ENV must be one of", result.stderr)
+
+
+class MetaBusinessNameTests(TestCase):
+    """Release B1: signed-in requests also get the shop name for the sidebar."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounts.models import User
+        from billing.models import BusinessProfile
+
+        cls.user = User.objects.create_user(username="meta-staff", password="Pass-12345!", role="staff")
+        cls.token = Token.objects.create(user=cls.user)
+        BusinessProfile.objects.create(business_name="Sharma General Store", gstin="27AAAAA0000A1Z5",
+                                       registered_address="Pune", state="Maharashtra", state_code="27")
+
+    @override_settings(STOCKBILL_ENV="production")
+    def test_token_authenticated_request_gets_the_business_name(self):
+        body = self.client.get("/api/meta/", HTTP_AUTHORIZATION=f"Token {self.token.key}").json()
+        self.assertEqual(body, {"environment": "production", "business_name": "Sharma General Store"})
+
+    @override_settings(STOCKBILL_ENV="production")
+    def test_session_authenticated_request_gets_the_business_name(self):
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get("/api/meta/").json()["business_name"], "Sharma General Store")
+
+    @override_settings(STOCKBILL_ENV="production")
+    def test_anonymous_request_gets_no_business_name(self):
+        self.assertEqual(self.client.get("/api/meta/").json(), {"environment": "production"})
+
+    @override_settings(STOCKBILL_ENV="development")
+    def test_invalid_token_is_treated_as_anonymous(self):
+        response = self.client.get("/api/meta/", HTTP_AUTHORIZATION="Token not-a-real-token")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("business_name", response.json())
+        self.assertEqual(response.json()["environment"], "development")
+
+    @override_settings(STOCKBILL_ENV="production")
+    def test_profile_endpoint_stays_admin_only(self):
+        response = self.client.get("/api/business-profile/", HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        self.assertEqual(response.status_code, 403)

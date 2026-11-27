@@ -85,7 +85,7 @@ export default function SalesGstReportPage() {
 
   const hasData = Boolean(report && report.rows && report.rows.length > 0)
   const totals = report?.totals || {}
-  const sellerName = report?.seller?.business_name || 'DIVYA ENTERPRISES'
+  const sellerName = report?.seller?.business_name || ''
   const fromDisplay = formatDateDisplay(range.from)
   const toDisplay = formatDateDisplay(range.to)
 

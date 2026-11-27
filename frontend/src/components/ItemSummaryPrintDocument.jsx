@@ -16,6 +16,7 @@ export default function ItemSummaryPrintDocument({
   invoiceCount = 0,
   totalBaseQty = '0',
   generatedAt = '',
+  businessName = '',
 }) {
   const displayInvoices = invoiceNumbers.length > 0
     ? invoiceNumbers.join(', ')
@@ -35,7 +36,7 @@ export default function ItemSummaryPrintDocument({
               className="print-company-title"
               style={{ margin: 0, color: '#1e382b', fontSize: '22px', fontWeight: 800, letterSpacing: '0.04em' }}
             >
-              DIVYA ENTERPRISES
+              {businessName}
             </h1>
             <h2
               className="print-report-title"

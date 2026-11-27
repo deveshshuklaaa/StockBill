@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import StatusMessage from '../components/StatusMessage'
+import StockBillLogo from '../components/StockBillLogo'
 import { useAuth } from '../context/AuthContext'
 
 export default function LoginPage() {
@@ -30,9 +31,9 @@ export default function LoginPage() {
   return (
     <main className="login-page">
       <section className="login-panel">
-        <div className="login-brand"><span className="brand-mark">DE</span><span>StockBill</span></div>
+        <div className="login-brand"><StockBillLogo tone="light" iconSize={32} textSize={22} /></div>
         <div className="login-heading">
-          <p className="eyebrow">Divya Enterprises</p>
+          <p className="eyebrow">Billing and inventory</p>
           <h1>Back office, ready.</h1>
           <p>Sign in to manage stock, customers, and daily operations.</p>
         </div>
@@ -48,7 +49,7 @@ export default function LoginPage() {
         <div className="aside-rule" />
         <p className="eyebrow">Operational clarity</p>
         <h2>Know what is on the shelf before the next bill.</h2>
-        <p>One focused workspace for the people moving product through Divya Enterprises every day.</p>
+        <p>One focused workspace for billing, stock and customer accounts, every day.</p>
         <div className="aside-stats"><span><strong>01</strong> stock view</span><span><strong>02</strong> customer ledger</span></div>
       </aside>
     </main>

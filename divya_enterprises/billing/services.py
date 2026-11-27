@@ -52,6 +52,38 @@ def _apply_round_off(exact_total, enabled):
     return final_total - exact_total, final_total
 
 
+PROFILE_REQUIRED_FIELDS = ("business_name", "registered_address", "gstin", "state", "state_code")
+PROFILE_INCOMPLETE_MESSAGE = "Complete Settings → Business profile (name, address, GSTIN, state) before posting invoices."
+
+
+def _require_complete_profile(seller=None):
+    """Posting issues a tax invoice in the shop's name, so the seller details
+    must exist. Drafts are not checked."""
+    profile = seller if seller is not None else BusinessProfile.objects.first()
+    if profile is None or any(not str(getattr(profile, field, "") or "").strip() for field in PROFILE_REQUIRED_FIELDS):
+        raise serializers.ValidationError({"business_profile": [PROFILE_INCOMPLETE_MESSAGE]})
+    return profile
+
+
+SELLER_SNAPSHOT_FIELDS = (
+    "seller_business_name_snapshot", "seller_gstin_snapshot", "seller_address_snapshot",
+    "seller_state_snapshot", "seller_state_code_snapshot", "terms_snapshot",
+)
+
+
+def _stamp_seller_details(invoice, profile):
+    """Copy the Business Profile in force at issue onto the invoice: seller
+    details and terms. Called at posting, so a draft created before a
+    profile change carries the details of the day it was issued."""
+    invoice.seller_business_name_snapshot = profile.business_name if profile else ""
+    invoice.seller_gstin_snapshot = profile.gstin if profile else ""
+    invoice.seller_address_snapshot = profile.registered_address if profile else ""
+    invoice.seller_state_snapshot = profile.state if profile else ""
+    invoice.seller_state_code_snapshot = profile.state_code if profile else ""
+    invoice.terms_snapshot = (profile.terms_and_conditions or "") if profile else ""
+    return invoice
+
+
 def _issue_invoice_number(invoice):
     """Stamp the tax-invoice number and issue date at the move into POSTED.
 
@@ -241,6 +273,8 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
     # Stored as given (null = Main); stock moves in the effective warehouse.
     source_warehouse = _check_source_warehouse(source_warehouse)
     warehouse = _effective_warehouse(source_warehouse)
+    if state != Invoice.STATE_DRAFT:
+        _require_complete_profile(seller)
 
     if state == Invoice.STATE_DRAFT:
         product_ids = {item["product"].pk for item in line_items}
@@ -338,6 +372,9 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
     numbered = Invoice(state=state)
     if state == Invoice.STATE_POSTED:
         _issue_invoice_number(numbered)
+    # Terms are fixed only when the invoice is issued; drafts print the
+    # current profile terms.
+    terms_snapshot = (seller.terms_and_conditions or "") if (seller and state == Invoice.STATE_POSTED) else ""
 
     invoice = Invoice.objects.create(
         customer=customer,
@@ -362,6 +399,7 @@ def create_invoice(*, customer, notes="", created_by, payment_type, line_items, 
         seller_address_snapshot=seller.registered_address if seller else "",
         seller_state_snapshot=seller.state if seller else "",
         seller_state_code_snapshot=seller.state_code if seller else "",
+        terms_snapshot=terms_snapshot,
         place_of_supply=calc_result["place_of_supply"],
         tax_mode=calc_result["tax_mode"],
         source_warehouse=source_warehouse,
@@ -432,6 +470,7 @@ def post_invoice(*, invoice_id, posted_by):
         return invoice
     if invoice.state != Invoice.STATE_DRAFT:
         raise serializers.ValidationError({"state": "Only draft invoices can be posted."})
+    profile = _require_complete_profile()
     line_items = list(invoice.line_items.select_related("product"))
     # Re-checked at posting: the draft's warehouse may have been deactivated.
     warehouse = _effective_warehouse(_check_source_warehouse(invoice.source_warehouse))
@@ -475,9 +514,12 @@ def post_invoice(*, invoice_id, posted_by):
         line.save(update_fields=["cost_price_snapshot", "cogs_amount", "product_name_snapshot", "base_unit_snapshot", "mrp_snapshot"])
         adjust_inventory(product=product, quantity_delta=-line.base_quantity, movement_type=StockLedger.SALE, created_by=posted_by, reference_type="invoice", reference_id=invoice.pk, unit_cost=line.cost_price_snapshot, warehouse=warehouse)
     _issue_invoice_number(invoice)
+    _stamp_seller_details(invoice, profile)
     invoice.state = Invoice.STATE_POSTED
     invoice._allow_lifecycle_transition = True
-    invoice.save(update_fields=["state", "invoice_number", "invoice_date", "total_amount", "round_off", "updated_at"])
+    invoice.save(update_fields=[
+        "state", "invoice_number", "invoice_date", "total_amount", "round_off", *SELLER_SNAPSHOT_FIELDS, "updated_at",
+    ])
     if invoice.payment_type == Invoice.PAYMENT_TYPE_CASH:
         create_payment(customer=invoice.customer, invoice=invoice, amount=invoice.total_amount, actor=posted_by)
     AuditLog.objects.create(user=posted_by, action="invoice_posted", entity_type="Invoice", entity_id=invoice.pk)
@@ -989,6 +1031,11 @@ def create_payment(*, customer, invoice, amount, actor, notes="", payment_method
     return payment
 
 
+def _profile_business_name():
+    profile = BusinessProfile.objects.only("business_name").first()
+    return profile.business_name if profile else ""
+
+
 def build_selected_invoices_item_summary(invoice_ids):
     """Authoritative item-wise quantity summary of selected POSTED invoices.
 
@@ -1029,6 +1076,7 @@ def build_selected_invoices_item_summary(invoice_ids):
             "total_products": 0,
             "total_base_quantity": "0.000",
             "items": [],
+            "business_name": _profile_business_name(),
         }
 
     lines = InvoiceLineItem.objects.filter(
@@ -1124,6 +1172,7 @@ def build_selected_invoices_item_summary(invoice_ids):
         "total_products": len(items),
         "total_base_quantity": str(grand_total_base),
         "items": items,
+        "business_name": _profile_business_name(),
     }
 
 
@@ -1165,8 +1214,8 @@ def build_item_summary_xlsx(summary_data):
         bottom=Side(style="double", color="2C4D3B"),
     )
 
-    # 1. Header block
-    ws["A1"] = "DIVYA ENTERPRISES"
+    # 1. Header block: the shop's name from the Business Profile
+    ws["A1"] = _profile_business_name()
     ws["A1"].font = title_font
 
     ws["A2"] = "ITEM-WISE SUMMARY OF SELECTED INVOICES"

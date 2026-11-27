@@ -11,7 +11,7 @@ import pypdf
 from rest_framework.test import APIClient, APITestCase
 
 from billing.models import BusinessProfile, Invoice, InvoiceLineItem
-from billing.pdf_engine import amount_to_words, build_invoice_a5_pdf, _resolve_logo_path
+from billing.pdf_engine import amount_to_words, build_invoice_a5_pdf, profile_logo_reader
 from customers.models import Customer
 from inventory.models import AttributeDefinition, Product, ProductAttributeValue, TaxRate
 
@@ -403,11 +403,10 @@ class InvoicePdfGenerationTests(APITestCase):
         text = doc[0].get_text()
         self.assertIn("Rs. Forty Two Thousand Nine Hundred and Ninety Five only", text)
 
-    # 15. Logo / resource loading works
-    def test_logo_resource_loading_works(self):
-        logo_path = _resolve_logo_path()
-        self.assertIsNotNone(logo_path)
-        self.assertTrue(Path(logo_path).exists())
+    # 15. Logo comes from the Business Profile (Release B2), not a file on disk
+    def test_logo_comes_from_the_business_profile(self):
+        self.assertIsNone(profile_logo_reader(self.profile))  # nothing uploaded
+        self.assertIsNone(profile_logo_reader(None))
 
     # 16. Page size is correct: A4 Portrait 210 mm x 297 mm (595.28 pt x 841.89 pt)
     def test_page_size_is_a4_portrait(self):
@@ -884,6 +883,9 @@ class InvoicePdfFooterTests(APITestCase):
     def render(self, *, terms=None, seller_name=None, lines=None):
         if terms is not None:
             BusinessProfile.objects.filter(pk=self.profile.pk).update(terms_and_conditions=terms)
+        # Posted invoices print the terms snapshotted at posting (Release B4);
+        # this fixture is posted, so give it the snapshot posting would set.
+        self.invoice.terms_snapshot = BusinessProfile.objects.get(pk=self.profile.pk).terms_and_conditions
         if seller_name is not None:
             self.invoice.seller_business_name_snapshot = seller_name  # in memory only
         return pymupdf.open("pdf", build_invoice_a5_pdf(self.invoice, lines=lines))
@@ -904,10 +906,17 @@ class InvoicePdfFooterTests(APITestCase):
     def word(page, text):
         return next(w for w in page.get_text("words") if w[4] == text)
 
-    def test_default_three_terms_print_in_full(self):
-        text = self.flat(self.render(terms="")[0].get_text())
+    def test_three_terms_print_in_full(self):
+        text = self.flat(self.render(terms="\n".join(self.DEFAULT_TERMS))[0].get_text())
         for line in self.DEFAULT_TERMS:
             self.assertIn(line, text)  # previously cut at 50 characters ("excha...")
+
+    def test_empty_profile_terms_print_nothing(self):
+        # Release B3: no built-in terms; each shop sets its own.
+        text = self.flat(self.render(terms="")[0].get_text())
+        self.assertNotIn("Goods once sold", text)
+        self.assertNotIn("interest", text.lower())
+        self.assertIn("Terms & Conditions", text)
 
     def test_profile_terms_print_in_full(self):
         text = self.flat(self.render()[0].get_text())

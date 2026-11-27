@@ -197,7 +197,8 @@ class SupplierStatementTests(SupplierLedgerTestBase):
         self.d1 = date.today() - timedelta(days=20)
         self.d2 = date.today() - timedelta(days=10)
         self.d3 = date.today() - timedelta(days=5)
-        # Same-day purchase and payment: the purchase is listed first.
+        # On d2 the purchase is recorded before the payment, so it is listed
+        # first (same-day entries follow the time they were recorded).
         self.p1 = self.purchase("97368.00", on=self.d2)
         self.pay1 = create_supplier_payment(supplier=self.supplier, amount="100000", created_by=self.staff, payment_date=self.d1, reference="ADV-1")
         self.pay2 = create_supplier_payment(supplier=self.supplier, amount="5000", created_by=self.staff, payment_date=self.d2, mode=SupplierPayment.MODE_CASH)
@@ -310,3 +311,40 @@ class SupplierReturnLedgerTests(SupplierLedgerTestBase):
         self.assertEqual(replaced["credit"], Decimal("80.00"))
         self.assertEqual([e["balance"] for e in statement["entries"]], [Decimal("80.00"), Decimal("0.00"), Decimal("80.00")])
         self.assertEqual(statement["closing_balance"], Decimal("80.00"))
+
+
+class SameDayOrderTests(SupplierLedgerTestBase):
+    """Same-day entries follow the time they were recorded, not their type."""
+
+    def test_advance_paid_before_a_same_day_purchase_is_listed_first(self):
+        create_supplier_payment(supplier=self.supplier, amount="100000", created_by=self.staff, reference="ADV")
+        self.purchase("97368.00")
+        statement = supplier_statement(self.supplier)
+        self.assertEqual([e["kind"] for e in statement["entries"]], ["payment", "purchase"])
+        self.assertEqual([e["balance"] for e in statement["entries"]], [Decimal("-100000.00"), Decimal("-2632.00")])
+        self.assertEqual(statement["closing_balance"], Decimal("-2632.00"))
+
+    def test_reversal_before_a_later_same_day_payment_is_listed_first(self):
+        self.purchase("5000.00")
+        first = create_supplier_payment(supplier=self.supplier, amount="500", created_by=self.staff)
+        SupplierPaymentReversal.objects.create(payment=first, amount=Decimal("500"), reason="entered twice", reversed_by=self.admin)
+        create_supplier_payment(supplier=self.supplier, amount="1000", created_by=self.staff)
+        statement = supplier_statement(self.supplier)
+        self.assertEqual(
+            [e["kind"] for e in statement["entries"]],
+            ["purchase", "payment", "payment_reversal", "payment"],
+        )
+        self.assertEqual(
+            [e["balance"] for e in statement["entries"]],
+            [Decimal("5000.00"), Decimal("4500.00"), Decimal("5000.00"), Decimal("4000.00")],
+        )
+
+    def test_a_purchase_is_placed_by_when_it_was_posted(self):
+        draft = self.purchase("300.00", post=False)
+        create_supplier_payment(supplier=self.supplier, amount="1000", created_by=self.staff)
+        from inventory.purchase_services import post_purchase
+
+        post_purchase(purchase_id=draft.pk, posted_by=self.admin)
+        statement = supplier_statement(self.supplier)
+        self.assertEqual([e["kind"] for e in statement["entries"]], ["payment", "purchase"])
+        self.assertEqual(statement["closing_balance"], Decimal("-700.00"))

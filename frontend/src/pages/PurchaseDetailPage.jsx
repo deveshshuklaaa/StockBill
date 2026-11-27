@@ -103,7 +103,7 @@ export default function PurchaseDetailPage() {
     <div className="print-sheet">
       <div className="invoice-detail-head">
         <div>
-          <p className="eyebrow">Divya Enterprises / Purchase</p>
+          <p className="eyebrow">Purchase</p>
           <h1>{purchase.purchase_number || `Draft #${purchase.id}`}</h1>
           <p>{purchase.invoice_date}{purchase.posted_at ? ` · posted ${String(purchase.posted_at).slice(0, 10)}` : ''}</p>
         </div>

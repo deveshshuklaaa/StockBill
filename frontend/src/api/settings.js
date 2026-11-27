@@ -41,3 +41,20 @@ export async function fetchAuditLogs({ page = 1, search = '', entity_type = '', 
   const { data } = await api.get('/audit-logs/', { params })
   return data
 }
+
+// Shop logo for invoices (stored in the database; served as a PNG).
+export async function fetchBusinessLogoBlob() {
+  const { data } = await api.get('/business-profile/logo/', { responseType: 'blob' })
+  return data
+}
+
+export async function uploadBusinessLogo(file) {
+  const form = new FormData()
+  form.append('logo', file)
+  const { data } = await api.post('/business-profile/logo/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  return data
+}
+
+export async function deleteBusinessLogo() {
+  await api.delete('/business-profile/logo/')
+}

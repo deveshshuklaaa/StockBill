@@ -236,7 +236,7 @@ export default function InvoiceDetailPage() {
     <div className="print-sheet">
       <div className="invoice-detail-head">
         <div>
-          <p className="eyebrow">Divya Enterprises / Invoice</p>
+          <p className="eyebrow">Invoice</p>
           <h1>{invoiceLabel(invoice)}</h1>
           <p>{invoice.invoice_date}{invoice.created_at ? ` · ${String(invoice.created_at).slice(11, 16)}` : ''}</p>
         </div>
@@ -262,7 +262,7 @@ export default function InvoiceDetailPage() {
         </div>
         <div>
           <span>Seller</span>
-          <strong>{invoice.seller_business_name_snapshot || 'Divya Enterprises'}</strong>
+          <strong>{invoice.seller_business_name_snapshot || ''}</strong>
           <span>{invoice.seller_gstin_snapshot || ''}</span>
           <span>{invoice.seller_address_snapshot || ''}</span>
         </div>
